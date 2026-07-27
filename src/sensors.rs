@@ -1,0 +1,309 @@
+//! Hardware sensor reading via sysfs hwmon.
+//!
+//! Sources: k10temp (CPU), amdgpu (iGPU), legion_hwmon (EC CPU/GPU),
+//! nvme (SSD), spd5118 (RAM), iwlwifi (WiFi), r8169 (Ethernet).
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SensorReadings {
+    pub cpu_tctl: f64,
+    pub cpu_ccd1: f64,
+    pub cpu_ccd2: f64,
+    pub ec_cpu: f64,
+    pub ec_gpu: f64,
+    pub igpu_edge: f64,
+    pub igpu_power: f64,
+    pub dgpu_temp: f64,
+    pub dgpu_power: f64,
+    pub dgpu_clock: f64,
+    pub ssd_composite: Vec<f64>,
+    pub ram_temps: Vec<f64>,
+    pub wifi_temp: f64,
+    pub ethernet_temp: f64,
+    pub fan1_rpm: u32,
+    pub fan2_rpm: u32,
+    pub fan4_rpm: u32,
+    pub fan1_target: u32,
+    pub fan2_target: u32,
+    pub fan4_target: u32,
+    pub profile: String,
+    pub battery_pct: u32,
+    pub battery_status: String,
+    pub battery_voltage: f64,
+    pub battery_cycles: u32,
+    pub charge_type: String,
+}
+
+fn read_file(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+}
+
+fn read_int(path: &Path) -> Option<i64> {
+    read_file(path).and_then(|s| s.parse().ok())
+}
+
+/// Discover hwmon devices by name, returning their sysfs paths.
+pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let base = Path::new("/sys/class/hwmon");
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let name_file = entry.path().join("name");
+            if let Some(n) = read_file(&name_file) {
+                if n == name {
+                    paths.push(entry.path());
+                }
+            }
+        }
+    }
+    paths
+}
+
+/// Get the first hwmon device matching a name.
+pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
+    find_hwmon(name).into_iter().next()
+}
+
+/// Read all sensors and return a snapshot.
+pub fn read_all() -> SensorReadings {
+    let mut s = SensorReadings::default();
+
+    // ─── CPU (k10temp) ───
+    if let Some(hw) = hwmon_by_name("k10temp") {
+        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.ends_with("_label") {
+                if let Some(label) = read_file(&entry.path()) {
+                    let input_path = hw.join(fname.replace("_label", "_input"));
+                    if let Some(val) = read_int(&input_path) {
+                        let temp = val as f64 / 1000.0;
+                        match label.as_str() {
+                            "Tctl" => s.cpu_tctl = temp,
+                            "Tccd1" => s.cpu_ccd1 = temp,
+                            "Tccd2" => s.cpu_ccd2 = temp,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ─── EC (legion_hwmon) ───
+    if let Some(hw) = hwmon_by_name("legion_hwmon") {
+        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.ends_with("_label") {
+                if let Some(label) = read_file(&entry.path()) {
+                    let input_path = hw.join(fname.replace("_label", "_input"));
+                    if let Some(val) = read_int(&input_path) {
+                        let temp = val as f64 / 1000.0;
+                        match label.as_str() {
+                            "EC CPU" => s.ec_cpu = temp,
+                            "EC GPU" => s.ec_gpu = temp,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ─── iGPU (amdgpu) ───
+    if let Some(hw) = hwmon_by_name("amdgpu") {
+        if let Some(val) = read_int(&hw.join("temp1_input")) {
+            s.igpu_edge = val as f64 / 1000.0;
+        }
+        if let Some(val) = read_int(&hw.join("power1_input")) {
+            s.igpu_power = val as f64 / 1_000_000.0;
+        }
+    }
+
+    // ─── dGPU (nvidia-smi) ───
+    // Use -1.0 as "unavailable" so the UI does not show "0.0°C" which looks
+    // like a frozen sensor.
+    s.dgpu_temp = crate::dgpu::read_temp().unwrap_or(-1.0);
+    s.dgpu_power = crate::dgpu::read_power().unwrap_or(-1.0);
+    s.dgpu_clock = crate::dgpu::read_clock().unwrap_or(-1.0);
+
+    // ─── NVMe SSDs (prefer Composite label; fall back to temp1) ───
+    for hw in find_hwmon("nvme") {
+        let mut composite = None;
+        let mut fallback = None;
+        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.ends_with("_label") {
+                if let Some(label) = read_file(&entry.path()) {
+                    let input_path = hw.join(fname.replace("_label", "_input"));
+                    if let Some(val) = read_int(&input_path) {
+                        let temp = val as f64 / 1000.0;
+                        if label.eq_ignore_ascii_case("Composite") {
+                            composite = Some(temp);
+                        } else if fallback.is_none() && fname.starts_with("temp") {
+                            fallback = Some(temp);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(t) = composite.or(fallback) {
+            s.ssd_composite.push(t);
+        } else if let Some(val) = read_int(&hw.join("temp1_input")) {
+            s.ssd_composite.push(val as f64 / 1000.0);
+        }
+    }
+
+    // ─── RAM (spd5118) ───
+    for hw in find_hwmon("spd5118") {
+        if let Some(val) = read_int(&hw.join("temp1_input")) {
+            s.ram_temps.push(val as f64 / 1000.0);
+        }
+    }
+
+    // ─── WiFi ───
+    if let Some(hw) = hwmon_by_name("iwlwifi_1") {
+        if let Some(val) = read_int(&hw.join("temp1_input")) {
+            s.wifi_temp = val as f64 / 1000.0;
+        }
+    }
+
+    // ─── Ethernet ───
+    for hw in find_hwmon("r8169") {
+        if let Some(val) = read_int(&hw.join("temp1_input")) {
+            s.ethernet_temp = val as f64 / 1000.0;
+        }
+    }
+    // Also try r8169_0_700:00 variant
+    for entry in fs::read_dir("/sys/class/hwmon")
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if let Some(name) = read_file(&entry.path().join("name")) {
+            if name.contains("r8169") {
+                if let Some(val) = read_int(&entry.path().join("temp1_input")) {
+                    s.ethernet_temp = val as f64 / 1000.0;
+                }
+            }
+        }
+    }
+
+    // ─── Fans ───
+    if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
+        for fan_num in 1..=4 {
+            if let Some(val) = read_int(&hw.join(format!("fan{}_input", fan_num))) {
+                match fan_num {
+                    1 => s.fan1_rpm = val as u32,
+                    2 => s.fan2_rpm = val as u32,
+                    4 => s.fan4_rpm = val as u32,
+                    _ => {}
+                }
+            }
+            if let Some(val) = read_int(&hw.join(format!("fan{}_target", fan_num))) {
+                match fan_num {
+                    1 => s.fan1_target = val as u32,
+                    2 => s.fan2_target = val as u32,
+                    4 => s.fan4_target = val as u32,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // ─── Platform profile ───
+    s.profile = read_file(Path::new("/sys/firmware/acpi/platform_profile"))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // ─── Battery ───
+    let bat = Path::new("/sys/class/power_supply/BAT0");
+    if let Some(val) = read_int(&bat.join("capacity")) {
+        s.battery_pct = val as u32;
+    }
+    s.battery_status = read_file(&bat.join("status")).unwrap_or_default();
+    if let Some(val) = read_int(&bat.join("voltage_now")) {
+        s.battery_voltage = val as f64 / 1_000_000.0;
+    }
+    if let Some(val) = read_int(&bat.join("cycle_count")) {
+        s.battery_cycles = val as u32;
+    }
+    s.charge_type = read_file(&bat.join("charge_types")).unwrap_or_default();
+
+    s
+}
+
+/// Sample CPU package power via intel-rapl energy_uj (needs root / daemon).
+pub fn sample_cpu_power_w() -> f64 {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static PREV: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
+    const PATH: &str = "/sys/devices/virtual/powercap/intel-rapl/intel-rapl:0/energy_uj";
+
+    let Ok(raw) = fs::read_to_string(PATH) else {
+        return 0.0;
+    };
+    let Ok(energy) = raw.trim().parse::<u64>() else {
+        return 0.0;
+    };
+    let now = Instant::now();
+    let Ok(mut prev) = PREV.lock() else {
+        return 0.0;
+    };
+    let watts = if let Some((e0, t0)) = *prev {
+        let dt = now.duration_since(t0).as_secs_f64();
+        if dt >= 0.2 && energy >= e0 {
+            (energy - e0) as f64 / dt / 1_000_000.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    *prev = Some((energy, now));
+    watts
+}
+
+/// CPU busy percentage from `/proc/stat` (needs two samples; first call returns 0).
+pub fn sample_cpu_usage_pct() -> f64 {
+    use std::sync::Mutex;
+
+    static PREV: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+
+    let Ok(raw) = fs::read_to_string("/proc/stat") else {
+        return 0.0;
+    };
+    let line = raw.lines().next().unwrap_or("");
+    let mut parts = line.split_whitespace().skip(1);
+    let mut vals = [0u64; 8];
+    for v in vals.iter_mut() {
+        *v = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    }
+    // user nice system idle iowait irq softirq steal
+    let idle = vals[3].saturating_add(vals[4]);
+    let total: u64 = vals.iter().sum();
+
+    let Ok(mut prev) = PREV.lock() else {
+        return 0.0;
+    };
+    let pct = if let Some((p_idle, p_total)) = *prev {
+        let d_total = total.saturating_sub(p_total);
+        let d_idle = idle.saturating_sub(p_idle);
+        if d_total > 0 {
+            (1.0 - d_idle as f64 / d_total as f64) * 100.0
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    *prev = Some((idle, total));
+    pct.clamp(0.0, 100.0)
+}
+
+/// Discrete GPU utilization % via nvidia-smi (0 if unavailable).
+pub fn sample_gpu_usage_pct() -> f64 {
+    crate::dgpu::read_util().unwrap_or(0.0).clamp(0.0, 100.0)
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=Legion Control Daemon (fan/profile/RGB)
+After=sysinit.target
+
+[Service]
+Type=simple
+Environment=LEGION_LOG=info
+ExecStart=/usr/bin/legion-daemon
+Restart=on-failure
+RestartSec=5
+
+# Hardware access
+DeviceAllow=/dev/hidraw* rw
+DeviceAllow=/dev/input/* rw
+DeviceAllow=/dev/bus/usb/* rw
+DeviceAllow=char-usb_device rw
+ProtectSystem=false
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

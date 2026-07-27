@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable legion-control.service >/dev/null 2>&1 || true
+    systemctl try-restart legion-control.service >/dev/null 2>&1 \
+        || systemctl start legion-control.service >/dev/null 2>&1 \
+        || true
+fi
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger -s hidraw || true
+fi

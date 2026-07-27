@@ -1,0 +1,162 @@
+//! Narrow PolicyKit helper for optional Legion Control components.
+//!
+//! This binary deliberately accepts only fixed operations and fixed paths. It
+//! never evaluates shell text or accepts caller-provided paths/commands.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+
+const DKMS_VERSION: &str = "0.1.7";
+
+fn executable(candidates: &[&'static str]) -> Result<&'static str, String> {
+    for path in candidates {
+        if Path::new(path).is_file() {
+            return Ok(path);
+        }
+    }
+    Err(format!(
+        "required tool not found: {}",
+        candidates.join(" or ")
+    ))
+}
+
+fn run(program: &str, args: &[&str]) -> Result<(), String> {
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .map_err(|e| format!("cannot run {program}: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{program} exited with {status}"))
+    }
+}
+
+fn source_dir() -> Result<PathBuf, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot resolve setup helper path: {error}"))?;
+    let source = if executable.starts_with("/usr/local/") {
+        PathBuf::from("/usr/local/lib/legion-control/ryzen_smu")
+    } else {
+        PathBuf::from("/usr/lib/legion-control/ryzen_smu")
+    };
+    (source.join("Makefile").is_file() && source.join("dkms.conf").is_file())
+        .then_some(source)
+        .ok_or_else(|| "bundled ryzen_smu source is missing; reinstall Legion Control".into())
+}
+
+fn install_ryzen_smu() -> Result<(), String> {
+    if Path::new("/sys/kernel/ryzen_smu_drv").is_dir() {
+        println!("ryzen_smu is already loaded");
+        return Ok(());
+    }
+    let dkms = executable(&["/usr/bin/dkms", "/usr/sbin/dkms"])?;
+    let make = executable(&["/usr/bin/make"])?;
+    let modprobe = executable(&["/usr/bin/modprobe", "/usr/sbin/modprobe"])?;
+    let source = source_dir()?;
+
+    let status = Command::new(dkms)
+        .arg("status")
+        .output()
+        .map_err(|e| format!("cannot query DKMS: {e}"))?;
+    let dkms_status = String::from_utf8_lossy(&status.stdout);
+    let registration = dkms_status
+        .lines()
+        .find(|line| line.starts_with(&format!("ryzen_smu/{DKMS_VERSION}")));
+    let registered = registration.is_some();
+    let installed = registration.is_some_and(|line| line.contains("installed"));
+    if !registered {
+        let status = Command::new(make)
+            .arg("dkms-install")
+            .current_dir(&source)
+            .status()
+            .map_err(|e| format!("cannot build ryzen_smu: {e}"))?;
+        if !status.success() {
+            return Err(format!("ryzen_smu DKMS build failed with {status}"));
+        }
+    } else if !installed {
+        run(dkms, &["install", &format!("ryzen_smu/{DKMS_VERSION}")])?;
+    }
+
+    fs::write("/etc/modules-load.d/ryzen_smu.conf", "ryzen_smu\n")
+        .map_err(|e| format!("cannot enable ryzen_smu at boot: {e}"))?;
+    run(modprobe, &["ryzen_smu"])?;
+    if !Path::new("/sys/kernel/ryzen_smu_drv").is_dir() {
+        return Err("ryzen_smu loaded but did not expose its sysfs interface".into());
+    }
+    restart_daemon()?;
+    println!("ryzen_smu installed and loaded; no tuning value was written");
+    Ok(())
+}
+
+fn remove_ryzen_smu() -> Result<(), String> {
+    let dkms = executable(&["/usr/bin/dkms", "/usr/sbin/dkms"])?;
+    let modprobe = executable(&["/usr/bin/modprobe", "/usr/sbin/modprobe"])?;
+    if Path::new("/sys/kernel/ryzen_smu_drv").is_dir() {
+        run(modprobe, &["-r", "ryzen_smu"])?;
+    }
+    let status = Command::new(dkms)
+        .arg("status")
+        .output()
+        .map_err(|e| format!("cannot query DKMS: {e}"))?;
+    if String::from_utf8_lossy(&status.stdout)
+        .lines()
+        .any(|line| line.starts_with(&format!("ryzen_smu/{DKMS_VERSION}")))
+    {
+        run(
+            dkms,
+            &["remove", &format!("ryzen_smu/{DKMS_VERSION}"), "--all"],
+        )?;
+    }
+    let source = format!("/usr/src/ryzen_smu-{DKMS_VERSION}");
+    if let Err(error) = fs::remove_dir_all(&source) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("cannot remove {source}: {error}"));
+        }
+    }
+    let load_config = "/etc/modules-load.d/ryzen_smu.conf";
+    if let Err(error) = fs::remove_file(load_config) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("cannot remove {load_config}: {error}"));
+        }
+    }
+    restart_daemon()?;
+    println!("ryzen_smu removed");
+    Ok(())
+}
+
+fn systemctl(args: &[&str]) -> Result<(), String> {
+    let systemctl = executable(&["/usr/bin/systemctl", "/bin/systemctl"])?;
+    run(systemctl, args)
+}
+
+fn restart_daemon() -> Result<(), String> {
+    systemctl(&["try-restart", "legion-control.service"])
+}
+
+fn enable_daemon() -> Result<(), String> {
+    systemctl(&["enable", "--now", "legion-control.service"])
+}
+
+fn real_main() -> Result<(), String> {
+    if unsafe { libc::geteuid() } != 0 {
+        return Err("this helper must be authorized through PolicyKit".into());
+    }
+    match std::env::args().nth(1).as_deref() {
+        Some("install-ryzen-smu") => install_ryzen_smu(),
+        Some("remove-ryzen-smu") => remove_ryzen_smu(),
+        Some("enable-daemon") => enable_daemon(),
+        _ => Err("allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon".into()),
+    }
+}
+
+fn main() -> ExitCode {
+    match real_main() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("legion-control-setup: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}

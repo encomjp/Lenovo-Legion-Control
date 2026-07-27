@@ -1,0 +1,13 @@
+[Unit]
+Description=Lenovo Legion laptop control daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p %h/.local/share/legion-control
+ExecStart=/usr/bin/legion-daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,335 @@
+//! Small helpers for Legion Settings.
+
+use adw::prelude::*;
+use gtk::{glib, Align, Orientation};
+use gtk4 as gtk;
+use libadwaita as adw;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+pub fn friendly_profile(name: &str) -> String {
+    match name {
+        "low-power" | "quiet" => "Quiet".into(),
+        "balanced" => "Balanced".into(),
+        "performance" => "Performance".into(),
+        "max-power" => "Max Power".into(),
+        "custom" => "Custom".into(),
+        other => other.to_string(),
+    }
+}
+
+/// One-line help under the profile picker.
+pub fn profile_blurb(name: &str) -> &'static str {
+    match name {
+        "low-power" | "quiet" => "Lower power and cooler fans",
+        "balanced" => "Mixed speed and noise",
+        "performance" => "Higher power for heavy loads",
+        "max-power" => "Highest turbo — confirm before use",
+        "custom" => "Manual CPU / GPU power limits below",
+        _ => "CPU and GPU power mode",
+    }
+}
+
+pub fn page_shell(body: &impl glib::object::IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    use gtk::PolicyType;
+    let clamp = libadwaita::Clamp::builder()
+        .maximum_size(1120)
+        .tightening_threshold(780)
+        .build();
+    clamp.set_child(Some(body));
+
+    gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .propagate_natural_height(true)
+        .child(&clamp)
+        .build()
+}
+
+pub fn page_box(title: &str, subtitle: &str) -> gtk::Box {
+    let page = gtk::Box::new(Orientation::Vertical, 18);
+    page.add_css_class("page");
+    page.set_vexpand(true);
+
+    if !title.is_empty() {
+        let t = gtk::Label::new(Some(title));
+        t.add_css_class("page-title");
+        t.set_halign(Align::Start);
+        tip(&t, title);
+        page.append(&t);
+    }
+    if !subtitle.is_empty() {
+        let s = gtk::Label::new(Some(subtitle));
+        s.add_css_class("page-sub");
+        s.set_halign(Align::Start);
+        s.set_wrap(true);
+        if title.is_empty() {
+            s.add_css_class("page-sub-solo");
+            s.add_css_class("page-lede");
+        }
+        tip(&s, subtitle);
+        page.append(&s);
+    }
+    page
+}
+
+/// Page body with lede only — header bar already shows the page title.
+pub fn page_lede(subtitle: &str) -> gtk::Box {
+    page_box("", subtitle)
+}
+
+/// Mark a primary button busy (spinner + Working…).
+pub fn set_busy(btn: &gtk::Button, busy: bool, idle_label: &str) {
+    if busy {
+        btn.set_sensitive(false);
+        let row = gtk::Box::new(Orientation::Horizontal, 8);
+        row.set_halign(Align::Center);
+        let spin = gtk::Spinner::new();
+        spin.set_spinning(true);
+        row.append(&spin);
+        let l = gtk::Label::new(Some("Working…"));
+        tip(&l, "Applying the change — please wait");
+        row.append(&l);
+        btn.set_child(Some(&row));
+    } else {
+        btn.set_sensitive(true);
+        btn.set_label(idle_label);
+    }
+}
+
+/// Adwaita preferences group (boxed list + title/description).
+pub fn pref_group(title: &str, description: Option<&str>) -> adw::PreferencesGroup {
+    let g = adw::PreferencesGroup::new();
+    if !title.is_empty() {
+        g.set_title(title);
+    }
+    if let Some(d) = description {
+        if !d.is_empty() {
+            g.set_description(Some(d));
+            tip(&g, d);
+        } else if !title.is_empty() {
+            tip(&g, title);
+        }
+    } else if !title.is_empty() {
+        tip(&g, title);
+    }
+    g
+}
+
+/// Read-only property-style ActionRow (title + value subtitle).
+pub fn property_row(title: &str, value: &str, tooltip: Option<&str>) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(title)
+        .subtitle(value)
+        .build();
+    row.add_css_class("property");
+    row.set_subtitle_selectable(true);
+    row.set_activatable(false);
+    let tt = tooltip.unwrap_or(title);
+    tip(&row, tt);
+    row
+}
+
+/// ComboRow backed by a string list (Adwaita boxed-list pattern).
+pub fn string_combo_row(
+    title: &str,
+    subtitle: &str,
+    labels: &[&str],
+    selected: u32,
+) -> adw::ComboRow {
+    let model = gtk::StringList::new(labels);
+    let row = adw::ComboRow::builder()
+        .title(title)
+        .subtitle(subtitle)
+        .model(&model)
+        .selected(selected)
+        .build();
+    let expr = gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        Option::<gtk::Expression>::None,
+        "string",
+    );
+    row.set_expression(Some(expr));
+    if !subtitle.is_empty() {
+        tip(&row, subtitle);
+    } else {
+        tip(&row, title);
+    }
+    row
+}
+
+pub fn section_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Box) {
+    let wrap = gtk::Box::new(Orientation::Vertical, 0);
+    wrap.add_css_class("section");
+    let label = gtk::Label::new(Some(title));
+    label.add_css_class("section-label");
+    label.set_halign(Align::Start);
+    let tt = tooltip.unwrap_or(title);
+    tip(&label, tt);
+    tip(&wrap, tt);
+    wrap.append(&label);
+    let card = gtk::Box::new(Orientation::Vertical, 0);
+    card.add_css_class("card");
+    tip(&card, tt);
+    wrap.append(&card);
+    (wrap, card)
+}
+
+/// Hover text for Spectrum lighting effects.
+pub fn effect_tooltip(id: &str) -> &'static str {
+    match id {
+        "static" => "Solid colour on this surface — no animation",
+        "color-pulse" => "Fades your colour in and out",
+        "color-wave" => "Your colour sweeps across the keys / bar",
+        "rainbow-wave" => "Rainbow colours move across the surface",
+        "screw-rainbow" => "Spiral rainbow pattern",
+        "smooth" => "Soft colour blend animation",
+        "color-change" => "Cycles through colours smoothly",
+        "rain" => "Raindrop-style sparkles",
+        "ripple" => "Ripple rings from the centre",
+        "reactive" => "Lights react when you press keys (keyboard)",
+        "off" => "Turns this surface’s lighting off",
+        _ => "Lighting effect for this surface",
+    }
+}
+
+/// Longer hover tip for each platform profile.
+pub fn profile_tooltip(name: &str) -> &'static str {
+    match name {
+        "low-power" | "quiet" => "Quiet (blue LED): lower power and cooler fans",
+        "balanced" => "Balanced (white LED): default mixed mode",
+        "performance" => "Performance (red LED): higher CPU/GPU power — louder fans",
+        "max-power" => "Max Power / Extreme (purple LED): highest turbo — runs hotter",
+        "custom" => "Custom (purple LED): unlocks CPU and GPU power-limit sliders below",
+        _ => "Changes how hard the laptop pushes CPU and GPU",
+    }
+}
+
+pub fn tip(widget: &impl glib::object::IsA<gtk::Widget>, text: &str) {
+    let w = widget.as_ref();
+    if text.is_empty() {
+        w.set_tooltip_text(None);
+    } else {
+        w.set_has_tooltip(true);
+        w.set_tooltip_text(Some(text));
+    }
+}
+
+pub fn labeled_row_tip(
+    title: &str,
+    subtitle: &str,
+    suffix: &impl glib::object::IsA<gtk::Widget>,
+    tooltip: Option<&str>,
+) -> gtk::Box {
+    let row = gtk::Box::new(Orientation::Horizontal, 16);
+    row.add_css_class("row");
+    row.set_hexpand(true);
+
+    let text = gtk::Box::new(Orientation::Vertical, 0);
+    text.set_hexpand(true);
+    text.set_valign(Align::Center);
+    let t = gtk::Label::new(Some(title));
+    t.add_css_class("row-title");
+    t.set_halign(Align::Start);
+    let tt = tooltip.unwrap_or(if subtitle.is_empty() { title } else { subtitle });
+    tip(&t, tt);
+    text.append(&t);
+    if !subtitle.is_empty() {
+        let s = gtk::Label::new(Some(subtitle));
+        s.add_css_class("row-sub");
+        s.set_halign(Align::Start);
+        s.set_wrap(true);
+        tip(&s, tt);
+        text.append(&s);
+    }
+    row.append(&text);
+
+    let sfx = suffix.clone().upcast::<gtk::Widget>();
+    sfx.set_valign(Align::Center);
+    sfx.set_halign(Align::End);
+    tip(&sfx, tt);
+    row.append(&sfx);
+    tip(&row, tt);
+    row
+}
+
+pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
+    let box_ = gtk::Box::new(Orientation::Vertical, 0);
+    box_.add_css_class("metric-chip");
+    box_.set_hexpand(true);
+    let l = gtk::Label::new(Some(title));
+    l.add_css_class("label");
+    l.set_halign(Align::Start);
+    let v = gtk::Label::new(Some("—"));
+    v.add_css_class("value");
+    v.add_css_class("numeric");
+    v.set_halign(Align::Start);
+    let d = gtk::Label::new(Some(""));
+    d.add_css_class("detail");
+    d.set_halign(Align::Start);
+    box_.append(&l);
+    box_.append(&v);
+    box_.append(&d);
+    let tt = tooltip.unwrap_or(title);
+    tip(&box_, tt);
+    tip(&l, tt);
+    tip(&v, tt);
+    tip(&d, tt);
+    (box_, v, d)
+}
+
+pub fn status_pill_tip(text: &str, kind: &str, tooltip: Option<&str>) -> gtk::Label {
+    let l = gtk::Label::new(Some(text));
+    l.add_css_class("status-pill");
+    l.add_css_class(match kind {
+        "ok" => "status-ok",
+        "warn" => "status-warn",
+        "bad" => "status-bad",
+        _ => "status-muted",
+    });
+    l.set_halign(Align::Center);
+    l.set_valign(Align::Center);
+    l.set_justify(gtk::Justification::Center);
+    l.set_xalign(0.5);
+    l.set_yalign(0.5);
+    if let Some(tt) = tooltip {
+        tip(&l, tt);
+    }
+    l
+}
+
+/// Primary action button with consistent sizing.
+pub fn primary_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
+    let btn = gtk::Button::with_label(label);
+    btn.add_css_class("suggested-action");
+    btn.add_css_class("pill-btn");
+    btn.set_halign(Align::Start);
+    tip(&btn, tooltip.unwrap_or(label));
+    btn
+}
+
+/// Widgets that need the root legion-control service — greyed out while offline.
+#[derive(Clone, Debug)]
+pub struct DaemonGate {
+    widgets: Rc<RefCell<Vec<gtk::Widget>>>,
+}
+
+impl DaemonGate {
+    pub fn new() -> Self {
+        Self {
+            widgets: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    pub fn track(&self, w: &impl glib::object::IsA<gtk::Widget>) {
+        self.widgets
+            .borrow_mut()
+            .push(w.clone().upcast::<gtk::Widget>());
+    }
+
+    pub fn set_online(&self, online: bool) {
+        for w in self.widgets.borrow().iter() {
+            w.set_sensitive(online);
+        }
+    }
+}

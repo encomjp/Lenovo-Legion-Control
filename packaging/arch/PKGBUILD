@@ -1,0 +1,50 @@
+pkgname=legion-control
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Lenovo Legion hardware control daemon, CLI, GTK app, and KDE widget'
+arch=('x86_64')
+url='https://github.com/encomjp/lenovo-legion-tool'
+license=('GPL-2.0-only')
+depends=('gtk4' 'libadwaita' 'systemd-libs' 'polkit')
+makedepends=('rust>=1.87' 'cargo' 'pkgconf')
+optdepends=(
+  'plasma-workspace: install and preview the bundled KDE Plasma 6 widget'
+  'dkms: install the optional AMD Curve Optimizer backend'
+  'linux-headers: build the optional AMD Curve Optimizer DKMS module on the stock kernel'
+)
+install=legion-control.install
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  cargo build --release --locked
+}
+
+check() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  cargo test --all-targets --locked
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  install -Dm755 target/release/legion-cli "${pkgdir}/usr/bin/legion-cli"
+  install -Dm755 target/release/legion-daemon "${pkgdir}/usr/bin/legion-daemon"
+  install -Dm755 target/release/legion-settings "${pkgdir}/usr/bin/legion-settings"
+  install -Dm755 target/release/legion-control-setup "${pkgdir}/usr/libexec/legion-control-setup"
+  install -Dm644 data/polkit/com.encomjp.legion-control.policy \
+    "${pkgdir}/usr/share/polkit-1/actions/com.encomjp.legion-control.policy"
+  mkdir -p "${pkgdir}/usr/lib/legion-control/ryzen_smu"
+  cp -a third_party/ryzen_smu/. "${pkgdir}/usr/lib/legion-control/ryzen_smu/"
+  install -Dm644 packaging/common/legion-control.service \
+    "${pkgdir}/usr/lib/systemd/system/legion-control.service"
+  install -Dm644 data/udev/99-legion.rules \
+    "${pkgdir}/usr/lib/udev/rules.d/99-legion.rules"
+  install -Dm644 data/gui/com.encomjp.legion-settings.desktop \
+    "${pkgdir}/usr/share/applications/com.encomjp.legion-settings.desktop"
+  install -Dm644 data/icons/app-mark.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
+  install -Dm644 data/icons/tray.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

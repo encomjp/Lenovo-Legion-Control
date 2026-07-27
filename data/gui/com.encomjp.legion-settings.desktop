@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Legion Control
+Comment=Fans, profiles, RGB and sensors for Lenovo Legion
+Exec=legion-settings
+Icon=com.encomjp.legion-settings
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;
+Keywords=legion;lenovo;fan;rgb;battery;
+StartupNotify=true

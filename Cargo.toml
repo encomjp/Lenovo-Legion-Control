@@ -1,0 +1,68 @@
+[package]
+name = "lenovo-legion-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Lenovo Legion laptop control — fans, profiles, keyboard RGB, sensors"
+license = "GPL-2.0-only"
+authors = ["europeanpepe (encomjp)"]
+repository = "https://github.com/encomjp/lenovo-legion-tool"
+
+[dependencies]
+# ─── Hardware access ───
+hidapi = { version = "2", default-features = false, features = ["linux-native"] }
+
+# ─── Serialization ───
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# ─── CLI ───
+clap = { version = "4", features = ["derive"] }
+
+# ─── GUI (GTK4 + libadwaita) ───
+gtk4 = { version = "0.9", features = ["v4_14"] }
+libadwaita = { version = "0.7", features = ["v1_5"] }
+glib = "0.20"
+
+# ─── System tray ───
+ksni = { version = "0.3", features = ["blocking"] }
+
+# ─── Logging ───
+log = "0.4"
+env_logger = "0.11"
+
+chrono = { version = "0.4", features = ["clock"] }
+dirs = "6"
+include_dir = "0.7"
+# ─── Daemon infrastructure ───
+# ─── Daemon infrastructure ───
+signal-hook = "0.3"
+libc = "0.2"
+
+# ─── Async utilities ───
+lazy_static = "1.4"
+
+[lib]
+name = "legion_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "legion-cli"
+path = "src/cli/main.rs"
+
+[[bin]]
+name = "legion-daemon"
+path = "src/daemon/main.rs"
+
+[[bin]]
+name = "legion-settings"
+path = "src/settings/main.rs"
+
+[[bin]]
+name = "legion-control-setup"
+path = "src/setup-helper/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 24 24" role="img" aria-label="Menu">
+  <circle cx="4" cy="6" r="1.5" fill="#d91637"/><path d="M7 5h14v2H7z" fill="#696973"/>
+  <circle cx="4" cy="12" r="1.5" fill="#e56f1f"/><path d="M7 11h14v2H7z" fill="#696973"/>
+  <circle cx="4" cy="18" r="1.5" fill="#4c91cf"/><path d="M7 17h14v2H7z" fill="#696973"/>
+</svg>

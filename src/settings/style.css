@@ -1,0 +1,378 @@
+/* Legion Control — friendly standalone shell */
+
+@define-color accent_color #c8102e;
+@define-color accent_bg_color #c8102e;
+@define-color accent_fg_color #ffffff;
+
+.numeric {
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.sidebar-brand {
+    padding: 24px 20px 12px;
+}
+
+.sidebar-brand .brand-name {
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.sidebar-brand .brand-sub {
+    font-size: 0.78rem;
+    opacity: 0.48;
+    margin-top: 4px;
+}
+
+.sidebar-foot {
+    padding: 12px 16px 18px;
+    border-top: 1px solid alpha(currentColor, 0.08);
+}
+
+.sidebar-foot .conn-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.sidebar-foot .conn-sub {
+    font-size: 0.72rem;
+    opacity: 0.45;
+    margin-top: 2px;
+}
+
+.conn-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 99px;
+    background: #6bcf7f;
+    margin-top: 4px;
+    margin-right: 2px;
+}
+
+.conn-dot.off {
+    background: #e86a6a;
+}
+
+/* ── Pages ───────────────────────────────────────────────────────────────── */
+
+.page {
+    padding: 20px 28px 48px;
+}
+
+.page-title {
+    font-size: 1.55rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.page-sub {
+    font-size: 0.92rem;
+    opacity: 0.55;
+    margin-top: 2px;
+    margin-bottom: 4px;
+    line-height: 1.35;
+}
+
+.page-sub-solo {
+    margin-top: 0;
+    margin-bottom: 4px;
+}
+
+/* Prefer Adwaita PreferencesGroup spacing over custom cards where used */
+.section {
+    margin-bottom: 24px;
+}
+
+.section-label {
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.42;
+    margin-bottom: 10px;
+}
+
+.card {
+    background: alpha(currentColor, 0.045);
+    border: 1px solid alpha(currentColor, 0.06);
+    border-radius: 16px;
+    padding: 18px 20px;
+}
+
+.card + .card {
+    margin-top: 12px;
+}
+
+.card-head {
+    margin-bottom: 8px;
+}
+
+.card-head-title {
+    font-weight: 650;
+    font-size: 1.02rem;
+}
+
+.row {
+    margin-bottom: 14px;
+}
+
+.row:last-child {
+    margin-bottom: 0;
+}
+
+.row-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.row-sub {
+    font-size: 0.82rem;
+    opacity: 0.5;
+    margin-top: 2px;
+    line-height: 1.35;
+}
+
+.page-lede {
+    font-size: 0.95rem;
+    opacity: 0.58;
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.metric-grid {
+    margin-bottom: 6px;
+}
+
+.metric-grid > flowboxchild {
+    padding: 0;
+}
+
+.metric-chip {
+    background: alpha(currentColor, 0.045);
+    border: 1px solid alpha(currentColor, 0.06);
+    border-radius: 16px;
+    padding: 14px 16px;
+    transition: background 120ms ease, border-color 120ms ease;
+    min-width: 140px;
+}
+
+.metric-chip:hover {
+    background: alpha(currentColor, 0.07);
+}
+
+.metric-chip .label {
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.45;
+}
+
+.metric-chip .value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-top: 6px;
+    font-feature-settings: "tnum";
+}
+
+.metric-chip .detail {
+    font-size: 0.78rem;
+    opacity: 0.48;
+    margin-top: 3px;
+}
+
+.metric-chip.hot .value {
+    color: #e86a6a;
+}
+
+.metric-chip.warm .value {
+    color: #e6b84d;
+}
+
+/* ── Status pills & buttons ──────────────────────────────────────────────── */
+
+.status-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 999px;
+    background: alpha(currentColor, 0.08);
+}
+
+.status-pill.status-warn,
+.status-pill.status-bad {
+    /* Longer labels ("Needs fix", "Panic") stay pill-shaped */
+    padding: 0 10px;
+    min-width: 36px;
+}
+
+.status-ok {
+    color: #6bcf7f;
+    background: alpha(#6bcf7f, 0.14);
+}
+
+.status-warn {
+    color: #e6b84d;
+    background: alpha(#e6b84d, 0.14);
+}
+
+.status-bad {
+    color: #e86a6a;
+    background: alpha(#e86a6a, 0.16);
+}
+
+.status-muted {
+    opacity: 0.65;
+}
+
+.pill-btn {
+    min-height: 40px;
+    padding-left: 18px;
+    padding-right: 18px;
+    border-radius: 12px;
+    font-weight: 650;
+}
+
+.pill-btn.suggested-action {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+
+.btn-row {
+    margin-top: 14px;
+}
+
+.profile-blurb {
+    font-size: 0.84rem;
+    opacity: 0.55;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    line-height: 1.35;
+}
+
+.ppt-block {
+    margin-top: 12px;
+    padding-top: 14px;
+    border-top: 1px solid alpha(currentColor, 0.08);
+}
+
+.ppt-title {
+    font-weight: 650;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+
+.detail-toggle {
+    margin-top: 8px;
+}
+
+.detail-body {
+    font-size: 0.8rem;
+    opacity: 0.5;
+    font-family: monospace;
+    margin-top: 8px;
+    line-height: 1.4;
+}
+
+.swatch {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 10px;
+    padding: 0;
+    border: 1px solid alpha(currentColor, 0.1);
+}
+
+.swatch-c8102e { background: #c8102e; }
+.swatch-ffffff { background: #f2f2f2; }
+.swatch-78dcff { background: #78dcff; }
+.swatch-00dcff { background: #00dcff; }
+.swatch-a020f0 { background: #a020f0; }
+.swatch-00e65a { background: #00e65a; }
+.swatch-ff8c00 { background: #ff8c00; }
+.swatch-000000 { background: #1a1a1e; border-color: alpha(currentColor, 0.25); }
+
+.charge-pill {
+    min-width: 88px;
+    min-height: 44px;
+    border-radius: 12px;
+    font-weight: 650;
+    font-size: 1rem;
+}
+
+.charge-pill.suggested-action {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+
+.battery-pct {
+    font-size: 2.75rem;
+    font-weight: 700;
+    font-feature-settings: "tnum";
+}
+
+.battery-status {
+    opacity: 0.5;
+    margin-top: 4px;
+}
+
+.battery-details {
+    border-top: 1px solid alpha(currentColor, 0.08);
+    padding-top: 14px;
+}
+
+.hint {
+    font-size: 0.82rem;
+    opacity: 0.5;
+    margin-top: 10px;
+    line-height: 1.35;
+}
+
+.amp-ok { color: #6bcf7f; }
+.amp-soft { color: #e6b84d; }
+.amp-broken { color: #e86a6a; }
+.amp-na { opacity: 0.7; }
+
+.lighting-switcher {
+    margin-bottom: 10px;
+}
+
+.colour-picker {
+    min-width: 52px;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 12px;
+}
+
+.colour-picker > * {
+    min-width: 48px;
+    min-height: 36px;
+    border-radius: 10px;
+}
+
+.perkey-canvas {
+    border-radius: 16px;
+    min-height: 150px;
+    min-width: 400px;
+}
+
+.perkey-tools {
+    margin-top: 4px;
+}
+
+.dim-label {
+    opacity: 0.55;
+    font-weight: 600;
+}
+
+.fan-rpm {
+    font-size: 1.05rem;
+    font-weight: 650;
+    min-width: 5.5rem;
+    opacity: 0.7;
+}

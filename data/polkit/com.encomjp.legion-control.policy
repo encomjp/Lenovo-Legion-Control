@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Legion Control</vendor>
+  <vendor_url>https://github.com/encomjp/lenovo-legion-tool</vendor_url>
+
+  <action id="com.encomjp.legion-control.setup">
+    <description>Configure optional Legion Control system components</description>
+    <message>Authentication is required to configure Legion Control</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/legion-control-setup</annotate>
+  </action>
+
+  <action id="com.encomjp.legion-control.setup-local">
+    <description>Configure optional Legion Control system components</description>
+    <message>Authentication is required to configure Legion Control</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/legion-control-setup</annotate>
+  </action>
+</policyconfig>

@@ -1,0 +1,32 @@
+reload_udev() {
+  udevadm control --reload-rules >/dev/null 2>&1 || true
+  udevadm trigger -s hidraw >/dev/null 2>&1 || true
+}
+
+post_install() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable --now legion-control.service >/dev/null 2>&1 || true
+  fi
+  reload_udev
+}
+
+post_upgrade() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl try-restart legion-control.service >/dev/null 2>&1 || true
+  fi
+  reload_udev
+}
+
+pre_remove() {
+  if [ -d /run/systemd/system ]; then
+    systemctl disable --now legion-control.service >/dev/null 2>&1 || true
+  fi
+}
+
+post_remove() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+  fi
+}
