@@ -173,10 +173,10 @@ fn apply_charge_limit(pct: u32) -> Result<(), String> {
         Ok(DaemonResponse::Ok) => Ok(()),
         Ok(DaemonResponse::Error(e)) => Err(e),
         Err(e) if e.contains("variant index") || e.contains("Parse:") => {
-            Err("Daemon outdated — run: sudo ./scripts/enable-root-daemon.sh".into())
+            Err("Service outdated — reinstall to update".into())
         }
         _ => legion_core::battery::set_charge_limit_pct(pct)
-            .map_err(|_| "Daemon outdated — run: sudo ./scripts/enable-root-daemon.sh".into()),
+            .map_err(|_| "Service outdated — reinstall to update".into()),
     }
 }
 
@@ -355,12 +355,12 @@ fn build_ui(app: &adw::Application) {
     stack.add_titled(
         &page_shell(&build_fix_lighting_page(&toast_overlay, &daemon_gate)),
         Some("fix-lighting"),
-        "RGB Repair",
+        "Lighting Repair",
     );
     stack.add_titled(
         &page_shell(&build_fix_logs_page(&toast_overlay)),
         Some("fix-logs"),
-        "Daemon Logs",
+        "Service Logs",
     );
     stack.add_titled(
         &page_shell(&build_profiles_page(
@@ -392,17 +392,11 @@ fn build_ui(app: &adw::Application) {
     let brand_name = gtk::Label::new(Some("Legion Control"));
     brand_name.add_css_class("brand-name");
     brand_name.set_halign(Align::Start);
-    tip(
-        &brand_name,
-        "Unofficial Legion laptop control — fans, lights, power, and more",
-    );
+    tip(&brand_name, "Unofficial Legion laptop control");
     let brand_sub = gtk::Label::new(Some("Fans · Lights · Power"));
     brand_sub.add_css_class("brand-sub");
     brand_sub.set_halign(Align::Start);
-    tip(
-        &brand_sub,
-        "Quick controls for cooling, Spectrum RGB, and power modes",
-    );
+    tip(&brand_sub, "Cooling, lighting, and power");
     brand_text.append(&brand_name);
     brand_text.append(&brand_sub);
     brand.append(&brand_text);
@@ -421,42 +415,42 @@ fn build_ui(app: &adw::Application) {
     for (title, subtitle, icon) in [
         (
             "Home",
-            "Temps and power mode",
+            "Temperatures and power",
             include_bytes!("../../data/icons/home.svg").as_slice(),
         ),
         (
             "CPU",
-            "Features, power, undervolt",
+            "Features, limits, undervolt",
             include_bytes!("../../data/icons/cpu.svg").as_slice(),
         ),
         (
             "Cooling",
-            "Fan speed",
+            "Fan speeds",
             include_bytes!("../../data/icons/cooling.svg").as_slice(),
         ),
         (
             "Lighting",
-            "Keyboard and accents",
+            "Keyboard and LEDs",
             include_bytes!("../../data/icons/lighting.svg").as_slice(),
         ),
         (
             "Battery",
-            "Charge limit",
+            "Charge limit and status",
             include_bytes!("../../data/icons/battery.svg").as_slice(),
         ),
         (
             "Fix",
-            "Speakers · RGB panic",
+            "Speakers, lighting",
             include_bytes!("../../data/icons/fix.svg").as_slice(),
         ),
         (
             "Profiles",
-            "Save and load presets",
+            "Saved profiles",
             include_bytes!("../../data/icons/profiles.svg").as_slice(),
         ),
         (
             "About",
-            "Help · donate · credits",
+            "Help and about",
             include_bytes!("../../data/icons/about.svg").as_slice(),
         ),
     ] {
@@ -467,54 +461,52 @@ fn build_ui(app: &adw::Application) {
         row.set_activatable(true);
         row.add_prefix(&color_icon(icon, 24));
         let nav_tip = match title {
-            "Home" => "Live temperatures, usage, fans, battery, and power mode",
-            "CPU" => "Hyperthreading, turbo boost, and Custom CPU/GPU power limits",
-            "Cooling" => "Automatic or manual fan RPM for CPU, GPU, and Aux",
-            "Lighting" => "Spectrum RGB — keyboard, front, rear, logo, and per-key paint",
-            "Battery" => "Charge limit (60 / 80 / 100%) and battery health",
-            "Fix" => "Speakers, Spectrum RGB panic detection + auto-fix",
-            "About" => "Help, donate, report issues, model info, and credits",
-            "Profiles" => "Named presets for power, fans, lighting, and charge limit",
+            "Home" => "Temperatures, fans, battery, mode",
+            "CPU" => "Boost, threading, power limits",
+            "Cooling" => "CPU, GPU, and Aux fan speeds",
+            "Lighting" => "Keyboard, front, rear, logo, per-key",
+            "Battery" => "Charge limit and battery status",
+            "Fix" => "Speakers, lighting, service logs",
+            "About" => "Help, hardware, and project info",
+            "Profiles" => "Save and restore settings",
             _ => subtitle,
         };
         tip(&row, nav_tip);
         list.append(&row);
     }
     let (cpu_menu, cpu_list, cpu_back) = build_submenu(&[
-        ("Features", "Boost and SMT"),
-        ("Power limits", "Custom watts"),
-        ("Undervolt", "Curve Optimizer"),
-        ("Stability test", "CPU stress test"),
+        ("Features", "Boost and threading"),
+        ("Power limits", "CPU and GPU limits"),
+        ("Undervolt", "CPU offset"),
+        ("Stability test", "5-minute check"),
     ]);
     let (cooling_menu, cooling_list, cooling_back) = build_submenu(&[
-        ("CPU fan", "Processor cooling"),
-        ("GPU fan", "Graphics cooling"),
-        ("Aux fan", "Chassis cooling"),
-        ("Reset fans", "Return to automatic"),
+        ("CPU fan", "Processor fan"),
+        ("GPU fan", "Graphics fan"),
+        ("Aux fan", "Chassis fan"),
+        ("Reset fans", "Return to firmware curve"),
     ]);
     let (lighting_menu, lighting_list, lighting_back) = build_submenu(&[
         ("Keyboard", "Whole-keyboard and per-key"),
-        ("Front", "Front accent bar"),
-        ("Rear", "Rear accent bar"),
+        ("Front", "Front bar"),
+        ("Rear", "Rear bar"),
         ("Logo", "Lid logo"),
-        ("More", "Brightness and power"),
+        ("More", "Brightness and power switch"),
     ]);
     let (battery_menu, battery_list, battery_back) = build_submenu(&[
-        ("Status", "Charge and health"),
-        ("Charge limit", "60, 80, or 100 percent"),
+        ("Status", "Charge and status"),
+        ("Charge limit", "60, 80, or 100%"),
     ]);
     let (fix_menu, fix_list, fix_back) = build_submenu(&[
-        ("Speakers", "Audio diagnostics"),
-        ("Lighting", "RGB recovery"),
-        ("Daemon logs", "Control-service output"),
+        ("Speakers", "Speaker diagnostics"),
+        ("Lighting", "Lighting recovery"),
+        ("Service logs", "Service output"),
     ]);
-    let (profiles_menu, profiles_list, profiles_back) =
-        build_submenu(&[("Saved profiles", "Create, load, and delete")]);
     let (about_menu, about_list, about_back) = build_submenu(&[
-        ("Setup", "Daemon, tuning backend, widget"),
-        ("Hardware", "Detected model and capabilities"),
-        ("Storage", "Settings, profiles, tray"),
-        ("Help", "Project links and legal notice"),
+        ("Setup", "Service, AMD backend, widget"),
+        ("Hardware", "Model and capabilities"),
+        ("Storage", "Settings and profiles"),
+        ("Help", "Help and legal"),
     ]);
 
     let sidebar_switch = gtk::Stack::new();
@@ -525,7 +517,6 @@ fn build_ui(app: &adw::Application) {
     sidebar_switch.add_named(&lighting_menu, Some("lighting"));
     sidebar_switch.add_named(&battery_menu, Some("battery"));
     sidebar_switch.add_named(&fix_menu, Some("fix"));
-    sidebar_switch.add_named(&profiles_menu, Some("profiles"));
     sidebar_switch.add_named(&about_menu, Some("about"));
     sidebar_switch.set_visible_child_name("main");
     sidebar_box.append(&sidebar_switch);
@@ -543,17 +534,11 @@ fn build_ui(app: &adw::Application) {
     let conn_l = gtk::Label::new(Some("Connected"));
     conn_l.add_css_class("conn-label");
     conn_l.set_halign(Align::Start);
-    tip(
-        &conn_l,
-        "Whether the root legion-control service is reachable",
-    );
-    let conn_s = gtk::Label::new(Some("Daemon ready"));
+    tip(&conn_l, "Service connection status");
+    let conn_s = gtk::Label::new(Some("Service ready"));
     conn_s.add_css_class("conn-sub");
     conn_s.set_halign(Align::Start);
-    tip(
-        &conn_s,
-        "Click this strip to re-check the daemon connection",
-    );
+    tip(&conn_s, "Click to check service status");
     foot_text.append(&conn_l);
     foot_text.append(&conn_s);
     foot.append(&dot);
@@ -583,7 +568,7 @@ fn build_ui(app: &adw::Application) {
     menu.append(Some("Report an issue"), Some("win.report-issue"));
     menu.append(Some("Donate"), Some("win.donate"));
     let menu_btn = gtk::MenuButton::builder()
-        .tooltip_text("Menu — About, Report an issue, Donate")
+        .tooltip_text("Menu")
         .menu_model(&menu)
         .primary(true)
         .build();
@@ -594,7 +579,7 @@ fn build_ui(app: &adw::Application) {
     header.pack_end(&menu_btn);
     content_toolbar.add_top_bar(&header);
 
-    let banner = adw::Banner::new("Control service is offline — fans, profile, and charge need it");
+    let banner = adw::Banner::new("Service offline — fans, profile, and charge need it");
     banner.set_button_label(Some("Start daemon"));
     banner.set_revealed(!daemon);
     content_toolbar.add_top_bar(&banner);
@@ -698,7 +683,7 @@ fn build_ui(app: &adw::Application) {
         "About",
     ];
     let submenu_names = [
-        "main", "cpu", "cooling", "lighting", "battery", "fix", "profiles", "about",
+        "main", "cpu", "cooling", "lighting", "battery", "fix", "about",
     ];
     let submenu_lists = [
         None,
@@ -707,7 +692,6 @@ fn build_ui(app: &adw::Application) {
         Some(lighting_list.clone()),
         Some(battery_list.clone()),
         Some(fix_list.clone()),
-        Some(profiles_list.clone()),
         Some(about_list.clone()),
     ];
     let stack_nav = stack.clone();
@@ -782,16 +766,9 @@ fn build_ui(app: &adw::Application) {
         &split,
         &[
             ("fix-audio", "Speaker Repair"),
-            ("fix-lighting", "RGB Repair"),
-            ("fix-logs", "Daemon Logs"),
+            ("fix-lighting", "Lighting Repair"),
+            ("fix-logs", "Service Logs"),
         ],
-    );
-    connect_page_submenu(
-        &profiles_list,
-        &stack,
-        &content_page,
-        &split,
-        &[("profiles", "Profiles")],
     );
     connect_page_submenu(
         &about_list,
@@ -837,7 +814,6 @@ fn build_ui(app: &adw::Application) {
         lighting_back,
         battery_back,
         fix_back,
-        profiles_back,
         about_back,
     ] {
         let sidebar_switch = sidebar_switch.clone();
@@ -942,7 +918,7 @@ fn build_ui(app: &adw::Application) {
             let overlay = overlay_f.clone();
             toast_with_button(
                 &overlay_f,
-                "Service offline — use Start daemon in the banner",
+                "Service offline — start it from the banner",
                 "Copy fix",
                 5,
                 move || {
@@ -986,7 +962,7 @@ fn apply_conn_status(
     if online {
         dot.remove_css_class("off");
         conn_l.set_text("Connected");
-        conn_s.set_text("Daemon ready");
+        conn_s.set_text("Service ready");
         tip(conn_l, "Root legion-control service is reachable");
         tip(
             conn_s,
@@ -1003,7 +979,7 @@ fn apply_conn_status(
         conn_s.set_text("Start legion-control service");
         tip(
             conn_l,
-            "Control service is offline — fans, profile, and charge need it",
+            "Service offline — fans, profile, and charge need it",
         );
         tip(
             conn_s,
@@ -1012,7 +988,7 @@ fn apply_conn_status(
         tip(dot, "Red = daemon offline");
         tip(
             foot,
-            "Service offline — use Start daemon in the banner, or: sudo systemctl enable --now legion-control",
+            "Service offline — start it from the banner, or: sudo systemctl enable --now legion-control",
         );
     }
 }
@@ -1269,7 +1245,7 @@ fn build_overview(
     ppt_scales_slot: &PptScales,
     ppt_suppress_slot: &Rc<Cell<bool>>,
 ) -> gtk::Box {
-    let page = page_lede("How the laptop feels right now");
+    let page = page_lede("");
 
     let metrics = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
@@ -1977,7 +1953,7 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
 }
 
 fn build_cpu_features_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Boost and threading");
+    let page = page_lede("");
     let features = build_cpu_features(toast_overlay);
     gate.track(&features);
     page.append(&features);
@@ -1985,7 +1961,7 @@ fn build_cpu_features_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate)
 }
 
 fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("CPU and GPU power limits");
+    let page = page_lede("");
     let note = pref_group("Custom watts", None);
     let tip_row = adw::ActionRow::builder()
         .title("Edit on Home")
@@ -1998,16 +1974,8 @@ fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 }
 
 fn build_cpu_undervolt_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("CPU undervolt");
+    let page = page_lede("");
     page.append(&build_curve_optimizer(toast_overlay));
-
-    let igpu = pref_group("iGPU undervolt", None);
-    let unavailable = adw::ActionRow::builder()
-        .title("Unavailable on this model")
-        .subtitle("No validated iGPU voltage control is exposed by this firmware")
-        .build();
-    igpu.add(&unavailable);
-    page.append(&igpu);
     page
 }
 
@@ -2099,7 +2067,7 @@ fn spawn_stability_test_for(
 }
 
 fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("Quick CPU stability check");
+    let page = page_lede("");
     let group = pref_group("Stability test", None);
     let status = adw::ActionRow::builder()
         .title("Ready")
@@ -2169,9 +2137,7 @@ fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
                             status.set_subtitle("No result");
                         } else if errors == 0 {
                             status.set_title("Quick test passed");
-                            status.set_subtitle(
-                                "No errors detected · longer testing is still needed",
-                            );
+                            status.set_subtitle("No errors found in this 5-minute run");
                             toast_ok(&overlay, "CPU stability test passed");
                         } else {
                             status.set_title("Errors detected");
@@ -2411,11 +2377,11 @@ fn build_profiles_page(
     mode_drop_slot: &Rc<RefCell<Option<adw::ComboRow>>>,
     profile_choices_slot: &Rc<RefCell<Vec<String>>>,
 ) -> gtk::Box {
-    let page = page_lede("Save power, fans, lighting, and charge as named presets");
+    let page = page_lede("Save and restore settings");
 
     let group = pref_group(
         "Named presets",
-        Some("Store the current setup, then load it later in one step"),
+        Some("Save and restore a group of settings"),
     );
 
     let names = legion_core::config::list_profile_names();
@@ -2440,7 +2406,7 @@ fn build_profiles_page(
     tip(&entry, "Type a name, then Save current");
     let entry_row = adw::ActionRow::builder()
         .title("New name")
-        .subtitle("Name for the preset you are about to save")
+        .subtitle("Name for this profile")
         .activatable(false)
         .build();
     tip(
@@ -3079,7 +3045,7 @@ fn fan_card(
                     "Very high fan speed",
                     &format!(
                         "Manual {rpm} RPM is near the maximum for this fan (~{max_rpm:.0}).\n\n\
-                         Loud and drains power. Use Automatic unless stress-testing with strong cooling."
+                         This holds the fan near its maximum speed and increases noise and power use."
                     ),
                     "Keep manual",
                     move |ok| {
@@ -3129,7 +3095,7 @@ fn fan_card(
                 "Very high fan speed",
                 &format!(
                     "Manual {rpm} RPM is near the maximum for this fan (~{max_rpm:.0}).\n\n\
-                     Loud and drains power. Use Automatic unless stress-testing with strong cooling."
+                     This holds the fan near its maximum speed and increases noise and power use."
                 ),
                 "Use high speed",
                 move |ok| {
@@ -3240,7 +3206,7 @@ fn build_battery_pages(
     status_page.append(&stats);
 
     let lim = pref_group(
-        "Charge limit",
+        "Charge limit and status",
         Some(
             "Caps how far the battery charges while plugged in — helps longevity when you leave the laptop on AC",
         ),
@@ -3295,7 +3261,7 @@ fn build_battery_pages(
     }
     let pill_row = adw::ActionRow::builder()
         .title("Stop charging at")
-        .subtitle("60% healthier · 80% balanced · 100% full")
+        .subtitle("60%, 80%, or 100%")
         .activatable(false)
         .build();
     tip(
@@ -3375,9 +3341,9 @@ fn build_lighting_reset_section(
     use legion_core::rgb_panic::{self, Health};
 
     let group = pref_group(
-        "Keyboard RGB panic",
+        "Keyboard lighting issue",
         Some(
-            "Detects Spectrum HID / kernel USB faults when lights go black (“RGB panic”), then soft-resets or USB-resets the controller",
+            "Detects Spectrum HID / kernel USB faults when lights go black, then soft-resets or USB-resets the controller",
         ),
     );
 
@@ -3425,8 +3391,8 @@ fn build_lighting_reset_section(
     let btn = primary_button_tip(
         match diag0.health {
             Health::Ok => "Re-check RGB",
-            Health::SoftIssue => "Fix RGB panic",
-            Health::HardwareBroken => "USB reset &amp; restore",
+            Health::SoftIssue => "Repair lighting",
+            Health::HardwareBroken => "USB reset & restore",
             Health::NotApplicable => "Check RGB",
         },
         Some(
@@ -3453,7 +3419,7 @@ fn build_lighting_reset_section(
     let expander_c = expander.clone();
     let btn_c = btn.clone();
     btn.connect_clicked(move |_| {
-        set_busy(&btn_c, true, "Fix RGB panic");
+        set_busy(&btn_c, true, "Repair lighting");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let report = match send_command(DaemonCommand::FixRgbPanic) {
@@ -3515,8 +3481,8 @@ fn build_lighting_reset_section(
                 }
                 let idle = match health {
                     Health::Ok => "Re-check RGB",
-                    Health::SoftIssue => "Fix RGB panic",
-                    Health::HardwareBroken => "USB reset &amp; restore",
+                    Health::SoftIssue => "Repair lighting",
+                    Health::HardwareBroken => "USB reset & restore",
                     Health::NotApplicable => "Check RGB",
                 };
                 set_busy(&btn_c, false, idle);
@@ -3527,12 +3493,12 @@ fn build_lighting_reset_section(
                 details_c.set_text(&e);
                 expander_c.set_expanded(true);
                 toast_error(&overlay, &e);
-                set_busy(&btn_c, false, "Fix RGB panic");
+                set_busy(&btn_c, false, "Repair lighting");
                 glib::ControlFlow::Break
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(_) => {
-                set_busy(&btn_c, false, "Fix RGB panic");
+                set_busy(&btn_c, false, "Repair lighting");
                 toast_error(&overlay, "RGB fix failed");
                 glib::ControlFlow::Break
             }
@@ -3680,7 +3646,7 @@ fn rgb_pill(health: legion_core::rgb_panic::Health) -> (&'static str, &'static s
     match health {
         Health::Ok => ("OK", "ok"),
         Health::SoftIssue => ("Panic", "warn"),
-        Health::HardwareBroken => ("Dead", "bad"),
+        Health::HardwareBroken => ("Not responding", "bad"),
         Health::NotApplicable => ("N/A", "muted"),
     }
 }
@@ -3705,7 +3671,7 @@ fn rgb_short_help(health: legion_core::rgb_panic::Health) -> &'static str {
         Health::Ok => {
             "Controller healthy. Daemon still watches kernel HID faults in the background."
         }
-        Health::SoftIssue => "Classic RGB panic / dark hang — run Auto-fix to restore lighting.",
+        Health::SoftIssue => "Lighting not responding — run Auto-fix to restore it.",
         Health::HardwareBroken => {
             "HID not responding — Auto-fix will USB-reset and rebind hid-generic."
         }
@@ -3776,7 +3742,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let installed = kde_widget_installed();
     let group = pref_group(
         "KDE Plasma widget",
-        Some("Animated telemetry gauges and quick controls for your panel or desktop"),
+        Some("Temperatures and quick controls in Plasma"),
     );
     let row = adw::ActionRow::builder()
         .title("Legion Control widget")
@@ -3861,10 +3827,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 }
 
 fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group(
-        "First-time setup",
-        Some("Core service and optional integrations — change these at any time"),
-    );
+    let group = pref_group("First-time setup", Some("Required and optional components"));
 
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
     let daemon_row = adw::ActionRow::builder()
@@ -4001,10 +3964,10 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 fn build_about_pages(
     toast_overlay: &adw::ToastOverlay,
 ) -> (gtk::Box, gtk::Box, gtk::Box, gtk::Box) {
-    let setup_page = page_lede("Services and desktop integration");
-    let help_page = page_lede("Project links and legal notice");
-    let hardware_page = page_lede("Detected hardware and capabilities");
-    let storage_page = page_lede("Settings, profiles, and tray behavior");
+    let setup_page = page_lede("");
+    let help_page = page_lede("");
+    let hardware_page = page_lede("");
+    let storage_page = page_lede("");
     let info = legion_core::device::detect();
 
     setup_page.append(&build_components_section(toast_overlay));
@@ -4200,7 +4163,7 @@ fn build_about_pages(
     hardware_page.append(&laptop);
 
     let lighting = pref_group(
-        "Lighting &amp; profiles",
+        "Lighting and profiles",
         Some("Where lighting and named profiles are stored on disk"),
     );
     let saved = legion_core::config::config_dir_display();
@@ -4275,8 +4238,8 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
 
     let btn = primary_button_tip(
         match diag0.health {
-            Health::Ok => "Refresh &amp; re-check",
-            Health::SoftIssue => "Fix speakers",
+            Health::Ok => "Refresh and re-check",
+            Health::SoftIssue => "Repair speakers",
             Health::HardwareBroken => "Try soft fix anyway",
             Health::NotApplicable => "Check speakers",
         },
@@ -4298,7 +4261,7 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
     let expander_c = expander.clone();
     let btn_c = btn.clone();
     btn.connect_clicked(move |_| {
-        set_busy(&btn_c, true, "Fix speakers");
+        set_busy(&btn_c, true, "Repair speakers");
 
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -4345,8 +4308,8 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
                 }
 
                 let idle = match report.after.health {
-                    Health::Ok => "Refresh &amp; re-check",
-                    Health::SoftIssue => "Fix speakers",
+                    Health::Ok => "Refresh and re-check",
+                    Health::SoftIssue => "Repair speakers",
                     Health::HardwareBroken => "Try soft fix anyway",
                     Health::NotApplicable => "Check speakers",
                 };
@@ -4357,7 +4320,7 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(_) => {
-                set_busy(&btn_c, false, "Fix speakers");
+                set_busy(&btn_c, false, "Repair speakers");
                 toast_error(&overlay, "Something went wrong");
                 glib::ControlFlow::Break
             }

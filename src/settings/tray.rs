@@ -31,7 +31,7 @@ impl Tray for LegionTray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: "Legion Control".into(),
-            description: "Fans · Lights · Power — click to show".into(),
+            description: "Fans, lights, and power — click to show".into(),
             ..Default::default()
         }
     }

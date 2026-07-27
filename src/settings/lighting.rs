@@ -46,7 +46,7 @@ pub fn build_lighting(
     app: &adw::Application,
 ) -> (gtk::Box, adw::ViewStack) {
     let cfg = legion_core::config::get();
-    let page = page_lede("Colours for the keyboard, front, rear, and logo");
+    let page = page_lede("");
 
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
 
@@ -269,7 +269,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     box_.set_margin_top(14);
 
     let (sec_look, look) = section_tip(
-        "Brightness &amp; logo",
+        "Brightness and logo",
         Some("Global Spectrum brightness and lid logo power switch"),
     );
 

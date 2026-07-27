@@ -24,17 +24,35 @@ pub fn profile_blurb(name: &str) -> &'static str {
         "low-power" | "quiet" => "Lower power and cooler fans",
         "balanced" => "Mixed speed and noise",
         "performance" => "Higher power for heavy loads",
-        "max-power" => "Highest turbo — confirm before use",
-        "custom" => "Manual CPU / GPU power limits below",
+        "max-power" => "Maximum firmware power",
+        "custom" => "Manual CPU and GPU limits",
         _ => "CPU and GPU power mode",
     }
 }
 
+/// Page width variant for the clamp.
+#[allow(dead_code)]
+pub enum PageWidth {
+    Standard, // ~760 px for settings forms
+    Wide,     // 1120 px for dashboards and lighting
+}
+
 pub fn page_shell(body: &impl glib::object::IsA<gtk::Widget>) -> gtk::ScrolledWindow {
+    page_shell_width(body, PageWidth::Standard)
+}
+
+pub fn page_shell_width(
+    body: &impl glib::object::IsA<gtk::Widget>,
+    width: PageWidth,
+) -> gtk::ScrolledWindow {
     use gtk::PolicyType;
+    let max = match width {
+        PageWidth::Standard => 760,
+        PageWidth::Wide => 1120,
+    };
     let clamp = libadwaita::Clamp::builder()
-        .maximum_size(1120)
-        .tightening_threshold(780)
+        .maximum_size(max)
+        .tightening_threshold((max as f64 * 0.7) as i32)
         .build();
     clamp.set_child(Some(body));
 
@@ -55,7 +73,6 @@ pub fn page_box(title: &str, subtitle: &str) -> gtk::Box {
         let t = gtk::Label::new(Some(title));
         t.add_css_class("page-title");
         t.set_halign(Align::Start);
-        tip(&t, title);
         page.append(&t);
     }
     if !subtitle.is_empty() {
@@ -67,7 +84,6 @@ pub fn page_box(title: &str, subtitle: &str) -> gtk::Box {
             s.add_css_class("page-sub-solo");
             s.add_css_class("page-lede");
         }
-        tip(&s, subtitle);
         page.append(&s);
     }
     page
@@ -78,7 +94,7 @@ pub fn page_lede(subtitle: &str) -> gtk::Box {
     page_box("", subtitle)
 }
 
-/// Mark a primary button busy (spinner + Working…).
+/// Mark a primary button busy (spinner + operation label).
 pub fn set_busy(btn: &gtk::Button, busy: bool, idle_label: &str) {
     if busy {
         btn.set_sensitive(false);
@@ -87,8 +103,7 @@ pub fn set_busy(btn: &gtk::Button, busy: bool, idle_label: &str) {
         let spin = gtk::Spinner::new();
         spin.set_spinning(true);
         row.append(&spin);
-        let l = gtk::Label::new(Some("Working…"));
-        tip(&l, "Applying the change — please wait");
+        let l = gtk::Label::new(Some(idle_label));
         row.append(&l);
         btn.set_child(Some(&row));
     } else {
@@ -106,18 +121,13 @@ pub fn pref_group(title: &str, description: Option<&str>) -> adw::PreferencesGro
     if let Some(d) = description {
         if !d.is_empty() {
             g.set_description(Some(d));
-            tip(&g, d);
-        } else if !title.is_empty() {
-            tip(&g, title);
         }
-    } else if !title.is_empty() {
-        tip(&g, title);
     }
     g
 }
 
 /// Read-only property-style ActionRow (title + value subtitle).
-pub fn property_row(title: &str, value: &str, tooltip: Option<&str>) -> adw::ActionRow {
+pub fn property_row(title: &str, value: &str, _tooltip: Option<&str>) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
         .title(title)
         .subtitle(value)
@@ -125,8 +135,6 @@ pub fn property_row(title: &str, value: &str, tooltip: Option<&str>) -> adw::Act
     row.add_css_class("property");
     row.set_subtitle_selectable(true);
     row.set_activatable(false);
-    let tt = tooltip.unwrap_or(title);
-    tip(&row, tt);
     row
 }
 
@@ -150,27 +158,18 @@ pub fn string_combo_row(
         "string",
     );
     row.set_expression(Some(expr));
-    if !subtitle.is_empty() {
-        tip(&row, subtitle);
-    } else {
-        tip(&row, title);
-    }
     row
 }
 
-pub fn section_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Box) {
+pub fn section_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Box) {
     let wrap = gtk::Box::new(Orientation::Vertical, 0);
     wrap.add_css_class("section");
     let label = gtk::Label::new(Some(title));
     label.add_css_class("section-label");
     label.set_halign(Align::Start);
-    let tt = tooltip.unwrap_or(title);
-    tip(&label, tt);
-    tip(&wrap, tt);
     wrap.append(&label);
     let card = gtk::Box::new(Orientation::Vertical, 0);
     card.add_css_class("card");
-    tip(&card, tt);
     wrap.append(&card);
     (wrap, card)
 }
@@ -178,17 +177,17 @@ pub fn section_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Box) {
 /// Hover text for Spectrum lighting effects.
 pub fn effect_tooltip(id: &str) -> &'static str {
     match id {
-        "static" => "Solid colour on this surface — no animation",
+        "static" => "Solid colour on this surface",
         "color-pulse" => "Fades your colour in and out",
-        "color-wave" => "Your colour sweeps across the keys / bar",
+        "color-wave" => "Your colour sweeps across the keys or bar",
         "rainbow-wave" => "Rainbow colours move across the surface",
         "screw-rainbow" => "Spiral rainbow pattern",
         "smooth" => "Soft colour blend animation",
         "color-change" => "Cycles through colours smoothly",
         "rain" => "Raindrop-style sparkles",
         "ripple" => "Ripple rings from the centre",
-        "reactive" => "Lights react when you press keys (keyboard)",
-        "off" => "Turns this surface’s lighting off",
+        "reactive" => "Lights react when you press keys",
+        "off" => "Turns this surface's lighting off",
         _ => "Lighting effect for this surface",
     }
 }
@@ -198,9 +197,9 @@ pub fn profile_tooltip(name: &str) -> &'static str {
     match name {
         "low-power" | "quiet" => "Quiet (blue LED): lower power and cooler fans",
         "balanced" => "Balanced (white LED): default mixed mode",
-        "performance" => "Performance (red LED): higher CPU/GPU power — louder fans",
-        "max-power" => "Max Power / Extreme (purple LED): highest turbo — runs hotter",
-        "custom" => "Custom (purple LED): unlocks CPU and GPU power-limit sliders below",
+        "performance" => "Performance (red LED): higher CPU and GPU power",
+        "max-power" => "Max Power (purple LED): highest firmware limits",
+        "custom" => "Custom (purple LED): manual CPU and GPU limits",
         _ => "Changes how hard the laptop pushes CPU and GPU",
     }
 }
@@ -219,7 +218,7 @@ pub fn labeled_row_tip(
     title: &str,
     subtitle: &str,
     suffix: &impl glib::object::IsA<gtk::Widget>,
-    tooltip: Option<&str>,
+    _tooltip: Option<&str>,
 ) -> gtk::Box {
     let row = gtk::Box::new(Orientation::Horizontal, 16);
     row.add_css_class("row");
@@ -231,15 +230,12 @@ pub fn labeled_row_tip(
     let t = gtk::Label::new(Some(title));
     t.add_css_class("row-title");
     t.set_halign(Align::Start);
-    let tt = tooltip.unwrap_or(if subtitle.is_empty() { title } else { subtitle });
-    tip(&t, tt);
     text.append(&t);
     if !subtitle.is_empty() {
         let s = gtk::Label::new(Some(subtitle));
         s.add_css_class("row-sub");
         s.set_halign(Align::Start);
         s.set_wrap(true);
-        tip(&s, tt);
         text.append(&s);
     }
     row.append(&text);
@@ -247,13 +243,11 @@ pub fn labeled_row_tip(
     let sfx = suffix.clone().upcast::<gtk::Widget>();
     sfx.set_valign(Align::Center);
     sfx.set_halign(Align::End);
-    tip(&sfx, tt);
     row.append(&sfx);
-    tip(&row, tt);
     row
 }
 
-pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
+pub fn metric_chip_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.add_css_class("metric-chip");
     box_.set_hexpand(true);
@@ -270,11 +264,6 @@ pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::La
     box_.append(&l);
     box_.append(&v);
     box_.append(&d);
-    let tt = tooltip.unwrap_or(title);
-    tip(&box_, tt);
-    tip(&l, tt);
-    tip(&v, tt);
-    tip(&d, tt);
     (box_, v, d)
 }
 
@@ -304,7 +293,9 @@ pub fn primary_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
     btn.add_css_class("suggested-action");
     btn.add_css_class("pill-btn");
     btn.set_halign(Align::Start);
-    tip(&btn, tooltip.unwrap_or(label));
+    if let Some(tt) = tooltip {
+        tip(&btn, tt);
+    }
     btn
 }
 

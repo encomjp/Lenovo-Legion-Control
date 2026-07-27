@@ -1725,7 +1725,7 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     });
     switch_row.append(&switch_l);
     switch_row.append(&layout_dd);
-    let hint = gtk::Label::new(Some("Same LEDs · different labels"));
+    let hint = gtk::Label::new(Some("LED mapping stays the same"));
     hint.add_css_class("hint");
     hint.set_hexpand(true);
     hint.set_halign(Align::Start);
