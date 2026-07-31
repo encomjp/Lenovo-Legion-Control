@@ -23,7 +23,7 @@ Item {
     }
 
     readonly property real normalized: {
-        if (value < 0) return 0
+        if (isNaN(value) || value < 0) return 0
         return Math.max(0, Math.min(1, (value - minValue) / (maxValue - minValue)))
     }
 
@@ -87,6 +87,14 @@ Item {
             text: unit
             font.pixelSize: gauge.size * 0.12
             color: Kirigami.Theme.disabledTextColor
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: gauge.label
+            font.pixelSize: gauge.size * 0.13
+            color: Kirigami.Theme.textColor
+            opacity: 0.7
+            visible: gauge.label !== ""
         }
     }
 }

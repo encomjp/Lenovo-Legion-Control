@@ -35,7 +35,6 @@ chrono = { version = "0.4", features = ["clock"] }
 dirs = "6"
 include_dir = "0.7"
 # ─── Daemon infrastructure ───
-# ─── Daemon infrastructure ───
 signal-hook = "0.3"
 libc = "0.2"
 

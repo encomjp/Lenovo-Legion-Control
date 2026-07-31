@@ -337,7 +337,9 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        let mut cur = fs::canonicalize(entry.path().join("device")).ok()?;
+        let Ok(mut cur) = fs::canonicalize(entry.path().join("device")) else {
+            continue;
+        };
         let mut matched = false;
         for _ in 0..10 {
             let v = cur.join("idVendor");

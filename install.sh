@@ -224,6 +224,7 @@ install_deps_zypper() {
 
 ensure_rust() {
   local min_rust="1.87.0"
+  local need_install=0
   if need_cmd cargo && need_cmd rustc; then
     local current
     current="$(rustc --version | awk '{print $2}')"
@@ -231,11 +232,14 @@ ensure_rust() {
       ok "Rust $current"
       return 0
     fi
-    warn "Rust $current is too old; this dependency set requires Rust $min_rust or newer"
+    warn "System Rust $current is too old — requires $min_rust+"
+    need_install=1
   else
     warn "Rust / cargo not found"
+    need_install=1
   fi
-  if confirm "Install/update stable Rust via rustup (https://rustup.rs)?"; then
+  # In non-interactive mode or when the user confirms, install via rustup.
+  if [[ "$ASSUME_YES" -eq 1 ]] || confirm "Install/update stable Rust via rustup (https://rustup.rs)?"; then
     if need_cmd rustup; then
       rustup update stable
       rustup default stable
@@ -244,20 +248,118 @@ ensure_rust() {
     fi
     # shellcheck disable=SC1091
     source "$HOME/.cargo/env"
+    export PATH="$HOME/.cargo/bin:$PATH"
     local installed
     installed="$(rustc --version | awk '{print $2}')"
-    ok "Rust $installed"
+    ok "Rust $installed (via rustup)"
   else
     die "Rust $min_rust+ is required. Update Rust and re-run."
   fi
 }
 
+# ─── Debian Bookworm → Trixie auto-upgrade ─────────────────────────────────
+upgrade_debian_to_trixie() {
+  info "This will change Debian sources from bookworm → trixie"
+  info "and install GTK 4.14+ / libadwaita 1.5+ from the Trixie repos."
+  warn "A full system upgrade to Trixie is recommended for production use."
+  warn "This installer only upgrades the libraries needed to build Legion Control."
+
+  if ! confirm "Upgrade Debian sources to Trixie now?"; then
+    die "Debian Bookworm GTK 4.8 / libadwaita 1.2 cannot build Legion Control.
+  Upgrade manually:
+    sudo sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
+    sudo apt update && sudo apt install libgtk-4-dev libadwaita-1-dev
+  Or do a clean install of Debian Trixie."
+  fi
+
+  local upgraded=0
+
+  # Handle legacy sources.list
+  if [[ -f /etc/apt/sources.list ]]; then
+    sudo_run cp /etc/apt/sources.list /etc/apt/sources.list.bak.bookworm
+    sudo_run sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
+    ok "Updated /etc/apt/sources.list: bookworm → trixie"
+    upgraded=1
+  fi
+
+  # Handle DEB822 .sources files and legacy .list files in sources.list.d
+  if [[ -d /etc/apt/sources.list.d ]]; then
+    for f in /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+      [[ -f "$f" ]] || continue
+      if grep -q 'bookworm' "$f" 2>/dev/null; then
+        sudo_run cp "$f" "${f}.bak.bookworm"
+        sudo_run sed -i 's/bookworm/trixie/g' "$f"
+        info "Updated $(basename "$f"): bookworm → trixie"
+        upgraded=1
+      fi
+    done
+  fi
+
+  if [[ "$upgraded" -eq 0 ]]; then
+    die "No Debian apt sources found containing 'bookworm'. Cannot auto-upgrade."
+  fi
+
+  sudo_run apt-get update -qq
+  ok "apt-get update done"
+
+  sudo_run apt-get install -y -qq libgtk-4-dev libadwaita-1-dev libglib2.0-dev libudev-dev
+  ok "Installed libgtk-4-dev + libadwaita-1-dev + deps from Trixie"
+}
+
 check_native_deps() {
   need_cmd pkg-config || die "pkg-config is required"
-  pkg-config --atleast-version=4.14 gtk4 \
-    || die "GTK 4.14+ is required (Ubuntu 24.04+, Fedora 40+, or current Arch/CachyOS)"
-  pkg-config --atleast-version=1.5 libadwaita-1 \
-    || die "libadwaita 1.5+ is required (Ubuntu 24.04+, Fedora 40+, or current Arch/CachyOS)"
+
+  # Detect specific distro for targeted upgrade advice.
+  local distro_id=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    distro_id="${ID:-}"
+  fi
+
+  if ! pkg-config --atleast-version=4.14 gtk4 2>/dev/null; then
+    local have
+    have="$(pkg-config --modversion gtk4 2>/dev/null || echo "not found")"
+    case "$distro_id" in
+      debian)
+        warn "GTK $have found, but 4.14+ is required (Debian Bookworm ships GTK 4.8)."
+        upgrade_debian_to_trixie
+        # Re-check after upgrade
+        if ! pkg-config --atleast-version=4.14 gtk4 2>/dev/null; then
+          die "GTK upgrade failed — $(pkg-config --modversion gtk4 2>/dev/null || echo "not found"). Check /etc/apt/sources.list."
+        fi
+        ;;
+      ubuntu)
+        die "GTK $have found, but 4.14+ is required.
+  Ubuntu 22.04 ships GTK 4.6 — upgrade to Ubuntu 24.04 LTS (Noble) or newer."
+        ;;
+      *)
+        die "GTK 4.14+ is required (found $have). Supported: Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed."
+        ;;
+    esac
+  fi
+
+  if ! pkg-config --atleast-version=1.5 libadwaita-1 2>/dev/null; then
+    local have
+    have="$(pkg-config --modversion libadwaita-1 2>/dev/null || echo "not found")"
+    case "$distro_id" in
+      debian)
+        # Already handled by upgrade_debian_to_trixie above (installs both)
+        if ! pkg-config --atleast-version=1.5 libadwaita-1 2>/dev/null; then
+          die "libadwaita $have found, but 1.5+ is required.
+  Debian Trixie upgrade may have failed — check: apt-get install -t trixie libadwaita-1-dev"
+        fi
+        ;;
+      ubuntu)
+        die "libadwaita $have found, but 1.5+ is required.
+  Ubuntu 22.04 ships libadwaita 1.1 — upgrade to Ubuntu 24.04 LTS or newer."
+        ;;
+      *)
+        die "libadwaita 1.5+ is required (found $have). Supported: Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed."
+        ;;
+    esac
+  fi
+
   pkg-config --exists libudev \
     || die "libudev development files are required (libudev-dev / systemd-devel / systemd)"
   ok "Native libraries: GTK $(pkg-config --modversion gtk4), libadwaita $(pkg-config --modversion libadwaita-1)"

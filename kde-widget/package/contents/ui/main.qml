@@ -24,6 +24,8 @@ PlasmoidItem {
     property string kbdBrightness: "--"
     property string logoOn: "false"
     property bool daemonOnline: false
+    property string batWatts: "--"
+    property string cliCommand: "bash " + Qt.resolvedUrl("legion-command.sh").toString().replace("file://", "")
     property var tempHistory: []
     property real _lastWriteTime: 0
 
@@ -48,8 +50,9 @@ PlasmoidItem {
             anchors.centerIn: parent
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.Icon {
-                source: "legion-settings"
+            Image {
+                source: Qt.resolvedUrl("icons/cpu.svg")
+                sourceSize: Qt.size(Kirigami.Units.iconSizes.smallMedium, Kirigami.Units.iconSizes.smallMedium)
                 Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
                 Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
             }
@@ -74,7 +77,7 @@ PlasmoidItem {
                 if (fanCpu !== "--") l.push("Fan CPU: " + (fanCpu === "0" ? "Auto" : fanCpu + " RPM"))
                 if (batteryPct !== "--") l.push("Battery: " + batteryPct + "%")
                 if (profile !== "--") l.push("Profile: " + profile)
-                if (!daemonOnline) l.push("⚠ Daemon offline")
+                if (!daemonOnline) l.push("Daemon offline")
                 return l.join("\n")
             }
             visible: compact.containsMouse
@@ -92,40 +95,6 @@ PlasmoidItem {
             id: fullCol
             width: parent.width
             spacing: Kirigami.Units.largeSpacing
-
-            // === HEADER ===
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.largeSpacing
-
-                Kirigami.Icon {
-                    source: "legion-settings"
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.large
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.large
-                }
-
-                Kirigami.Heading {
-                    text: "Legion Control"
-                    level: 3
-                    font.weight: Font.DemiBold
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Rectangle {
-                    Layout.preferredWidth: 8
-                    Layout.preferredHeight: 8
-                    radius: 4
-                    color: root.daemonOnline ? "#44d62c" : "#ff4444"
-                    Behavior on color { ColorAnimation { duration: 300 } }
-                }
-
-                QQC2.Label {
-                    text: root.daemonOnline ? "Online" : "Offline"
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: root.daemonOnline ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.negativeTextColor
-                }
-            }
 
             // === TEMPERATURE GAUGES ===
             RowLayout {
@@ -153,213 +122,102 @@ PlasmoidItem {
                 }
             }
 
-            // === METRIC CARDS ===
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: metricsCol.implicitHeight + Kirigami.Units.largeSpacing * 2
-                radius: Kirigami.Units.largeSpacing
-                color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.3)
-                border.width: 1
-                border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.1)
-
+            // === SYSTEM MONITOR ===
+            SectionCard {
                 ColumnLayout {
-                    id: metricsCol
-                    anchors.fill: parent
-                    anchors.margins: Kirigami.Units.smallSpacing
-                    spacing: Kirigami.Units.smallSpacing
-
-                    MetricCard {
-                        iconSource: "cpu-symbolic"
+                    Layout.fillWidth: true
+                    MonitorRow {
+                        iconSource: Qt.resolvedUrl("icons/cpu.svg")
                         label: root.cpuName
-                        value: root.cpuTemp
-                        unit: "°C"
-                        valueColor: {
-                            var t = parseFloat(root.cpuTemp)
-                            if (t > 90) return Kirigami.Theme.negativeTextColor
-                            if (t > 75) return Kirigami.Theme.neutralTextColor
-                            return Kirigami.Theme.positiveTextColor
-                        }
-                        showSparkline: root.showSparklines
-                        sparkPoints: root.tempHistory
-                        sparkColor: "#44d62c"
+                        temperature: root.cpuTemp
+                        fanValue: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
                     }
-
-                    MetricCard {
-                        iconSource: "video-display-symbolic"
+                    MonitorRow {
+                        iconSource: Qt.resolvedUrl("icons/gpu.svg")
                         label: root.gpuName
-                        value: root.gpuTemp === "--" || parseFloat(root.gpuTemp) < 0 ? "Off" : root.gpuTemp
-                        unit: "°C"
-                        subValue: root.gpuPower >= 0 ? root.gpuPower : ""
-                        subUnit: "W"
-                        valueColor: {
-                            var t = parseFloat(root.gpuTemp)
-                            if (t < 0) return Kirigami.Theme.disabledTextColor
-                            if (t > 85) return Kirigami.Theme.negativeTextColor
-                            if (t > 70) return Kirigami.Theme.neutralTextColor
-                            return Kirigami.Theme.positiveTextColor
-                        }
-                    }
-
-                    MetricCard {
-                        iconSource: "speedometer-symbolic"
-                        label: "CPU Fan"
-                        value: root.fanCpu === "0" ? "Auto" : root.fanCpu
-                        unit: " RPM"
-                    }
-
-                    MetricCard {
-                        iconSource: "speedometer-symbolic"
-                        label: "GPU Fan"
-                        value: root.fanGpu === "0" ? "Auto" : root.fanGpu
-                        unit: " RPM"
-                    }
-
-                    MetricCard {
-                        iconSource: "speedometer-symbolic"
-                        label: "Aux Fan"
-                        value: root.fanAux === "0" ? "Auto" : root.fanAux
-                        unit: " RPM"
+                        temperature: root.gpuTemp === "--" || parseFloat(root.gpuTemp) < 0 ? "--" : root.gpuTemp
+                        secondaryValue: parseFloat(root.gpuPower) >= 0 ? root.gpuPower + " W" : ""
+                        fanValue: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
+                        muted: parseFloat(root.gpuTemp) < 0
                     }
                 }
             }
 
             // === BATTERY ===
-            BatteryBar {
-                Layout.fillWidth: true
-                percentage: root.batteryPct
-                status: root.batteryStatus
-                chargeLimit: root.chargeLimit
+            SectionCard {
+                BatteryBar {
+                    percentage: root.batteryPct
+                    batteryStatus: root.batteryStatus
+                    chargeLimit: root.chargeLimit
+                    watts: root.batWatts
+                }
             }
 
-            // === QUICK CONTROLS ===
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: quickCol.implicitHeight + Kirigami.Units.largeSpacing * 2
-                radius: Kirigami.Units.largeSpacing
-                color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.3)
-                border.width: 1
-                border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.1)
-
-                ColumnLayout {
-                    id: quickCol
-                    anchors.fill: parent
-                    anchors.margins: Kirigami.Units.smallSpacing
-                    spacing: 0
-
-                    QuickControl {
-                        iconSource: "system-run"
-                        label: "Profile"
-                        valueText: root.profile
-                        valueColor: Kirigami.Theme.positiveTextColor
-                        onClicked: {
-                            root._lastWriteTime = Date.now()
-                            var profiles = ["quiet", "balanced", "performance", "max-power", "custom"]
-                            var idx = profiles.indexOf(root.profile.toLowerCase().split(" ")[0])
-                            if (idx < 0) idx = 0
-                            var next = profiles[(idx + 1) % profiles.length]
-                            executable.exec("legion-cli set-profile " + next)
-                            refreshTimer.restart()
-                        }
+            // === CONTROLS ===
+            SectionCard {
+                QuickControl {
+                    iconSource: Qt.resolvedUrl("icons/profile.svg")
+                    label: "Profile"
+                    valueText: root.profile
+                    valueColor: Kirigami.Theme.positiveTextColor
+                    onClicked: {
+                        root._lastWriteTime = Date.now()
+                        var profiles = ["quiet", "balanced", "performance", "max-power", "custom"]
+                        var idx = profiles.indexOf(root.profile.toLowerCase().split(" ")[0])
+                        if (idx < 0) idx = 0
+                        var next = profiles[(idx + 1) % profiles.length]
+                        executable.exec(root.cliCommand + " set-profile " + next)
+                        refreshTimer.restart()
                     }
-
-                    Rectangle { Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.largeSpacing; Layout.rightMargin: Kirigami.Units.largeSpacing; implicitHeight: 1; color: Kirigami.Theme.alternateBackgroundColor }
-
-                    QuickControl {
-                        iconSource: "speedometer-symbolic"
-                        label: "CPU Fan"
-                        valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
-                        onClicked: {
-                            root._lastWriteTime = Date.now()
-                            var presets = [0, 3000, 3500, 4000, 4500]
-                            var cur = parseInt(root.fanCpu) || 0
-                            var idx = presets.indexOf(cur)
-                            if (idx < 0) idx = 0
-                            var next = presets[(idx + 1) % presets.length]
-                            executable.exec("legion-cli set-fan 1 " + next)
-                            refreshTimer.restart()
-                        }
+                }
+                QuickControl {
+                    iconSource: Qt.resolvedUrl("icons/fan.svg")
+                    label: "CPU Fan"
+                    valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
+                    onClicked: {
+                        root._lastWriteTime = Date.now()
+                        var presets = [0, 3000, 3500, 4000, 4500]
+                        var cur = parseInt(root.fanCpu) || 0
+                        var idx = presets.indexOf(cur)
+                        if (idx < 0) idx = 0
+                        var next = presets[(idx + 1) % presets.length]
+                        executable.exec(root.cliCommand + " set-fan 1 " + next)
+                        refreshTimer.restart()
                     }
-
-                    Rectangle { Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.largeSpacing; Layout.rightMargin: Kirigami.Units.largeSpacing; implicitHeight: 1; color: Kirigami.Theme.alternateBackgroundColor }
-
-                    QuickControl {
-                        iconSource: "brightness-high-symbolic"
-                        label: "KB Brightness"
-                        valueText: {
-                            var b = parseInt(root.kbdBrightness)
-                            if (b === 0) return "Off"
-                            if (b === 1) return "Low"
-                            if (b === 2) return "High"
-                            return "--"
-                        }
-                        onClicked: {
-                            root._lastWriteTime = Date.now()
-                            var cur = parseInt(root.kbdBrightness) || 0
-                            var next = (cur + 1) % 3
-                            executable.exec("legion-cli set-kbd " + next)
-                            refreshTimer.restart()
-                        }
+                }
+                QuickControl {
+                    iconSource: Qt.resolvedUrl("icons/fan.svg")
+                    label: "GPU Fan"
+                    valueText: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
+                    onClicked: {
+                        root._lastWriteTime = Date.now()
+                        var presets = [0, 3000, 3500, 4000, 4500]
+                        var cur = parseInt(root.fanGpu) || 0
+                        var idx = presets.indexOf(cur)
+                        if (idx < 0) idx = 0
+                        var next = presets[(idx + 1) % presets.length]
+                        executable.exec(root.cliCommand + " set-fan 2 " + next)
+                        refreshTimer.restart()
                     }
-
-                    Rectangle { Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.largeSpacing; Layout.rightMargin: Kirigami.Units.largeSpacing; implicitHeight: 1; color: Kirigami.Theme.alternateBackgroundColor }
-
-                    QuickControl {
-                        iconSource: "preferences-desktop-display-color"
-                        label: "Logo LED"
-                        valueText: root.logoOn === "true" ? "On" : "Off"
-                        on: root.logoOn === "true"
-                        valueColor: root.logoOn === "true" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
-                        onClicked: {
-                            root._lastWriteTime = Date.now()
-                            var next = root.logoOn === "true" ? "off" : "on"
-                            executable.exec("legion-cli set-logo " + next)
-                            refreshTimer.restart()
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.largeSpacing; Layout.rightMargin: Kirigami.Units.largeSpacing; implicitHeight: 1; color: Kirigami.Theme.alternateBackgroundColor }
-
-                    QuickControl {
-                        iconSource: "battery-good-charging-symbolic"
-                        label: "Charge Limit"
-                        valueText: {
-                            if (root.chargeLimit === "") return "100%"
-                            return root.chargeLimit + "%"
-                        }
-                        valueColor: root.chargeLimit !== "" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
-                        onClicked: {
-                            root._lastWriteTime = Date.now()
-                            var limits = [100, 80, 60]
-                            var cur = parseInt(root.chargeLimit) || 100
-                            var idx = limits.indexOf(cur)
-                            if (idx < 0) idx = 0
-                            var next = limits[(idx + 1) % limits.length]
-                            executable.exec("legion-cli charge-limit " + next)
-                            refreshTimer.restart()
-                        }
+                }
+                QuickControl {
+                    iconSource: Qt.resolvedUrl("icons/charge-limit.svg")
+                    label: "Charge Limit"
+                    valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit + "%"
+                    valueColor: root.chargeLimit !== "" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
+                    onClicked: {
+                        root._lastWriteTime = Date.now()
+                        var limits = [100, 80, 60]
+                        var cur = parseInt(root.chargeLimit) || 100
+                        var idx = limits.indexOf(cur)
+                        if (idx < 0) idx = 0
+                        var next = limits[(idx + 1) % limits.length]
+                        executable.exec(root.cliCommand + " charge-limit " + next)
+                        refreshTimer.restart()
                     }
                 }
             }
 
-            // === FOOTER ===
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-
-                QQC2.Button {
-                    text: "Open Settings"
-                    icon.name: "preferences-system"
-                    onClicked: executable.exec("legion-settings")
-                }
-
-                Item { Layout.fillWidth: true }
-
-                QQC2.Label {
-                    text: root.cpuName
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    opacity: 0.5
-                }
-            }
         }
     }
 
@@ -379,8 +237,8 @@ PlasmoidItem {
         interval: root.refreshInterval * 1000
         connectedSources: [sensorCmd]
 
-        // Resolve poll script: use Plasmoid internal file path
-        property string sensorCmd: "bash " + Plasmoid.file("contents/ui/legion-poll.sh")
+        // Resolve the helper relative to this QML file in Plasma 6.
+        property string sensorCmd: "bash " + Qt.resolvedUrl("legion-poll.sh").toString().replace("file://", "")
 
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"]
@@ -388,9 +246,8 @@ PlasmoidItem {
                 root.daemonOnline = false
                 return
             }
-            root.daemonOnline = true
-
             var lines = stdout.split("\n")
+            var pollSucceeded = false
             for (var i = 0; i < lines.length; i++) {
                 var line = lines[i].trim()
                 if (!line) continue
@@ -403,6 +260,13 @@ PlasmoidItem {
                 var writeGuard = (Date.now() - root._lastWriteTime) < 2500
 
                 switch (key) {
+                    case "LEGION_OK":
+                        pollSucceeded = val === "1"
+                        break
+                    case "LEGION_DAEMON_OFFLINE":
+                    case "LEGION_CLI_NOT_FOUND":
+                        pollSucceeded = false
+                        break
                     case "CPU_TEMP":
                         if (!writeGuard) cpuTemp = val
                         break
@@ -430,6 +294,9 @@ PlasmoidItem {
                     case "CHARGE_LIMIT":
                         chargeLimit = val === "100" ? "" : val
                         break
+                    case "BAT_POWER":
+                        batWatts = val
+                        break
                     case "PROFILE":
                         if (!writeGuard) profile = val
                         break
@@ -439,20 +306,41 @@ PlasmoidItem {
                     case "LOGO":
                         if (!writeGuard) logoOn = val === "on" ? "true" : "false"
                         break
-                    case "CPU_NAME":
-                        cpuName = val
-                        break
-                    case "GPU_NAME":
-                        gpuName = val
-                        break
                 }
             }
+            root.daemonOnline = pollSucceeded
 
             // Push CPU temp to history for sparkline
             if (cpuTemp !== "--") {
-                tempHistory.push(parseFloat(cpuTemp))
-                if (tempHistory.length > 30) tempHistory.shift()
+                var h = root.tempHistory.slice()
+                h.push(parseFloat(cpuTemp))
+                if (h.length > 30) h.shift()
+                root.tempHistory = h
             }
+        }
+    }
+
+    // === ONE-SHOT STATIC INFO (CPU/GPU names) ===
+    Plasma5Support.DataSource {
+        id: infoSource
+        engine: "executable"
+        connectedSources: ["bash " + Qt.resolvedUrl("legion-info.sh").toString().replace("file://", "")]
+        onNewData: function(sourceName, data) {
+            var stdout = data["stdout"]
+            if (!stdout) return
+            var lines = stdout.split("\n")
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim()
+                var eq = line.indexOf("=")
+                if (eq < 1) continue
+                var key = line.substring(0, eq)
+                var val = line.substring(eq + 1).trim()
+                switch (key) {
+                    case "CPU_NAME": cpuName = val; break
+                    case "GPU_NAME": gpuName = val; break
+                }
+            }
+            disconnectSource(sourceName)
         }
     }
 

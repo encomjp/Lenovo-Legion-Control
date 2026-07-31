@@ -10,6 +10,8 @@ Item {
     implicitHeight: 24
     implicitWidth: 80
 
+    onPointsChanged: updatePath()
+
     function push(val) {
         points.push(val)
         if (points.length > maxPoints) points.shift()

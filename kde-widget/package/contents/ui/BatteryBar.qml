@@ -6,7 +6,7 @@ import org.kde.kirigami 2.20 as Kirigami
 Item {
     id: bat
     property string percentage: "--"
-    property string status: "Unknown"
+    property string batteryStatus: "Unknown"
     property string watts: "--"
     property string chargeLimit: ""
 
@@ -15,7 +15,7 @@ Item {
 
     readonly property int pct: parseInt(percentage) || 0
     readonly property color fillColor: {
-        if (status === "Charging") return "#44d62c"
+        if (batteryStatus === "Charging") return "#44d62c"
         if (pct <= 15) return Kirigami.Theme.negativeTextColor
         if (pct <= 30) return Kirigami.Theme.neutralTextColor
         return "#44d62c"
@@ -29,17 +29,18 @@ Item {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.Icon {
-                source: status === "Charging" ? "battery-charging" : "battery"
+            Image {
+                source: Qt.resolvedUrl("icons/battery.svg")
+                sourceSize: Qt.size(18, 18)
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
             }
 
             QQC2.Label {
                 text: {
-                    if (status === "Charging") return "Battery — Charging"
-                    if (status === "Not charging") return "Battery — Full (Limit)"
-                    if (status === "Full") return "Battery — Full"
+                    if (batteryStatus === "Charging") return "Battery — Charging"
+                    if (batteryStatus === "Not charging") return "Battery — Full (Limit)"
+                    if (batteryStatus === "Full") return "Battery — Full"
                     return "Battery — Discharging"
                 }
                 font.weight: Font.DemiBold
@@ -48,10 +49,10 @@ Item {
             Item { Layout.fillWidth: true }
 
             QQC2.Label {
-                visible: watts !== "--" && watts !== "0.0" && (status === "Charging" || status === "Discharging")
-                text: (status === "Charging" ? "+" : "−") + watts + " W"
+                visible: watts !== "--" && watts !== "0.0" && (batteryStatus === "Charging" || batteryStatus === "Discharging")
+                text: (batteryStatus === "Charging" ? "+" : "−") + watts + " W"
                 font.bold: true
-                color: status === "Charging" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
+                color: batteryStatus === "Charging" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
             }
 
             QQC2.Label {
@@ -81,7 +82,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: 400 } }
 
                 SequentialAnimation on opacity {
-                    running: status === "Charging"
+                    running: batteryStatus === "Charging"
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.7; duration: 1200 }
                     NumberAnimation { to: 1.0; duration: 1200 }

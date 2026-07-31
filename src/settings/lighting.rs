@@ -274,10 +274,11 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     );
 
     let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
-    bright.set_value(cfg.brightness.max(1) as f64);
+    bright.set_value(cfg.brightness as f64);
     bright.set_draw_value(true);
     bright.set_digits(0);
     bright.set_hexpand(true);
+    bright.set_width_request(180);
     let bright_suppress = Rc::new(Cell::new(true));
     let bright_suppress_c = bright_suppress.clone();
     let bri_ticket = Rc::new(Cell::new(0u32));
@@ -352,15 +353,6 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
         "Writes one effect to keyboard, front, rear, and logo together",
     );
     all_card.append(&zone_editor(RgbZone::All, &cfg.keyboard, false, &toast));
-    let hint = gtk::Label::new(Some("Same effect on keyboard, front, rear, and logo."));
-    hint.add_css_class("hint");
-    hint.set_halign(Align::Start);
-    hint.set_wrap(true);
-    tip(
-        &hint,
-        "Applies one effect to every Spectrum surface at once",
-    );
-    all_card.append(&hint);
     box_.append(&sec_all);
 
     let (sec_r, restore_card) = section_tip(

@@ -5,7 +5,7 @@ import org.kde.kirigami 2.20 as Kirigami
 
 Item {
     id: qc
-    property string iconSource: "system-run"
+    property string iconSource: "icons/profile.svg"
     property string label: "Profile"
     property string valueText: "--"
     property color valueColor: Kirigami.Theme.positiveTextColor
@@ -37,8 +37,9 @@ Item {
             anchors.leftMargin: Kirigami.Units.largeSpacing
             anchors.rightMargin: Kirigami.Units.largeSpacing
 
-            Kirigami.Icon {
-                source: qc.iconSource
+            Image {
+                source: Qt.resolvedUrl(qc.iconSource)
+                sourceSize: Qt.size(18, 18)
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 opacity: qc.on ? 0.9 : 0.4
@@ -59,11 +60,15 @@ Item {
                 color: qc.valueColor
             }
 
-            Kirigami.Icon {
-                source: "go-next-symbolic"
+            Item {
                 Layout.preferredWidth: 12
                 Layout.preferredHeight: 12
-                opacity: 0.3
+                opacity: 0.35
+                Image {
+                    anchors.fill: parent
+                    source: Qt.resolvedUrl("icons/chevron.svg")
+                    sourceSize: Qt.size(12, 12)
+                }
             }
         }
     }
