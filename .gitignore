@@ -1,0 +1,19 @@
+/target/
+
+# Editor metadata
+.DS_Store
+*.swp
+*.swo
+
+# Qt/QML generated cache files
+*.qmlc
+
+# Local build and packaging output
+*.rpm
+*.deb
+*.AppImage
+
+# Local environment files
+.env
+.env.*
+!.env.example
