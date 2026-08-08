@@ -1,4 +1,15 @@
 /target/
+packaging/out/
+docs/superpowers/
+
+# Kernel driver build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+Module.symvers
+modules.order
 
 # Editor metadata
 .DS_Store

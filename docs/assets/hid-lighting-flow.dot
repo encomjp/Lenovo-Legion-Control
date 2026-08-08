@@ -1,0 +1,95 @@
+digraph hid_lighting_flow {
+    graph [
+        label="Lenovo Legion HID lighting flow\nSource-verified path; packet layout omitted",
+        labelloc=t,
+        labeljust=l,
+        rankdir=LR,
+        bgcolor="white",
+        fontname="sans-serif",
+        fontsize=17,
+        nodesep=0.25,
+        ranksep=0.5,
+        pad=0.2
+    ];
+
+    node [
+        shape=box,
+        style="rounded,filled",
+        fontname="sans-serif",
+        fontsize=11,
+        margin="0.14,0.09",
+        color="#334155",
+        penwidth=1.3
+    ];
+
+    edge [
+        fontname="sans-serif",
+        fontsize=9,
+        color="#475569",
+        penwidth=1.1,
+        arrowsize=0.7
+    ];
+
+    client [
+        label="Clients\nCLI · settings · KDE widget\nwidget via CLI",
+        fillcolor="#dbeafe",
+        color="#2563eb"
+    ];
+    command_path [
+        label="Keyboard module\nlighting command",
+        fillcolor="#dbeafe",
+        color="#2563eb"
+    ];
+    hidraw [
+        label="Linux hidraw\n/dev/hidrawN",
+        fillcolor="#f1f5f9",
+        color="#64748b"
+    ];
+    spectrum [
+        label="Spectrum responder\nprimary match: VID/PID 048d:c197\ncheck marker 06 89 ff when available\nfall back only if marker unavailable",
+        fillcolor="#fef3c7",
+        color="#d97706"
+    ];
+    lighting [
+        label="Lighting\neffects, zones, brightness, logo",
+        fillcolor="#fef3c7",
+        color="#d97706"
+    ];
+
+    client -> command_path [label="lighting request"];
+    command_path -> hidraw [label="open /dev/hidrawN"];
+    hidraw -> spectrum [label="HID feature report\nID 0x07 · 960 bytes"];
+    spectrum -> lighting [label="keyboard lighting"];
+
+    subgraph cluster_legend {
+        label="Legend";
+        labelloc=t;
+        labeljust=l;
+        fontname="sans-serif";
+        fontsize=10;
+        color="#cbd5e1";
+        style="rounded,dashed";
+
+        legend_linux [
+            label="Standard Linux interface",
+            fillcolor="#f1f5f9",
+            color="#64748b",
+            fontsize=9
+        ];
+        legend_project [
+            label="Project behavior",
+            fillcolor="#dbeafe",
+            color="#2563eb",
+            fontsize=9
+        ];
+        legend_hardware [
+            label="Hardware-specific behavior",
+            fillcolor="#fef3c7",
+            color="#d97706",
+            fontsize=9
+        ];
+
+        legend_linux -> legend_project [style=invis];
+        legend_project -> legend_hardware [style=invis];
+    }
+}

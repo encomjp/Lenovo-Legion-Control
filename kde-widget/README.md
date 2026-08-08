@@ -3,14 +3,13 @@
 Live telemetry and quick controls for Lenovo Legion laptops.
 
 ## Features
-- **Circular temperature gauges** — animated SVG arcs with color zones (green/yellow/orange/red)
-- **Real-time sparklines** — mini history charts for CPU temperature (last 30 samples)
-- **Metric cards** — CPU, dGPU, fan RPMs with icons and color-coded values
-- **Battery bar** — animated fill with charging pulse and charge limit badge
-- **Quick controls** — click to cycle profile, fan, KB brightness, logo, charge limit
-- **Daemon status** — green/red dot showing if legion-daemon is connected
-- **Compact panel mode** — small icon + color-coded CPU temp in your panel
-- **Configurable** — refresh interval, gauges toggle, sparklines toggle
+- **Circular temperature gauges** — optional animated CPU and dGPU temperature arcs with color zones (green/yellow/orange/red)
+- **System Monitor card** — CPU and dGPU rows with temperatures, fan values, and dGPU power when available
+- **Battery bar** — animated fill with charging pulse, watts, and charge-limit label
+- **Quick controls** — click to cycle Profile, CPU Fan, GPU Fan, and Charge Limit
+- **Compact panel mode** — small icon + color-coded CPU temperature in your panel
+- **Daemon status** — compact tooltip status for the legion-control service
+- **Configurable** — refresh interval, gauges toggle, and a sparkline setting (the current main view does not instantiate a sparkline)
 - **Theme-aware** — uses Kirigami colors, adapts to Breeze Dark / Light
 
 ## Install
@@ -34,7 +33,7 @@ Then right-click desktop → Add Widgets → search "Legion Control".
 
 ## Requirements
 - KDE Plasma 6 (tested on 6.7.3)
-- `legion-cli` installed at `/usr/local/bin/legion-cli`
+- `legion-cli` installed in one of the widget's searched paths: `/usr/local/bin/legion-cli`, `/usr/bin/legion-cli`, or `~/.local/bin/legion-cli`
 - `legion-daemon` running (`systemctl is-active legion-control`)
 
 ## Files
@@ -51,8 +50,8 @@ kde-widget/
         └── ui/
             ├── main.qml          # Main plasmoid
             ├── Gauge.qml          # Circular temp gauge
-            ├── Sparkline.qml      # Mini history chart
-            ├── MetricCard.qml     # Sensor row with icon
+            ├── Sparkline.qml      # Reusable mini history chart (not instantiated by main.qml)
+            ├── MetricCard.qml     # Reusable metric card (not instantiated by main.qml)
             ├── QuickControl.qml   # Clickable cycle control
             ├── BatteryBar.qml     # Animated battery section
             └── legion-poll.sh     # Sensor data poller
