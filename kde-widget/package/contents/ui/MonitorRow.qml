@@ -1,5 +1,4 @@
 import QtQuick 2.15
-import QtQuick.Controls 2.15 as QQC2
 import QtQuick.Layouts 1.15
 import org.kde.kirigami 2.20 as Kirigami
 
@@ -9,66 +8,79 @@ Item {
     property string label: ""
     property string temperature: "--"
     property string secondaryValue: ""
-    property string tertiaryValue: ""
     property string fanValue: ""
     property bool muted: false
 
-    implicitHeight: rowLayout.implicitHeight + Kirigami.Units.smallSpacing * 2
+    implicitHeight: 30
     Layout.fillWidth: true
     visible: label !== ""
 
+    readonly property color tempColor: {
+        if (row.temperature === "--" || row.temperature === "—") return Kirigami.Theme.disabledTextColor
+        var t = parseFloat(row.temperature)
+        if (isNaN(t)) return Kirigami.Theme.disabledTextColor
+        if (t >= 90) return "#e8566e"
+        if (t >= 80) return "#d9981a"
+        return Kirigami.Theme.textColor
+    }
+
     RowLayout {
-        id: rowLayout
         anchors.fill: parent
-        anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.rightMargin: Kirigami.Units.largeSpacing
-        spacing: Kirigami.Units.largeSpacing
+        anchors.leftMargin: 2
+        anchors.rightMargin: 2
+        spacing: Kirigami.Units.smallSpacing + 2
 
-        Image {
+        Kirigami.Icon {
             source: row.iconSource
-            sourceSize: Qt.size(18, 18)
-            Layout.preferredWidth: 18
-            Layout.preferredHeight: 18
-            opacity: row.muted ? 0.42 : 0.82
+            isMask: true
+            color: Kirigami.Theme.textColor
+            implicitWidth: 14
+            implicitHeight: 14
+            Layout.alignment: Qt.AlignVCenter
+            opacity: row.muted ? 0.30 : 0.55
         }
 
-        Kirigami.Heading {
+        Text {
             text: row.label
-            level: 5
+            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+            font.weight: Font.Medium
             Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
             elide: Text.ElideRight
-            opacity: row.muted ? 0.55 : 1.0
+            color: Kirigami.Theme.textColor
+            opacity: row.muted ? 0.40 : 0.92
         }
 
-        Kirigami.Heading {
-            text: row.temperature === "--" ? "--" : row.temperature + "°C"
-            level: 5
-            Layout.preferredWidth: 62
-            horizontalAlignment: Text.AlignRight
-            color: row.temperature === "--" ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
-        }
-
-        QQC2.Label {
-            text: row.secondaryValue
-            Layout.preferredWidth: 62
-            horizontalAlignment: Text.AlignRight
-            opacity: 0.65
-            visible: text !== ""
-        }
-
-        QQC2.Label {
-            text: row.tertiaryValue
-            Layout.preferredWidth: 62
-            horizontalAlignment: Text.AlignRight
-            opacity: 0.65
-            visible: text !== ""
-        }
-
-        QQC2.Label {
-            text: row.fanValue
-            Layout.preferredWidth: 58
-            horizontalAlignment: Text.AlignRight
+        Text {
+            text: row.temperature === "--" ? "—" : row.temperature + "°C"
+            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 1
             font.weight: Font.DemiBold
+            Layout.alignment: Qt.AlignVCenter
+            horizontalAlignment: Text.AlignRight
+            color: row.tempColor
+            opacity: row.muted ? 0.45 : 1.0
+            Behavior on color { ColorAnimation { duration: 220 } }
+        }
+
+        Text {
+            text: row.secondaryValue
+            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            Layout.preferredWidth: 52
+            Layout.alignment: Qt.AlignVCenter
+            horizontalAlignment: Text.AlignRight
+            color: Kirigami.Theme.textColor
+            opacity: 0.62
+            visible: text !== ""
+        }
+
+        Text {
+            text: row.fanValue
+            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            Layout.preferredWidth: 76
+            Layout.alignment: Qt.AlignVCenter
+            horizontalAlignment: Text.AlignRight
+            color: Kirigami.Theme.textColor
+            opacity: row.muted ? 0.35 : 0.72
             visible: text !== ""
         }
     }

@@ -1,112 +1,110 @@
 digraph legion_control_overview {
     graph [
         rankdir=LR,
-        bgcolor="#0f172a",
+        bgcolor="#0c0a09",
         pad="0.18",
         nodesep="0.28",
-        ranksep="0.5",
+        ranksep="0.55",
         splines=polyline,
-        fontname="Inter,Arial,sans-serif",
-        fontcolor="#e2e8f0",
-        label="Lenovo Legion Control · normal runtime path",
+        fontname="JetBrains Mono,ui-monospace,monospace",
+        fontcolor="#e7e0d6",
+        label="LEGION CONTROL  ·  bench console  ·  normal runtime path",
         labelloc=t,
         labeljust=l,
-        fontsize=18
+        fontsize=13
     ];
 
     node [
         shape=box,
         style="rounded,filled",
-        fontname="Inter,Arial,sans-serif",
+        fontname="Inter,ui-sans-serif,sans-serif",
         fontsize=9,
         margin="0.12,0.07",
-        color="#334155",
-        fontcolor="#f8fafc",
-        penwidth=1.3
+        penwidth=1.2
     ];
 
     edge [
-        fontname="Inter,Arial,sans-serif",
-        fontsize=8,
-        color="#94a3b8",
-        fontcolor="#cbd5e1",
-        penwidth=1.15,
-        arrowsize=0.62
+        fontname="JetBrains Mono,ui-monospace,monospace",
+        fontsize=7.5,
+        color="#6b7280",
+        fontcolor="#9ca3af",
+        penwidth=1.05,
+        arrowsize=0.58
     ];
 
     subgraph cluster_userspace {
-        label="USER INTERFACES";
-        color="#22d3ee";
-        fontcolor="#67e8f9";
+        label="OPERATOR";
+        color="#c8102e";
+        fontcolor="#fca5a5";
         style="rounded,dashed";
-        cli [label="legion-cli", fillcolor="#155e75", color="#22d3ee"];
-        settings [label="legion-settings\nGTK4", fillcolor="#155e75", color="#22d3ee"];
-        kde [label="KDE widget", fillcolor="#155e75", color="#22d3ee"];
+        cli [label="legion-cli", fillcolor="#450a0a", color="#c8102e", fontcolor="#fecaca"];
+        settings [label="legion-settings  ·  GTK4", fillcolor="#450a0a", color="#c8102e", fontcolor="#fecaca"];
+        kde [label="KDE widget", fillcolor="#450a0a", color="#c8102e", fontcolor="#fecaca"];
         cli -> settings [style=invis, weight=10];
         settings -> kde [style=invis, weight=10];
     }
 
     subgraph cluster_service {
         label="DAEMON / IPC";
-        color="#a78bfa";
-        fontcolor="#c4b5fd";
+        color="#6b7280";
+        fontcolor="#d6d3d1";
         style="rounded,dashed";
-        socket [label="Unix socket\n/run/legion-control.socket", fillcolor="#312e81", color="#a78bfa"];
-        daemon [label="legion-daemon\nusually root", fillcolor="#4c1d95", color="#a78bfa"];
-        socket -> daemon [label="bincode command / response"];
+        socket [label="Unix socket\n/run/legion-control.socket", fillcolor="#1c1917", color="#6b7280", fontcolor="#e7e5e4"];
+        daemon [label="legion-daemon  ·  root", fillcolor="#292524", color="#a8a29e", fontcolor="#fafaf9"];
+        socket -> daemon [label="bincode  ·  command / response", color="#a8a29e", fontcolor="#a8a29e"];
     }
 
     subgraph cluster_domains {
         label="CONTROL / TELEMETRY";
-        color="#f59e0b";
-        fontcolor="#fbbf24";
+        color="#d9981a";
+        fontcolor="#fde68a";
         style="rounded,dashed";
-        controls [label="Controls", fillcolor="#78350f", color="#f59e0b"];
-        telemetry [label="Telemetry", fillcolor="#78350f", color="#f59e0b"];
+        controls [label="CONTROLS", fillcolor="#451a03", color="#d9981a", fontcolor="#fde68a"];
+        telemetry [label="TELEMETRY", fillcolor="#451a03", color="#d9981a", fontcolor="#fde68a"];
         controls -> telemetry [style=invis, weight=10];
     }
 
     subgraph cluster_linux {
         label="LINUX INTERFACES";
-        color="#38bdf8";
-        fontcolor="#7dd3fc";
+        color="#78716c";
+        fontcolor="#d6d3d1";
         style="rounded,dashed";
-        sysfs [label="sysfs / hwmon\nplatform + battery", fillcolor="#075985", color="#38bdf8"];
-        wmi [label="WMI\nplatform controls", fillcolor="#075985", color="#38bdf8"];
-        nvidia [label="nvidia-smi", fillcolor="#075985", color="#38bdf8"];
-        hidraw [label="/dev/hidrawN\nUSB HID", fillcolor="#075985", color="#38bdf8"];
-        smu [label="optional\nryzen_smu", fillcolor="#075985", color="#38bdf8"];
+        sysfs [label="sysfs / hwmon\nplatform  ·  battery", fillcolor="#1c1917", color="#78716c", fontcolor="#e7e5e4"];
+        wmi [label="WMI\nplatform", fillcolor="#1c1917", color="#78716c", fontcolor="#e7e5e4"];
+        nvidia [label="nvidia-smi", fillcolor="#1c1917", color="#78716c", fontcolor="#e7e5e4"];
+        hidraw [label="/dev/hidrawN  ·  USB HID", fillcolor="#1c1917", color="#78716c", fontcolor="#e7e5e4"];
+        smu [label="optional  ·  ryzen_smu", fillcolor="#1c1917", color="#78716c", fontcolor="#e7e5e4"];
         sysfs -> wmi [style=invis, weight=10];
         wmi -> nvidia [style=invis, weight=10];
         nvidia -> hidraw [style=invis, weight=10];
         hidraw -> smu [style=invis, weight=10];
     }
 
-    hardware [label="Legion hardware\nEC · sensors · Spectrum keyboard", fillcolor="#92400e", color="#f59e0b"];
+    hardware [label="LEGION HARDWARE\nEC  ·  sensors  ·  Spectrum 048d:c197", fillcolor="#7f1d1d", color="#c8102e", fontcolor="#fecaca"];
 
     subgraph cluster_setup {
-        label="SETUP / POLICYKIT";
-        color="#fb923c";
-        fontcolor="#fdba74";
+        label="SETUP";
+        color="#57534e";
+        fontcolor="#a8a29e";
         style="rounded,dashed";
-        setup [label="legion-control-setup\nfixed setup actions", fillcolor="#7c2d12", color="#fb923c"];
-        polkit [label="PolicyKit\nauthentication", fillcolor="#7c2d12", color="#fb923c"];
-        setup -> polkit [label="authorize"];
+        setup [label="legion-control-setup\nfixed actions", fillcolor="#1c1917", color="#57534e", fontcolor="#d6d3d1"];
+        polkit [label="PolicyKit", fillcolor="#1c1917", color="#57534e", fontcolor="#d6d3d1"];
+        setup -> polkit [label="authorize", color="#78716c", fontcolor="#78716c"];
     }
 
-    cli -> socket [label="Unix socket IPC\nread / write"];
-    settings -> socket [label="Unix socket IPC\nread / write"];
-    kde -> cli [label="executes CLI", style=dashed, constraint=false];
+    cli -> socket [label="IPC  ·  read / write"];
+    settings -> socket [label="IPC  ·  read / write"];
+    kde -> cli [label="executes CLI", style=dashed, constraint=false, color="#78716c", fontcolor="#78716c"];
 
-    daemon -> controls [label="read / write"];
-    daemon -> telemetry [label="read"];
-    controls -> sysfs [label="write", color="#fb923c", fontcolor="#fdba74"];
-    controls -> wmi [label="write", color="#fb923c", fontcolor="#fdba74"];
+    daemon -> controls [label="read / write", color="#d9981a", fontcolor="#d9981a"];
+    daemon -> telemetry [label="read", color="#d6d3d1", fontcolor="#a8a29e"];
+    controls -> sysfs [label="write", color="#c8102e", fontcolor="#fca5a5"];
+    controls -> wmi [label="write", color="#c8102e", fontcolor="#fca5a5"];
     telemetry -> sysfs [label="read"];
     telemetry -> wmi [label="read"];
     telemetry -> nvidia [label="read"];
-    daemon -> hidraw [label="RGB / recovery", color="#c084fc", fontcolor="#d8b4fe"];
-    daemon -> smu [label="read / write", color="#fb923c", fontcolor="#fdba74"];
+    daemon -> hidraw [label="RGB / recovery", color="#57534e", fontcolor="#a8a29e"];
+    daemon -> smu [label="read / write", color="#c8102e", fontcolor="#fca5a5"];
     sysfs -> hardware;
     wmi -> hardware;
     nvidia -> hardware;

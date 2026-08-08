@@ -1,79 +1,238 @@
-/* Legion Control — friendly standalone shell */
+/* Legion Control — Garage Lab Console */
 
+/* ── Palette + Glass — Alacritty-clean transparency ─────────────── */
 @define-color accent_color #c8102e;
 @define-color accent_bg_color #c8102e;
 @define-color accent_fg_color #ffffff;
+@define-color lab_amber #d9981a;
+@define-color lab_amber_fg #1a1404;
+@define-color lab_steel #6b7280;
+@define-color lab_surface #f3eee6;
+@define-color lab_rule alpha(currentColor, 0.10);
+@define-color lab_rule_strong alpha(currentColor, 0.14);
+@define-color glass_bg alpha(@theme_base_color, 0.38);
+@define-color glass_border alpha(white, 0.11);
+@define-color glass_highlight alpha(white, 0.07);
 
-.numeric {
-    font-feature-settings: "tnum";
-    font-variant-numeric: tabular-nums;
+.glass-card {
+    background: alpha(@theme_base_color, 0.38);
+    border: 1px solid alpha(white, 0.11);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px alpha(black, 0.10), 0 1px 0 alpha(white, 0.07) inset;
 }
 
-/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.glass-panel {
+    background: alpha(@theme_base_color, 0.32);
+    border: 1px solid alpha(white, 0.09);
+    border-radius: 14px;
+    box-shadow: 0 6px 24px alpha(black, 0.08);
+}
 
+/* ── Type ─────────────────────────────────────────────────────────── */
+.numeric {
+    font-feature-settings: "tnum" 1, "ss01" 1;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+window.background {
+    background-color: alpha(@theme_bg_color, 0.93);
+}
+
+window {
+    background-color: transparent;
+    opacity: 0.985;
+}
+
+.navigation-sidebar:not(.sidebar-child):not(.nav-glass) row {
+    min-height: 44px;
+}
+
+/* ── Sidebar — instrument rail ───────────────────────────────────── */
 .sidebar-brand {
-    padding: 24px 20px 12px;
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid alpha(white, 0.07);
 }
 
 .sidebar-brand .brand-name {
-    font-size: 1.2rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-size: 1.02rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    text-transform: uppercase;
 }
 
 .sidebar-brand .brand-sub {
-    font-size: 0.78rem;
-    opacity: 0.48;
-    margin-top: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.42;
+    margin-top: 3px;
 }
 
 .sidebar-foot {
-    padding: 12px 16px 18px;
-    border-top: 1px solid alpha(currentColor, 0.08);
+    padding: 12px 14px 14px;
+    border-top: 1px solid alpha(white, 0.09);
+    background: alpha(@theme_base_color, 0.36);
+    border-radius: 14px;
+    margin: 8px 10px 10px 10px;
+    box-shadow: 0 8px 24px alpha(black, 0.08), 0 1px 0 alpha(white, 0.06) inset;
 }
 
 .sidebar-foot .conn-label {
-    font-size: 0.78rem;
-    font-weight: 600;
+    font-size: 0.70rem;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
 }
 
 .sidebar-foot .conn-sub {
-    font-size: 0.72rem;
-    opacity: 0.45;
+    font-size: 0.68rem;
+    opacity: 0.50;
     margin-top: 2px;
+    line-height: 1.3;
 }
 
 .conn-dot {
-    min-width: 8px;
-    min-height: 8px;
+    min-width: 10px;
+    min-height: 10px;
     border-radius: 99px;
-    background: #6bcf7f;
-    margin-top: 4px;
-    margin-right: 2px;
+    background: #2ecc71;
+    box-shadow: 0 0 0 4px alpha(#2ecc71, 0.18);
+    margin-top: 3px;
+    margin-right: 4px;
 }
 
 .conn-dot.off {
     background: #e86a6a;
+    box-shadow: 0 0 0 4px alpha(#e86a6a, 0.18);
 }
 
-/* ── Pages ───────────────────────────────────────────────────────────────── */
+.navigation-sidebar row {
+    border-radius: 10px;
+    margin: 1px 8px;
+    border: 1px solid transparent;
+    min-height: 42px;
+    padding: 2px 0;
+    transition: background 140ms ease, border-color 140ms ease;
+}
 
+.navigation-sidebar row:hover {
+    background: alpha(white, 0.07);
+    border-color: alpha(white, 0.06);
+}
+
+.navigation-sidebar row:selected {
+    background: alpha(@theme_selected_bg_color, 0.18);
+    border-color: alpha(@theme_selected_bg_color, 0.22);
+    box-shadow: none;
+}
+
+.navigation-sidebar row:selected label.title {
+    color: @theme_selected_fg_color;
+    font-weight: 700;
+}
+
+.navigation-sidebar row:selected label.subtitle {
+    color: alpha(@theme_selected_fg_color, 0.70);
+    opacity: 1.0;
+}
+
+.navigation-sidebar row:selected image {
+    color: @theme_selected_fg_color;
+}
+
+.sidebar-section {
+    padding: 7px 14px 4px 14px;
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    opacity: 0.72;
+    min-height: 20px;
+    font-style: italic;
+}
+
+.sidebar-child row {
+    margin: 1px 8px 1px 14px;
+    min-height: 40px;
+    padding: 1px 0;
+    border-radius: 9px;
+}
+
+.sidebar-child row label.title {
+    font-size: 0.96rem;
+    font-weight: 700;
+}
+
+.sidebar-child row label.subtitle {
+    font-size: 0.76rem;
+    opacity: 0.62;
+}
+
+.sidebar-child row:selected {
+    background: alpha(@accent_bg_color, 0.12);
+    border-color: alpha(@accent_bg_color, 0.16);
+}
+
+.home-btn {
+    min-height: 30px;
+    border-radius: 8px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    font-weight: 700;
+}
+
+.home-btn:hover {
+    background: alpha(@theme_base_color, 0.42);
+    border-color: alpha(white, 0.08);
+}
+
+.home-btn:active {
+    background: alpha(@theme_selected_bg_color, 0.14);
+}
+
+.home-btn label.home-label {
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.92;
+}
+
+.sidebar-sep {
+    opacity: 0.45;
+}
+
+.sidebar-chevron {
+    opacity: 0.46;
+    transition: transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.sidebar-chevron.open {
+    transform: rotate(90deg);
+    opacity: 0.78;
+}
+
+/* ── Pages ────────────────────────────────────────────────────────── */
 .page {
-    padding: 20px 28px 48px;
+    padding: 18px 22px 40px;
 }
 
 .page-title {
-    font-size: 1.55rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-size: 1.45rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    text-transform: uppercase;
 }
 
 .page-sub {
-    font-size: 0.92rem;
-    opacity: 0.55;
-    margin-top: 2px;
-    margin-bottom: 4px;
-    line-height: 1.35;
+    font-size: 0.86rem;
+    opacity: 0.58;
+    margin-top: 3px;
+    margin-bottom: 2px;
+    line-height: 1.4;
 }
 
 .page-sub-solo {
@@ -81,29 +240,49 @@
     margin-bottom: 4px;
 }
 
-/* Prefer Adwaita PreferencesGroup spacing over custom cards where used */
+.page-lede {
+    font-size: 0.88rem;
+    opacity: 0.62;
+    margin-bottom: 10px;
+    line-height: 1.45;
+}
+
+/* ── Sections — rule-led, not card-only ───────────────────────── */
 .section {
-    margin-bottom: 24px;
+    margin-bottom: 22px;
+}
+
+.section-head {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid alpha(currentColor, 0.09);
 }
 
 .section-label {
-    font-size: 0.72rem;
-    font-weight: 650;
-    letter-spacing: 0.07em;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    opacity: 0.42;
-    margin-bottom: 10px;
+    opacity: 0.52;
+}
+
+.section-sub {
+    font-size: 0.78rem;
+    opacity: 0.55;
+    margin-top: 3px;
+    line-height: 1.35;
 }
 
 .card {
-    background: alpha(currentColor, 0.045);
-    border: 1px solid alpha(currentColor, 0.06);
+    background: alpha(@theme_base_color, 0.36);
+    border: 1px solid alpha(white, 0.11);
     border-radius: 16px;
-    padding: 18px 20px;
+    padding: 16px 16px;
+    box-shadow: 0 10px 32px alpha(black, 0.08), 0 1px 0 alpha(white, 0.06) inset;
 }
 
 .card + .card {
-    margin-top: 12px;
+    margin-top: 10px;
 }
 
 .card-head {
@@ -111,39 +290,49 @@
 }
 
 .card-head-title {
-    font-weight: 650;
-    font-size: 1.02rem;
+    font-weight: 750;
+    font-size: 0.96rem;
+    letter-spacing: -0.02em;
+}
+
+/* Alt: inset control strip — for dense operate rows */
+.card.inset {
+    background: alpha(currentColor, 0.02);
+    border-style: dashed;
 }
 
 .row {
-    margin-bottom: 14px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
 }
 
 .row:last-child {
     margin-bottom: 0;
 }
 
+.row:hover {
+    background: alpha(currentColor, 0.03);
+    border-color: alpha(currentColor, 0.08);
+}
+
 .row-title {
-    font-weight: 600;
-    font-size: 0.95rem;
+    font-weight: 700;
+    font-size: 0.90rem;
+    letter-spacing: -0.01em;
 }
 
 .row-sub {
-    font-size: 0.82rem;
-    opacity: 0.5;
+    font-size: 0.78rem;
+    opacity: 0.55;
     margin-top: 2px;
     line-height: 1.35;
 }
 
-.page-lede {
-    font-size: 0.95rem;
-    opacity: 0.58;
-    margin-bottom: 8px;
-    line-height: 1.4;
-}
-
+/* ── Metric chips — bench readouts ──────────────────────────────── */
 .metric-grid {
-    margin-bottom: 6px;
+    margin-bottom: 10px;
 }
 
 .metric-grid > flowboxchild {
@@ -151,97 +340,143 @@
 }
 
 .metric-chip {
-    background: alpha(currentColor, 0.045);
-    border: 1px solid alpha(currentColor, 0.06);
+    background: alpha(@theme_base_color, 0.38);
+    border: 1px solid alpha(white, 0.11);
+    border-left-width: 3px;
     border-radius: 16px;
-    padding: 14px 16px;
-    transition: background 120ms ease, border-color 120ms ease;
-    min-width: 140px;
+    padding: 12px 14px;
+    min-width: 148px;
+    box-shadow: 0 10px 28px alpha(black, 0.08), 0 1px 0 alpha(white, 0.06) inset;
+    transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
 }
 
 .metric-chip:hover {
-    background: alpha(currentColor, 0.07);
+    border-color: alpha(white, 0.14);
+    background: alpha(@theme_base_color, 0.48);
+    transform: translateY(-1px);
 }
 
 .metric-chip .label {
-    font-size: 0.68rem;
-    font-weight: 650;
-    letter-spacing: 0.07em;
+    font-size: 0.60rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    opacity: 0.45;
+    opacity: 0.44;
 }
 
 .metric-chip .value {
-    font-size: 1.6rem;
-    font-weight: 700;
+    font-size: 1.45rem;
+    font-weight: 800;
     margin-top: 6px;
-    font-feature-settings: "tnum";
+    letter-spacing: -0.04em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .metric-chip .detail {
-    font-size: 0.78rem;
-    opacity: 0.48;
-    margin-top: 3px;
-}
-
-.metric-chip.hot .value {
-    color: #e86a6a;
-}
-
-.metric-chip.warm .value {
-    color: #e6b84d;
-}
-
-/* ── Status pills & buttons ──────────────────────────────────────────────── */
-
-.status-pill {
     font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
+    opacity: 0.52;
+    margin-top: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Left-edge status — steel by default, amber/red by state */
+.metric-chip.hot {
+    border-left-color: #c8102e;
+}
+.metric-chip.hot .value {
+    color: #c8102e;
+}
+
+.metric-chip.warm {
+    border-left-color: #d9981a;
+}
+.metric-chip.warm .value {
+    color: #b7790f;
+}
+
+/* ── Status pills — sharper, technical ──────────────────────────── */
+.status-pill {
+    font-size: 0.64rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     min-width: 36px;
-    min-height: 36px;
-    padding: 0;
-    border-radius: 999px;
-    background: alpha(currentColor, 0.08);
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid alpha(white, 0.09);
+    background: alpha(@theme_base_color, 0.38);
+    box-shadow: 0 4px 14px alpha(black, 0.07);
 }
 
 .status-pill.status-warn,
 .status-pill.status-bad {
-    /* Longer labels ("Needs fix", "Panic") stay pill-shaped */
     padding: 0 10px;
-    min-width: 36px;
 }
 
 .status-ok {
-    color: #6bcf7f;
-    background: alpha(#6bcf7f, 0.14);
+    color: #1a7a3a;
+    background: alpha(#2ecc71, 0.12);
+    border-color: alpha(#2ecc71, 0.22);
 }
 
 .status-warn {
-    color: #e6b84d;
-    background: alpha(#e6b84d, 0.14);
+    color: #8a5a00;
+    background: alpha(#d9981a, 0.14);
+    border-color: alpha(#d9981a, 0.24);
 }
 
 .status-bad {
-    color: #e86a6a;
-    background: alpha(#e86a6a, 0.16);
+    color: #a70e26;
+    background: alpha(#c8102e, 0.10);
+    border-color: alpha(#c8102e, 0.22);
 }
 
 .status-muted {
-    opacity: 0.65;
+    opacity: 0.60;
 }
 
+/* ── Buttons — instrument controls ──────────────────────────────── */
 .pill-btn {
-    min-height: 40px;
-    padding-left: 18px;
-    padding-right: 18px;
-    border-radius: 12px;
-    font-weight: 650;
+    min-height: 36px;
+    padding-left: 16px;
+    padding-right: 16px;
+    border-radius: 10px;
+    font-weight: 750;
+    font-size: 0.88rem;
+    letter-spacing: -0.01em;
+    border: 1px solid alpha(white, 0.09);
+    background: alpha(@theme_base_color, 0.38);
+    box-shadow: 0 4px 14px alpha(black, 0.07);
+    transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+}
+
+.pill-btn:hover {
+    border-color: alpha(currentColor, 0.16);
+}
+
+.pill-btn:active {
+    transform: scale(0.98);
 }
 
 .pill-btn.suggested-action {
     background-color: @accent_bg_color;
     color: @accent_fg_color;
+    border-color: alpha(@accent_bg_color, 0.0);
+}
+
+.pill-btn.suggested-action:hover {
+    background-color: shade(@accent_bg_color, 1.06);
+}
+
+.pill-btn.suggested-action:active {
+    background-color: shade(@accent_bg_color, 0.96);
+}
+
+/* Destructive stays destructive — no red-as-accent inflation */
+button.destructive-action {
+    border-radius: 8px;
+    font-weight: 700;
 }
 
 .btn-row {
@@ -249,22 +484,25 @@
 }
 
 .profile-blurb {
-    font-size: 0.84rem;
-    opacity: 0.55;
+    font-size: 0.80rem;
+    opacity: 0.58;
     margin-top: 4px;
     margin-bottom: 4px;
-    line-height: 1.35;
+    line-height: 1.4;
 }
 
 .ppt-block {
     margin-top: 12px;
     padding-top: 14px;
-    border-top: 1px solid alpha(currentColor, 0.08);
+    border-top: 1px solid alpha(currentColor, 0.10);
 }
 
 .ppt-title {
-    font-weight: 650;
-    font-size: 0.9rem;
+    font-weight: 750;
+    font-size: 0.84rem;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    opacity: 0.72;
     margin-bottom: 4px;
 }
 
@@ -273,19 +511,30 @@
 }
 
 .detail-body {
-    font-size: 0.8rem;
-    opacity: 0.5;
-    font-family: monospace;
+    font-size: 0.74rem;
+    opacity: 0.62;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     margin-top: 8px;
-    line-height: 1.4;
+    line-height: 1.45;
+    background: alpha(currentColor, 0.04);
+    border: 1px solid alpha(currentColor, 0.07);
+    border-radius: 8px;
+    padding: 10px 12px;
 }
 
+/* ── Swatches — tighter, technical ─────────────────────────────── */
 .swatch {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 10px;
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 8px;
     padding: 0;
-    border: 1px solid alpha(currentColor, 0.1);
+    border: 1px solid alpha(currentColor, 0.12);
+    transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.swatch:hover {
+    transform: translateY(-1px);
+    border-color: alpha(currentColor, 0.18);
 }
 
 .swatch-c8102e { background: #c8102e; }
@@ -295,84 +544,214 @@
 .swatch-a020f0 { background: #a020f0; }
 .swatch-00e65a { background: #00e65a; }
 .swatch-ff8c00 { background: #ff8c00; }
-.swatch-000000 { background: #1a1a1e; border-color: alpha(currentColor, 0.25); }
+.swatch-000000 { background: #1a1a1e; border-color: alpha(currentColor, 0.22); }
 
 .charge-pill {
-    min-width: 88px;
-    min-height: 44px;
-    border-radius: 12px;
-    font-weight: 650;
-    font-size: 1rem;
+    min-width: 84px;
+    min-height: 36px;
+    border-radius: 8px;
+    font-weight: 800;
+    font-size: 0.92rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border: 1px solid alpha(currentColor, 0.10);
 }
 
 .charge-pill.suggested-action {
     background-color: @accent_bg_color;
     color: @accent_fg_color;
+    border-color: transparent;
 }
 
 .battery-pct {
-    font-size: 2.75rem;
-    font-weight: 700;
-    font-feature-settings: "tnum";
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .battery-status {
-    opacity: 0.5;
+    opacity: 0.52;
     margin-top: 4px;
+    font-size: 0.82rem;
 }
 
 .battery-details {
-    border-top: 1px solid alpha(currentColor, 0.08);
+    border-top: 1px solid alpha(currentColor, 0.10);
     padding-top: 14px;
 }
 
 .hint {
-    font-size: 0.82rem;
-    opacity: 0.5;
+    font-size: 0.78rem;
+    opacity: 0.54;
     margin-top: 10px;
-    line-height: 1.35;
+    line-height: 1.4;
+    border-left: 2px solid alpha(@accent_bg_color, 0.22);
+    padding-left: 10px;
+    background: alpha(@theme_base_color, 0.38);
+    border-radius: 0 10px 10px 0;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    padding-right: 10px;
 }
 
-.amp-ok { color: #6bcf7f; }
-.amp-soft { color: #e6b84d; }
-.amp-broken { color: #e86a6a; }
-.amp-na { opacity: 0.7; }
+.amp-ok { color: #1a7a3a; }
+.amp-soft { color: #8a5a00; }
+.amp-broken { color: #a70e26; }
+.amp-na { opacity: 0.62; }
 
 .lighting-switcher {
     margin-bottom: 10px;
 }
 
+.lighting-switcher button {
+    border-radius: 10px;
+    font-weight: 700;
+    background: alpha(@theme_base_color, 0.52);
+    border: 1px solid alpha(white, 0.08);
+    box-shadow: 0 2px 10px alpha(black, 0.05);
+}
+
+.lighting-switcher button:checked {
+    background: @accent_bg_color;
+    color: @accent_fg_color;
+    border-color: transparent;
+}
+
+.nav-glass {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding-bottom: 6px;
+    border-bottom: 1px solid alpha(white, 0.07);
+    margin-bottom: 8px;
+}
+
 .colour-picker {
-    min-width: 52px;
-    min-height: 40px;
+    min-width: 48px;
+    min-height: 36px;
     padding: 0;
-    border-radius: 12px;
+    border-radius: 8px;
+    border: 1px solid alpha(currentColor, 0.10);
 }
 
 .colour-picker > * {
-    min-width: 48px;
-    min-height: 36px;
-    border-radius: 10px;
+    min-width: 44px;
+    min-height: 32px;
+    border-radius: 6px;
 }
 
 .perkey-canvas {
-    border-radius: 16px;
+    border-radius: 10px;
+    border: 1px solid alpha(currentColor, 0.10);
     min-height: 150px;
     min-width: 400px;
+    background: alpha(currentColor, 0.02);
 }
 
 .perkey-tools {
-    margin-top: 4px;
+    margin-top: 6px;
 }
 
 .dim-label {
-    opacity: 0.55;
-    font-weight: 600;
+    opacity: 0.58;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.84rem;
 }
 
 .fan-rpm {
-    font-size: 1.05rem;
-    font-weight: 650;
-    min-width: 5.5rem;
-    opacity: 0.7;
+    font-size: 0.98rem;
+    font-weight: 750;
+    min-width: 5.2rem;
+    opacity: 0.78;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+list.navigation-sidebar row {
+    padding: 4px 0;
+}
+
+.sidebar-child row {
+    padding: 2px 0;
+}
+
+/* ── Focus — visible, offset, consistent ─────────────────────────── */
+*:focus:focus-visible {
+    outline: 2px solid alpha(@accent_bg_color, 0.55);
+    outline-offset: 2px;
+}
+
+/* ── Banner — lab warning strip ─────────────────────────────────── */
+banner {
+    border-bottom: 1px solid alpha(@accent_bg_color, 0.18);
+}
+
+/* ── Scales — bench sliders (always a bar, never a dot) ────────────── */
+scale trough {
+    min-height: 8px;
+    border-radius: 99px;
+    background: alpha(currentColor, 0.10);
+    border: 1px solid alpha(white, 0.06);
+}
+
+scale highlight {
+    background: @accent_bg_color;
+    border-radius: 99px;
+    min-height: 8px;
+}
+
+scale slider {
+    min-width: 16px;
+    min-height: 16px;
+    border-radius: 99px;
+    background: white;
+    border: 1px solid alpha(black, 0.10);
+    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(@accent_bg_color, 0.0);
+    transition: box-shadow 140ms ease;
+}
+
+scale slider:hover {
+    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(@accent_bg_color, 0.14);
+}
+
+scale slider:active {
+    box-shadow: 0 1px 6px alpha(black, 0.22), 0 0 0 4px alpha(@accent_bg_color, 0.22);
+}
+
+/* Ensure the trough bar is always visible even at 0 and when unfocused */
+scale trough highlight {
+    opacity: 1;
+}
+
+.brightness-slider trough {
+    background: linear-gradient(to right, alpha(black, 0.18), alpha(#d9981a, 0.18));
+}
+
+.brightness-slider highlight {
+    background: linear-gradient(to right, #e0a72a, #d9981a);
+}
+
+.brightness-slider slider {
+    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(#d9981a, 0.0);
+}
+
+.brightness-slider slider:hover {
+    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(#d9981a, 0.16);
+}
+
+/* Numeric value + marks helper row */
+.scale-marks {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    opacity: 0.42;
+    margin-top: 2px;
+}
+
+.scale-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 800;
+    font-size: 0.82rem;
+    min-width: 3.2rem;
 }

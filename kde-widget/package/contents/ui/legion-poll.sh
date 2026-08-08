@@ -10,13 +10,13 @@ for p in /usr/local/bin/legion-cli /usr/bin/legion-cli "$HOME/.local/bin/legion-
 done
 [[ -z "$CLI" ]] && { echo "LEGION_CLI_NOT_FOUND=1"; exit 0; }
 
-status="$("$CLI" status 2>/dev/null || true)"
+status="$(timeout 3 "$CLI" status 2>/dev/null || true)"
 if [[ -z "$status" ]]; then
   echo "LEGION_DAEMON_OFFLINE=1"
   exit 0
 fi
 printf 'LEGION_OK=1\n'
-fans="$("$CLI" fan 2>/dev/null || true)"
+fans="$(timeout 3 "$CLI" fan 2>/dev/null || true)"
 
 value() {
   local key="$1" val="$2"
@@ -64,6 +64,6 @@ bat_power() {
 }
 value BAT_POWER "$(bat_power || true)"
 
-value PROFILE "$("$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' | head -1 | xargs || true)"
-value KBD_BRIGHTNESS "$("$CLI" kbd 2>/dev/null | grep -oP '\(\K[0-9]+(?=\))' | head -1 || true)"
-value LOGO "$("$CLI" logo 2>/dev/null | grep -oP '(on|off)' | head -1 || true)"
+value PROFILE "$(timeout 3 "$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' | head -1 | xargs || true)"
+value KBD_BRIGHTNESS "$(timeout 3 "$CLI" kbd 2>/dev/null | grep -oP '\(\K[0-9]+(?=\))' | head -1 || true)"
+value LOGO "$(timeout 3 "$CLI" logo 2>/dev/null | grep -oP '(on|off)' | head -1 || true)"

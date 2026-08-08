@@ -161,13 +161,25 @@ pub fn string_combo_row(
     row
 }
 
-pub fn section_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Box) {
+pub fn section_tip(title: &str, blurb: Option<&str>) -> (gtk::Box, gtk::Box) {
     let wrap = gtk::Box::new(Orientation::Vertical, 0);
     wrap.add_css_class("section");
+    let head = gtk::Box::new(Orientation::Vertical, 0);
+    head.add_css_class("section-head");
     let label = gtk::Label::new(Some(title));
     label.add_css_class("section-label");
     label.set_halign(Align::Start);
-    wrap.append(&label);
+    head.append(&label);
+    if let Some(b) = blurb {
+        if !b.is_empty() {
+            let sub = gtk::Label::new(Some(b));
+            sub.add_css_class("section-sub");
+            sub.set_halign(Align::Start);
+            sub.set_wrap(true);
+            head.append(&sub);
+        }
+    }
+    wrap.append(&head);
     let card = gtk::Box::new(Orientation::Vertical, 0);
     card.add_css_class("card");
     wrap.append(&card);
@@ -220,9 +232,13 @@ pub fn labeled_row_tip(
     suffix: &impl glib::object::IsA<gtk::Widget>,
     _tooltip: Option<&str>,
 ) -> gtk::Box {
-    let row = gtk::Box::new(Orientation::Horizontal, 16);
+    let row = gtk::Box::new(Orientation::Vertical, 8);
     row.add_css_class("row");
     row.set_hexpand(true);
+
+    let top = gtk::Box::new(Orientation::Horizontal, 12);
+    top.set_hexpand(true);
+    top.set_valign(Align::Center);
 
     let text = gtk::Box::new(Orientation::Vertical, 0);
     text.set_hexpand(true);
@@ -238,13 +254,38 @@ pub fn labeled_row_tip(
         s.set_wrap(true);
         text.append(&s);
     }
-    row.append(&text);
+    top.append(&text);
 
-    let sfx = suffix.clone().upcast::<gtk::Widget>();
-    sfx.set_valign(Align::Center);
-    sfx.set_halign(Align::End);
-    row.append(&sfx);
+    if suffix.as_ref().is::<gtk::Scale>() {
+        let wrap = gtk::Box::new(Orientation::Vertical, 0);
+        wrap.set_hexpand(true);
+        let w = suffix.clone().upcast::<gtk::Widget>();
+        w.set_hexpand(true);
+        w.set_halign(Align::Fill);
+        wrap.append(&w);
+        let marks = gtk::Label::new(Some("0  ·  3  ·  6  ·  9"));
+        marks.add_css_class("scale-marks");
+        marks.set_halign(Align::Fill);
+        marks.set_xalign(0.5);
+        wrap.append(&marks);
+        row.append(&top);
+        row.append(&wrap);
+    } else {
+        let sfx = suffix.clone().upcast::<gtk::Widget>();
+        sfx.set_valign(Align::Center);
+        sfx.set_halign(Align::End);
+        top.append(&sfx);
+        row.append(&top);
+    }
     row
+}
+
+pub fn section_header_tip(title: &str) -> gtk::Label {
+    let l = gtk::Label::new(Some(title));
+    l.add_css_class("sidebar-section");
+    l.set_halign(Align::Start);
+    l.set_sensitive(false);
+    l
 }
 
 pub fn metric_chip_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {

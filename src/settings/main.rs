@@ -221,6 +221,83 @@ fn build_submenu(entries: &[(&str, &str)]) -> (gtk::Box, gtk::ListBox, gtk::Butt
     (menu, list, back)
 }
 
+fn build_sidebar_section(
+    icon: &'static [u8],
+    title: &str,
+    subtitle: &str,
+    children: &[(&str, &str, &'static [u8])],
+) -> (gtk::Box, gtk::ListBox, Vec<gtk::ListBox>) {
+    let section = gtk::Box::new(Orientation::Vertical, 0);
+    let header = gtk::Box::new(Orientation::Horizontal, 10);
+    header.set_margin_top(8);
+    header.set_margin_bottom(2);
+    header.set_margin_start(14);
+    header.set_margin_end(10);
+    let chevron = gtk::Image::from_icon_name("go-next-symbolic");
+    chevron.set_pixel_size(10);
+    chevron.add_css_class("sidebar-chevron");
+    let icon_w = color_icon(icon, 16);
+    icon_w.set_opacity(0.62);
+    let label = gtk::Label::new(Some(title));
+    label.set_halign(Align::Start);
+    label.add_css_class("sidebar-section");
+    label.set_margin_top(0);
+    label.set_margin_bottom(0);
+    header.append(&chevron);
+    header.append(&icon_w);
+    header.append(&label);
+    if !subtitle.is_empty() {
+        let sub = gtk::Label::new(Some(subtitle));
+        sub.set_halign(Align::Start);
+        sub.add_css_class("sidebar-section");
+        sub.set_opacity(0.55);
+        sub.set_margin_start(4);
+        header.append(&sub);
+    }
+    section.append(&header);
+
+    let child_list = gtk::ListBox::new();
+    child_list.set_selection_mode(gtk::SelectionMode::Single);
+    child_list.add_css_class("navigation-sidebar");
+    child_list.add_css_class("sidebar-child");
+    for (title, subtitle, icon) in children {
+        let row = adw::ActionRow::builder()
+            .title(*title)
+            .subtitle(*subtitle)
+            .build();
+        row.set_activatable(true);
+        if !icon.is_empty() {
+            row.add_prefix(&color_icon(icon, 14));
+        }
+        child_list.append(&row);
+    }
+    section.append(&child_list);
+
+    let revealer = gtk::Revealer::new();
+    revealer.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+    revealer.set_transition_duration(160);
+    revealer.set_child(Some(&child_list));
+    revealer.set_reveal_child(false);
+    section.append(&revealer);
+
+    let chevron_c = chevron.clone();
+    let revealer_c = revealer.clone();
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |_, _, _, _| {
+        let open = !revealer_c.reveals_child();
+        revealer_c.set_reveal_child(open);
+        if open {
+            chevron_c.add_css_class("open");
+        } else {
+            chevron_c.remove_css_class("open");
+        }
+    });
+    header.add_controller(click);
+    header.set_cursor_from_name(Some("pointer"));
+
+    (section, child_list.clone(), vec![child_list])
+}
+
 fn connect_page_submenu(
     list: &gtk::ListBox,
     stack: &adw::ViewStack,
@@ -405,121 +482,180 @@ fn build_ui(app: &adw::Application) {
     brand_handle.set_child(Some(&brand));
     sidebar_box.append(&brand_handle);
 
-    let list = gtk::ListBox::new();
-    list.set_selection_mode(gtk::SelectionMode::Single);
-    list.add_css_class("navigation-sidebar");
-    list.set_vexpand(true);
-    list.set_margin_top(4);
-    list.set_margin_bottom(8);
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_height(true)
+        .vexpand(true)
+        .build();
+    let nav_box = gtk::Box::new(Orientation::Vertical, 2);
+    nav_box.set_margin_top(2);
+    nav_box.set_margin_bottom(4);
 
-    for (title, subtitle, icon) in [
-        (
-            "Home",
-            "Temperatures and power",
-            include_bytes!("../../data/icons/home.svg").as_slice(),
-        ),
-        (
-            "CPU",
-            "Features, limits, undervolt",
-            include_bytes!("../../data/icons/cpu.svg").as_slice(),
-        ),
-        (
-            "Cooling",
-            "Fan speeds",
-            include_bytes!("../../data/icons/cooling.svg").as_slice(),
-        ),
-        (
-            "Lighting",
-            "Keyboard and LEDs",
-            include_bytes!("../../data/icons/lighting.svg").as_slice(),
-        ),
-        (
-            "Battery",
-            "Charge limit and status",
-            include_bytes!("../../data/icons/battery.svg").as_slice(),
-        ),
-        (
-            "Fix",
-            "Speakers, lighting",
-            include_bytes!("../../data/icons/fix.svg").as_slice(),
-        ),
-        (
-            "Profiles",
-            "Saved profiles",
-            include_bytes!("../../data/icons/profiles.svg").as_slice(),
-        ),
-        (
-            "About",
-            "Help and about",
-            include_bytes!("../../data/icons/about.svg").as_slice(),
-        ),
-    ] {
-        let row = adw::ActionRow::builder()
-            .title(title)
-            .subtitle(subtitle)
-            .build();
-        row.set_activatable(true);
-        row.add_prefix(&color_icon(icon, 24));
-        let nav_tip = match title {
-            "Home" => "Temperatures, fans, battery, mode",
-            "CPU" => "Boost, threading, power limits",
-            "Cooling" => "CPU, GPU, and Aux fan speeds",
-            "Lighting" => "Keyboard, front, rear, logo, per-key",
-            "Battery" => "Charge limit and battery status",
-            "Fix" => "Speakers, lighting, service logs",
-            "About" => "Help, hardware, and project info",
-            "Profiles" => "Save and restore settings",
-            _ => subtitle,
+    // Home — compact pill at icon scale, right below brand
+    let home_btn = gtk::Button::builder()
+        .halign(Align::Fill)
+        .margin_start(10)
+        .margin_end(10)
+        .margin_top(6)
+        .margin_bottom(2)
+        .build();
+    home_btn.add_css_class("home-btn");
+    home_btn.add_css_class("flat");
+    let home_inner = gtk::Box::new(Orientation::Horizontal, 7);
+    home_inner.set_halign(Align::Center);
+    home_inner.set_valign(Align::Center);
+    home_inner.append(&color_icon(
+        include_bytes!("../../data/icons/home.svg").as_slice(),
+        13,
+    ));
+    let home_label = gtk::Label::new(Some("Home"));
+    home_label.add_css_class("home-label");
+    home_inner.append(&home_label);
+    home_btn.set_child(Some(&home_inner));
+    home_btn.set_tooltip_text(Some("Temperatures, fans, battery, mode"));
+    nav_box.append(&home_btn);
+    let home_sep = gtk::Separator::new(Orientation::Horizontal);
+    home_sep.set_margin_top(6);
+    home_sep.set_margin_bottom(2);
+    home_sep.set_margin_start(14);
+    home_sep.set_margin_end(14);
+    home_sep.add_css_class("sidebar-sep");
+    nav_box.append(&home_sep);
+
+    let make_section =
+        |icon: &'static [u8], title: &str, entries: &[(&str, &str)]| -> (gtk::Box, gtk::ListBox) {
+            let sec = gtk::Box::new(Orientation::Vertical, 0);
+            sec.set_margin_top(2);
+            let hdr = gtk::Box::new(Orientation::Horizontal, 8);
+            hdr.set_margin_start(16);
+            hdr.set_margin_end(10);
+            hdr.set_margin_top(6);
+            hdr.set_margin_bottom(2);
+            let chev = gtk::Image::from_icon_name("go-next-symbolic");
+            chev.set_pixel_size(10);
+            chev.add_css_class("sidebar-chevron");
+            let ic = color_icon(icon, 14);
+            ic.set_opacity(0.62);
+            let lb = gtk::Label::new(Some(title));
+            lb.add_css_class("sidebar-section");
+            lb.set_halign(Align::Start);
+            hdr.append(&chev);
+            hdr.append(&ic);
+            hdr.append(&lb);
+            sec.append(&hdr);
+            let lb_list = gtk::ListBox::new();
+            lb_list.set_selection_mode(gtk::SelectionMode::Single);
+            lb_list.add_css_class("navigation-sidebar");
+            lb_list.add_css_class("sidebar-child");
+            for (t, s) in entries {
+                let row = adw::ActionRow::builder().title(*t).subtitle(*s).build();
+                row.set_activatable(true);
+                lb_list.append(&row);
+            }
+            let rev = gtk::Revealer::new();
+            rev.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+            rev.set_transition_duration(120);
+            rev.set_child(Some(&lb_list));
+            rev.set_reveal_child(false);
+            sec.append(&rev);
+            let chev_c = chev.clone();
+            let rev_c = rev.clone();
+            let gc = gtk::GestureClick::new();
+            gc.connect_released(move |_, _, _, _| {
+                let open = !rev_c.reveals_child();
+                rev_c.set_reveal_child(open);
+                if open {
+                    chev_c.add_css_class("open");
+                } else {
+                    chev_c.remove_css_class("open");
+                }
+            });
+            hdr.add_controller(gc);
+            hdr.set_cursor_from_name(Some("pointer"));
+            (sec, lb_list)
         };
-        tip(&row, nav_tip);
-        list.append(&row);
-    }
-    let (cpu_menu, cpu_list, cpu_back) = build_submenu(&[
-        ("Features", "Boost and threading"),
-        ("Power limits", "CPU and GPU limits"),
-        ("Undervolt", "CPU offset"),
-        ("Stability test", "5-minute check"),
-    ]);
-    let (cooling_menu, cooling_list, cooling_back) = build_submenu(&[
-        ("CPU fan", "Processor fan"),
-        ("GPU fan", "Graphics fan"),
-        ("Aux fan", "Chassis fan"),
-        ("Reset fans", "Return to firmware curve"),
-    ]);
-    let (lighting_menu, lighting_list, lighting_back) = build_submenu(&[
-        ("Keyboard", "Whole-keyboard and per-key"),
-        ("Front", "Front bar"),
-        ("Rear", "Rear bar"),
-        ("Logo", "Lid logo"),
-        ("More", "Brightness and power switch"),
-    ]);
-    let (battery_menu, battery_list, battery_back) = build_submenu(&[
-        ("Status", "Charge and status"),
-        ("Charge limit", "60, 80, or 100%"),
-    ]);
-    let (fix_menu, fix_list, fix_back) = build_submenu(&[
-        ("Speakers", "Speaker diagnostics"),
-        ("Lighting", "Lighting recovery"),
-        ("Service logs", "Service output"),
-    ]);
-    let (about_menu, about_list, about_back) = build_submenu(&[
-        ("Setup", "Service, AMD backend, widget"),
-        ("Hardware", "Model and capabilities"),
-        ("Storage", "Settings and profiles"),
-        ("Help", "Help and legal"),
-    ]);
 
-    let sidebar_switch = gtk::Stack::new();
-    sidebar_switch.set_vexpand(true);
-    sidebar_switch.add_named(&list, Some("main"));
-    sidebar_switch.add_named(&cpu_menu, Some("cpu"));
-    sidebar_switch.add_named(&cooling_menu, Some("cooling"));
-    sidebar_switch.add_named(&lighting_menu, Some("lighting"));
-    sidebar_switch.add_named(&battery_menu, Some("battery"));
-    sidebar_switch.add_named(&fix_menu, Some("fix"));
-    sidebar_switch.add_named(&about_menu, Some("about"));
-    sidebar_switch.set_visible_child_name("main");
-    sidebar_box.append(&sidebar_switch);
+    let (cpu_sec, cpu_list) = make_section(
+        include_bytes!("../../data/icons/cpu.svg"),
+        "CPU",
+        &[
+            ("Features", "Boost and threading"),
+            ("Power limits", "CPU and GPU limits"),
+            ("Undervolt", "CPU offset"),
+            ("Stability test", "5-minute check"),
+        ],
+    );
+    let (cooling_sec, cooling_list) = make_section(
+        include_bytes!("../../data/icons/cooling.svg"),
+        "Cooling",
+        &[
+            ("CPU fan", "Processor fan"),
+            ("GPU fan", "Graphics fan"),
+            ("Aux fan", "Chassis fan"),
+            ("Reset fans", "Return to curve"),
+        ],
+    );
+    let (lighting_sec, lighting_list) = make_section(
+        include_bytes!("../../data/icons/lighting.svg"),
+        "Lighting",
+        &[
+            ("Keyboard", "Whole-keyboard and per-key"),
+            ("Front", "Front bar"),
+            ("Rear", "Rear bar"),
+            ("Logo", "Lid logo"),
+            ("More", "Brightness and power"),
+        ],
+    );
+    let (battery_sec, battery_list) = make_section(
+        include_bytes!("../../data/icons/battery.svg"),
+        "Battery",
+        &[
+            ("Status", "Charge and status"),
+            ("Charge limit", "60, 80, or 100%"),
+        ],
+    );
+    let (fix_sec, fix_list) = make_section(
+        include_bytes!("../../data/icons/fix.svg"),
+        "Fix",
+        &[
+            ("Speakers", "Speaker diagnostics"),
+            ("Lighting", "Lighting recovery"),
+            ("Service logs", "Service output"),
+        ],
+    );
+    let (about_sec, about_list) = make_section(
+        include_bytes!("../../data/icons/about.svg"),
+        "About",
+        &[
+            ("Setup", "Service, AMD backend, widget"),
+            ("Hardware", "Model and capabilities"),
+            ("Storage", "Settings and profiles"),
+            ("Help", "Help and legal"),
+        ],
+    );
+    nav_box.append(&cpu_sec);
+    nav_box.append(&cooling_sec);
+    nav_box.append(&lighting_sec);
+    nav_box.append(&battery_sec);
+    nav_box.append(&fix_sec);
+    // Profiles + About at bottom — less frequent, out of primary flow
+    let bot_sep = gtk::Separator::new(Orientation::Horizontal);
+    bot_sep.set_margin_top(8);
+    bot_sep.set_margin_bottom(4);
+    bot_sep.set_margin_start(14);
+    bot_sep.set_margin_end(14);
+    bot_sep.add_css_class("sidebar-sep");
+    nav_box.append(&bot_sep);
+    let (profiles_sec, profiles_list) = make_section(
+        include_bytes!("../../data/icons/profiles.svg"),
+        "Profiles",
+        &[("Manage", "Save and restore presets")],
+    );
+    nav_box.append(&profiles_sec);
+    nav_box.append(&about_sec);
+    scroll.set_child(Some(&nav_box));
+    sidebar_box.append(&scroll);
 
     let foot = gtk::Box::new(Orientation::Horizontal, 10);
     foot.add_css_class("sidebar-foot");
@@ -662,167 +798,113 @@ fn build_ui(app: &adw::Application) {
         .child(&content_toolbar)
         .build();
 
-    let page_ids = [
-        "overview",
-        "cpu-features",
-        "cooling-cpu",
-        "lighting",
-        "battery-status",
-        "fix-audio",
-        "profiles",
-        "about-setup",
-    ];
-    let page_titles = [
-        "Home",
-        "CPU Features",
-        "CPU Fan",
-        "Keyboard Lighting",
-        "Battery Status",
-        "Speaker Repair",
-        "Profiles",
-        "About",
-    ];
-    let submenu_names = [
-        "main", "cpu", "cooling", "lighting", "battery", "fix", "about",
-    ];
-    let submenu_lists = [
-        None,
-        Some(cpu_list.clone()),
-        Some(cooling_list.clone()),
-        Some(lighting_list.clone()),
-        Some(battery_list.clone()),
-        Some(fix_list.clone()),
-        Some(about_list.clone()),
-    ];
-    let stack_nav = stack.clone();
-    let content_page_t = content_page.clone();
-    let split_nav = split.clone();
-    let sidebar_switch_nav = sidebar_switch.clone();
-    let go = Rc::new(move |idx: i32| {
-        let i = idx as usize;
-        if let (Some(name), Some(title), Some(submenu)) =
-            (page_ids.get(i), page_titles.get(i), submenu_names.get(i))
-        {
-            sidebar_switch_nav.set_visible_child_name(submenu);
-            if let Some(Some(submenu_list)) = submenu_lists.get(i) {
-                submenu_list.select_row(submenu_list.row_at_index(0).as_ref());
-            }
-            stack_nav.set_visible_child_name(name);
-            content_page_t.set_title(title);
-            if split_nav.is_collapsed() {
-                split_nav.set_show_content(true);
-            }
+    fn nav_to(
+        stack: &adw::ViewStack,
+        page: &adw::NavigationPage,
+        split: &adw::NavigationSplitView,
+        name: &str,
+        title: &str,
+    ) {
+        stack.set_visible_child_name(name);
+        page.set_title(title);
+        if split.is_collapsed() {
+            split.set_show_content(true);
         }
-    });
-    let go_sel = go.clone();
-    list.connect_row_selected(move |_, row| {
-        if let Some(row) = row {
-            go_sel(row.index());
-        }
-    });
-    let go_act = go.clone();
-    list.connect_row_activated(move |_, row| {
-        go_act(row.index());
+    }
+    let show_page = {
+        let stack = stack.clone();
+        let page = content_page.clone();
+        let split = split.clone();
+        Rc::new(move |name: &'static str, title: &'static str| {
+            nav_to(&stack, &page, &split, name, title)
+        })
+    };
+    home_btn.connect_clicked({
+        let show = show_page.clone();
+        move |_| show("overview", "Home")
     });
 
-    connect_page_submenu(
+    let bind_sub = |lb: &gtk::ListBox,
+                    pages: &'static [(&'static str, &'static str)],
+                    show_page: Rc<dyn Fn(&'static str, &'static str)>| {
+        let show_page = show_page.clone();
+        lb.connect_row_selected(move |_, row| {
+            let Some(r) = row else {
+                return;
+            };
+            if let Some((name, title)) = pages.get(r.index() as usize) {
+                show_page(name, title);
+            }
+        });
+    };
+    bind_sub(
         &cpu_list,
-        &stack,
-        &content_page,
-        &split,
         &[
             ("cpu-features", "CPU Features"),
             ("cpu-power", "CPU Power Limits"),
             ("cpu-undervolt", "CPU Undervolt"),
             ("cpu-stability", "CPU Stability"),
         ],
+        show_page.clone(),
     );
-    connect_page_submenu(
+    bind_sub(
         &cooling_list,
-        &stack,
-        &content_page,
-        &split,
         &[
             ("cooling-cpu", "CPU Fan"),
             ("cooling-gpu", "GPU Fan"),
             ("cooling-aux", "Aux Fan"),
             ("cooling-reset", "Reset Fans"),
         ],
+        show_page.clone(),
     );
-    connect_page_submenu(
+    bind_sub(
         &battery_list,
-        &stack,
-        &content_page,
-        &split,
         &[
             ("battery-status", "Battery Status"),
             ("battery-limit", "Charge Limit"),
         ],
+        show_page.clone(),
     );
-    connect_page_submenu(
+    bind_sub(
         &fix_list,
-        &stack,
-        &content_page,
-        &split,
         &[
             ("fix-audio", "Speaker Repair"),
             ("fix-lighting", "Lighting Repair"),
             ("fix-logs", "Service Logs"),
         ],
+        show_page.clone(),
     );
-    connect_page_submenu(
+    bind_sub(
         &about_list,
-        &stack,
-        &content_page,
-        &split,
         &[
             ("about-setup", "Setup"),
             ("about-hardware", "Hardware"),
             ("about-storage", "Storage"),
             ("about-help", "Help"),
         ],
+        show_page.clone(),
     );
-
-    let lighting_outer_stack = stack.clone();
-    let lighting_content_page = content_page.clone();
-    let lighting_split = split.clone();
-    lighting_list.connect_row_selected(move |_, row| {
-        let Some(row) = row else {
-            return;
-        };
-        let pages = [
-            ("keyboard", "Keyboard Lighting"),
-            ("front", "Front Lighting"),
-            ("rear", "Rear Lighting"),
-            ("logo", "Logo Lighting"),
-            ("more", "Lighting Options"),
-        ];
-        let Some((name, title)) = pages.get(row.index() as usize) else {
-            return;
-        };
-        lighting_tabs.set_visible_child_name(name);
-        lighting_outer_stack.set_visible_child_name("lighting");
-        lighting_content_page.set_title(title);
-        if lighting_split.is_collapsed() {
-            lighting_split.set_show_content(true);
-        }
-    });
-
-    for back in [
-        cpu_back,
-        cooling_back,
-        lighting_back,
-        battery_back,
-        fix_back,
-        about_back,
-    ] {
-        let sidebar_switch = sidebar_switch.clone();
-        back.connect_clicked(move |_| {
-            sidebar_switch.set_visible_child_name("main");
+    bind_sub(&profiles_list, &[("profiles", "Profiles")], show_page.clone());
+    {
+        let tabs = lighting_tabs.clone();
+        let show = show_page.clone();
+        lighting_list.connect_row_selected(move |_, row| {
+            let Some(r) = row else {
+                return;
+            };
+            let pages = [
+                ("keyboard", "Keyboard Lighting"),
+                ("front", "Front Lighting"),
+                ("rear", "Rear Lighting"),
+                ("logo", "Logo Lighting"),
+                ("more", "Lighting Options"),
+            ];
+            if let Some((name, title)) = pages.get(r.index() as usize) {
+                tabs.set_visible_child_name(name);
+                show("lighting", title);
+            }
         });
     }
-    list.select_row(list.row_at_index(0).as_ref());
-
     let about_action = gio::SimpleAction::new("about", None);
     let win_about = window.clone();
     about_action.connect_activate(move |_, _| {

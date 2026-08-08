@@ -1,5 +1,4 @@
 import QtQuick 2.15
-import QtQuick.Controls 2.15 as QQC2
 import QtQuick.Layouts 1.15
 import org.kde.kirigami 2.20 as Kirigami
 
@@ -8,13 +7,22 @@ Item {
     property string iconSource: "icons/profile.svg"
     property string label: "Profile"
     property string valueText: "--"
-    property color valueColor: Kirigami.Theme.positiveTextColor
-    property bool on: true
-
+    property color valueColor: Kirigami.Theme.textColor
     signal clicked()
 
-    implicitHeight: 44
+    implicitHeight: 34
     Layout.fillWidth: true
+
+    Rectangle {
+        anchors.fill: parent
+        radius: 9
+        color: ma.pressed ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
+              : ma.containsMouse ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+              : "transparent"
+        border.width: ma.containsMouse || ma.pressed ? 1 : 0
+        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
+        Behavior on color { ColorAnimation { duration: 140 } }
+    }
 
     MouseArea {
         id: ma
@@ -22,54 +30,52 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: qc.clicked()
+    }
 
-        Rectangle {
-            anchors.fill: parent
-            radius: 6
-            color: ma.containsMouse
-                ? Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g, Kirigami.Theme.highlightColor.b, 0.15)
-                : "transparent"
-            Behavior on color { ColorAnimation { duration: 150 } }
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: Kirigami.Units.smallSpacing + 4
+        anchors.rightMargin: Kirigami.Units.smallSpacing + 4
+        spacing: Kirigami.Units.smallSpacing + 2
+
+        Kirigami.Icon {
+            source: Qt.resolvedUrl(qc.iconSource)
+            isMask: true
+            color: Kirigami.Theme.textColor
+            implicitWidth: 13
+            implicitHeight: 13
+            Layout.alignment: Qt.AlignVCenter
+            opacity: 0.60
         }
 
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: Kirigami.Units.largeSpacing
-            anchors.rightMargin: Kirigami.Units.largeSpacing
+        Text {
+            text: qc.label
+            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+            font.weight: Font.Medium
+            Layout.alignment: Qt.AlignVCenter
+            color: Kirigami.Theme.textColor
+            opacity: 0.92
+        }
 
-            Image {
-                source: Qt.resolvedUrl(qc.iconSource)
-                sourceSize: Qt.size(18, 18)
-                Layout.preferredWidth: 18
-                Layout.preferredHeight: 18
-                opacity: qc.on ? 0.9 : 0.4
-            }
+        Item { Layout.fillWidth: true }
 
-            QQC2.Label {
-                text: qc.label
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                font.weight: Font.DemiBold
-            }
+        Text {
+            text: qc.valueText
+            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+            font.weight: Font.DemiBold
+            Layout.alignment: Qt.AlignVCenter
+            color: qc.valueColor
+            opacity: 0.95
+        }
 
-            Item { Layout.fillWidth: true }
-
-            QQC2.Label {
-                text: qc.valueText
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                font.bold: true
-                color: qc.valueColor
-            }
-
-            Item {
-                Layout.preferredWidth: 12
-                Layout.preferredHeight: 12
-                opacity: 0.35
-                Image {
-                    anchors.fill: parent
-                    source: Qt.resolvedUrl("icons/chevron.svg")
-                    sourceSize: Qt.size(12, 12)
-                }
-            }
+        Text {
+            text: "›"
+            font.pixelSize: 13
+            font.weight: Font.DemiBold
+            Layout.alignment: Qt.AlignVCenter
+            color: ma.containsMouse ? "#e8566e" : Kirigami.Theme.textColor
+            opacity: ma.containsMouse ? 0.95 : 0.35
+            Behavior on color { ColorAnimation { duration: 140 } }
         }
     }
 }

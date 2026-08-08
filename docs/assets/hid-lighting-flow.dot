@@ -1,92 +1,100 @@
 digraph hid_lighting_flow {
     graph [
-        label="Lenovo Legion HID lighting flow\nSource-verified path; packet layout omitted",
+        label="LEGION HID LIGHTING  ·  source-verified path  ·  packet layout omitted",
         labelloc=t,
         labeljust=l,
         rankdir=LR,
-        bgcolor="white",
-        fontname="sans-serif",
-        fontsize=17,
+        bgcolor="#0c0a09",
+        fontname="JetBrains Mono,ui-monospace,monospace",
+        fontsize=12,
         nodesep=0.25,
-        ranksep=0.5,
+        ranksep=0.55,
         pad=0.2
     ];
 
     node [
         shape=box,
         style="rounded,filled",
-        fontname="sans-serif",
-        fontsize=11,
+        fontname="Inter,ui-sans-serif,sans-serif",
+        fontsize=10,
         margin="0.14,0.09",
-        color="#334155",
-        penwidth=1.3
+        penwidth=1.2
     ];
 
     edge [
-        fontname="sans-serif",
-        fontsize=9,
-        color="#475569",
-        penwidth=1.1,
-        arrowsize=0.7
+        fontname="JetBrains Mono,ui-monospace,monospace",
+        fontsize=8.5,
+        color="#57534e",
+        penwidth=1.05,
+        arrowsize=0.66
     ];
 
     client [
-        label="Clients\nCLI · settings · KDE widget\nwidget via CLI",
-        fillcolor="#dbeafe",
-        color="#2563eb"
+        label="OPERATOR\nCLI  ·  settings  ·  widget (via CLI)",
+        fillcolor="#450a0a",
+        color="#c8102e",
+        fontcolor="#fecaca"
     ];
     command_path [
-        label="Keyboard module\nlighting command",
-        fillcolor="#dbeafe",
-        color="#2563eb"
+        label="KEYBOARD MODULE\nlighting command",
+        fillcolor="#292524",
+        color="#78716c",
+        fontcolor="#e7e5e4"
     ];
     hidraw [
-        label="Linux hidraw\n/dev/hidrawN",
-        fillcolor="#f1f5f9",
-        color="#64748b"
+        label="LINUX  ·  hidraw\n/dev/hidrawN",
+        fillcolor="#1c1917",
+        color="#57534e",
+        fontcolor="#d6d3d1"
     ];
     spectrum [
-        label="Spectrum responder\nprimary match: VID/PID 048d:c197\ncheck marker 06 89 ff when available\nfall back only if marker unavailable",
-        fillcolor="#fef3c7",
-        color="#d97706"
+        label="SPECTRUM RESPONDER\n048d:c197  ·  check 06 89 ff when available",
+        fillcolor="#451a03",
+        color="#d9981a",
+        fontcolor="#fde68a"
     ];
     lighting [
-        label="Lighting\neffects, zones, brightness, logo",
-        fillcolor="#fef3c7",
-        color="#d97706"
+        label="LIGHTING\nzones  ·  effects  ·  brightness  ·  logo",
+        fillcolor="#7f1d1d",
+        color="#c8102e",
+        fontcolor="#fecaca"
     ];
 
-    client -> command_path [label="lighting request"];
+    client -> command_path [label="request"];
     command_path -> hidraw [label="open /dev/hidrawN"];
-    hidraw -> spectrum [label="HID feature report\nID 0x07 · 960 bytes"];
-    spectrum -> lighting [label="keyboard lighting"];
+    hidraw -> spectrum [label="feature report  ·  ID 0x07  ·  960 B"];
+    spectrum -> lighting [label="apply"];
 
     subgraph cluster_legend {
-        label="Legend";
+        label="LEGEND";
         labelloc=t;
         labeljust=l;
-        fontname="sans-serif";
-        fontsize=10;
-        color="#cbd5e1";
+        fontname="JetBrains Mono,ui-monospace,monospace";
+        fontsize=8.5;
+        color="#44403c";
         style="rounded,dashed";
+        fontcolor="#a8a29e";
 
         legend_linux [
-            label="Standard Linux interface",
-            fillcolor="#f1f5f9",
-            color="#64748b",
-            fontsize=9
+            label="Linux interface",
+            fillcolor="#1c1917",
+            color="#57534e",
+            fontcolor="#d6d3d1",
+            fontsize=8.5
         ];
         legend_project [
             label="Project behavior",
-            fillcolor="#dbeafe",
-            color="#2563eb",
-            fontsize=9
+            fillcolor="#292524",
+            color="#78716c",
+            fontcolor="#e7e5e4",
+            fontsize=8.5
         ];
         legend_hardware [
-            label="Hardware-specific behavior",
-            fillcolor="#fef3c7",
-            color="#d97706",
-            fontsize=9
+            label="Hardware path  ·  amber",
+            fillcolor="#451a03",
+            color="#d9981a",
+            fontcolor="#fde68a",
+            fontsize=8.5
         ];
 
         legend_linux -> legend_project [style=invis];

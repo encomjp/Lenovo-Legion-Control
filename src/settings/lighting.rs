@@ -123,21 +123,10 @@ fn build_keyboard_tab(
     let (sec_fx, fx_card) = section_tip(
         "Whole keyboard",
         Some(
-            "One Spectrum effect for the entire keyboard — painting keys in the per-key window switches to per-key mode",
+            "One Spectrum effect on every key — painting in the per-key window overrides it until you Clear map",
         ),
     );
     fx_card.append(&zone_editor(RgbZone::Keyboard, layer, true, toast));
-    let note = gtk::Label::new(Some(
-        "One effect on every key. Open per-key lighting to paint individual keys.",
-    ));
-    note.add_css_class("hint");
-    note.set_halign(Align::Start);
-    note.set_wrap(true);
-    tip(
-        &note,
-        "Per-key paint overrides this whole-keyboard effect until you Clear map",
-    );
-    fx_card.append(&note);
     box_.append(&sec_fx);
 
     let (sec_brush, brush_card) = section_tip(
@@ -149,7 +138,7 @@ fn build_keyboard_tab(
 
     let (sec_map, map_card) = section_tip(
         "Per-key lighting",
-        Some("Opens a larger window so the keyboard map is not scaled down"),
+        Some("Paint individual keys in a dedicated full-size window — no downscaling"),
     );
     let open_btn = gtk::Button::with_label("Open individual key lighting…");
     open_btn.add_css_class("suggested-action");
@@ -177,17 +166,6 @@ fn build_keyboard_tab(
         *win_slot_c.borrow_mut() = Some(win);
     });
     map_card.append(&open_btn);
-    let hint = gtk::Label::new(Some(
-        "Paint individual keys in a separate window — no aggressive downscaling.",
-    ));
-    hint.add_css_class("hint");
-    hint.set_halign(Align::Start);
-    hint.set_wrap(true);
-    tip(
-        &hint,
-        "Opens a dedicated window with a larger keyboard map for precise per-key painting",
-    );
-    map_card.append(&hint);
     box_.append(&sec_map);
 
     box_
@@ -251,13 +229,6 @@ fn build_zone_tab(
     box_.set_margin_top(14);
 
     let (sec, card) = section_tip(title, Some(blurb));
-    let sub = gtk::Label::new(Some(blurb));
-    sub.add_css_class("hint");
-    sub.set_halign(Align::Start);
-    sub.set_margin_bottom(12);
-    sub.set_wrap(true);
-    tip(&sub, blurb);
-    card.append(&sub);
     card.append(&zone_editor(zone, layer, false, toast));
     box_.append(&sec);
     box_
@@ -276,9 +247,10 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
     bright.set_value(cfg.brightness as f64);
     bright.set_draw_value(true);
+    bright.add_css_class("brightness-slider");
     bright.set_digits(0);
     bright.set_hexpand(true);
-    bright.set_width_request(180);
+    bright.set_width_request(240);
     let bright_suppress = Rc::new(Cell::new(true));
     let bright_suppress_c = bright_suppress.clone();
     let bri_ticket = Rc::new(Cell::new(0u32));
@@ -448,25 +420,6 @@ fn zone_editor(
         ));
         wrap.append(&row);
     } else {
-        wrap.append(&labeled_row_tip(
-            "Effect",
-            "Hover the menu for what each animation does",
-            &effect_dd,
-            Some("Lighting animation for this surface"),
-        ));
-        wrap.append(&labeled_row_tip(
-            "Speed",
-            "Animated effects only",
-            &speed_dd,
-            Some("Slow / Normal / Fast — ignored for Static and Off"),
-        ));
-        wrap.append(&labeled_row_tip(
-            "Colour",
-            "Click for the full system colour dialog",
-            &picker,
-            Some("Used by Static, Pulse, Wave, and other coloured effects"),
-        ));
-
         let hex = gtk::Entry::builder()
             .placeholder_text("#RRGGBB")
             .width_chars(9)
@@ -486,13 +439,6 @@ fn zone_editor(
                 set_picker_rgba(&picker_h, r, g, b);
             }
         });
-        wrap.append(&labeled_row_tip(
-            "Hex",
-            "Type and press Return",
-            &hex,
-            Some("Manual RGB entry — useful for matching brand colours exactly"),
-        ));
-
         let hex_s = hex.clone();
         let color_s = color.clone();
         picker.connect_rgba_notify(move |p| {
@@ -500,11 +446,36 @@ fn zone_editor(
             color_s.set((r, g, b));
             hex_s.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
         });
+
+        let fx_box = gtk::Box::new(Orientation::Horizontal, 8);
+        fx_box.set_valign(Align::Center);
+        effect_dd.set_hexpand(true);
+        fx_box.append(&effect_dd);
+        fx_box.append(&speed_dd);
+        wrap.append(&labeled_row_tip(
+            "Effect",
+            "Animation and playback speed",
+            &fx_box,
+            Some("Lighting animation for this surface — speed only affects animated effects"),
+        ));
+
+        let colour_box = gtk::Box::new(Orientation::Horizontal, 8);
+        colour_box.set_valign(Align::Center);
+        colour_box.append(&picker);
+        colour_box.append(&hex);
+        wrap.append(&labeled_row_tip(
+            "Colour",
+            "Picker, or type #RRGGBB and press Return",
+            &colour_box,
+            Some("Used by Static, Pulse, Wave, and other coloured effects"),
+        ));
+
         let bright_slider = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
         bright_slider.set_value(brightness.get() as f64);
         bright_slider.set_draw_value(true);
         bright_slider.set_digits(0);
         bright_slider.set_hexpand(true);
+        bright_slider.set_width_request(220);
         bright_slider.add_css_class("brightness-slider");
         let bri_c = brightness.clone();
         bright_slider.connect_value_changed(move |s| {
