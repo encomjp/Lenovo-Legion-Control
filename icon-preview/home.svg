@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Home">
+  <title>Home</title>
+  <path d="M75 222L256 79l181 143" fill="none" stroke="#c8102e" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M117 205v215h278V205" fill="#fbe8eb" stroke="#c8102e" stroke-width="38" stroke-linejoin="round"/>
+  <path d="M198 421v-132h116v132" fill="#c8102e"/>
+</svg>

@@ -1,0 +1,17 @@
+# HWMON names
+hwmon0: ADP0
+hwmon1: BAT0
+hwmon10: r8169_0_700:00
+hwmon11: iwlwifi_1
+hwmon12: ucsi_source_psy_USBC000:001
+hwmon13: ucsi_source_psy_USBC000:002
+hwmon14: ucsi_source_psy_USBC000:003
+hwmon15: hidpp_battery_0
+hwmon2: nvme
+hwmon3: nvme
+hwmon4: amdgpu
+hwmon5: k10temp
+hwmon6: yogafan
+hwmon7: lenovo_wmi_other
+hwmon8: spd5118
+hwmon9: spd5118

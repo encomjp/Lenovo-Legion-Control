@@ -1,0 +1,36 @@
+# Build artifacts
+lenovo-legion-tool/target/
+*.qmlc
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+Module.symvers
+modules.order
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.directory
+.DS_Store
+
+# Tool metadata / local state (never commit)
+.commandcode/
+.superpowers/
+graphify-out/
+sqlite_mcp_server.db
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+
+# Nested repo (lenovo-legion-tool has its own git repo + remote)
+lenovo-legion-tool/

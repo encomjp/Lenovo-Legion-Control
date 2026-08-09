@@ -1,0 +1,177 @@
+{
+  "cpu": {
+    "driver": "k10temp",
+    "sensors": {
+      "Tctl": 66.375,
+      "Tccd1": 73.5,
+      "Tccd2": 66.625
+    }
+  },
+  "igpu": {
+    "driver": "amdgpu",
+    "sensors": {
+      "sclk": "600MHz",
+      "vddgfx": "1.275V",
+      "vddnb": "0.849V",
+      "PPT": "0.021W",
+      "edge": "56.0\u00b0C"
+    }
+  },
+  "dgpu": {
+    "name": "NVIDIA GeForce RTX 5080 Laptop GPU",
+    "temperature_C": 49.0,
+    "power_draw_W": 17.24,
+    "clock_graphics_MHz": 397.0,
+    "clock_memory_MHz": 9001.0,
+    "power_limit_W": null
+  },
+  "nvme": [
+    {
+      "Composite": {
+        "value_C": 32.85,
+        "max_C": 83.85,
+        "crit_C": 88.85
+      }
+    },
+    {
+      "Composite": {
+        "value_C": 35.85,
+        "max_C": 82.85,
+        "crit_C": 84.85
+      },
+      "Sensor 1": {
+        "value_C": 43.85,
+        "max_C": 65261.85
+      },
+      "Sensor 2": {
+        "value_C": 35.85,
+        "max_C": 65261.85
+      }
+    }
+  ],
+  "ram": {
+    "DIMM_0": {
+      "temperature_C": 44.25,
+      "max_C": 55.0,
+      "crit_C": 85.0
+    },
+    "DIMM_1": {
+      "temperature_C": 39.0,
+      "max_C": 55.0,
+      "crit_C": 85.0
+    }
+  },
+  "fans": {
+    "lenovo_wmi_other_fan1": {
+      "rpm": 2200,
+      "min_rpm": 1700,
+      "max_rpm": 5200,
+      "target_rpm": 0
+    },
+    "lenovo_wmi_other_fan2": {
+      "rpm": 2100,
+      "min_rpm": 1700,
+      "max_rpm": 5400,
+      "target_rpm": 0
+    },
+    "lenovo_wmi_other_fan4": {
+      "rpm": 2800,
+      "min_rpm": 1500,
+      "max_rpm": 6500,
+      "target_rpm": 0
+    },
+    "yogafan_fan1": {
+      "rpm": 0,
+      "min_rpm": 0,
+      "max_rpm": 0,
+      "target_rpm": 0
+    },
+    "yogafan_fan2": {
+      "rpm": 0,
+      "min_rpm": 0,
+      "max_rpm": 0,
+      "target_rpm": 0
+    }
+  },
+  "nic": {
+    "ethernet": {
+      "name": "r8169_0_700:00",
+      "temperature_C": 34.0,
+      "max_C": 120.0
+    },
+    "wifi": {
+      "name": "iwlwifi_1",
+      "temperature_C": 32.0
+    }
+  },
+  "battery": {
+    "manufacturer": "SMP",
+    "model": "L24M4PC1",
+    "technology": "Li-poly",
+    "status": "Not charging",
+    "capacity_pct": 100,
+    "voltage_V": 17.269,
+    "power_W": null,
+    "energy_now_Wh": 99.9,
+    "energy_full_Wh": 99.9,
+    "energy_design_Wh": 99.9,
+    "cycle_count": 8,
+    "charge_types": "Fast [Standard] Long_Life"
+  },
+  "profile": {
+    "current": "performance",
+    "choices": [
+      "low-power",
+      "balanced",
+      "performance",
+      "max-power",
+      "custom"
+    ]
+  },
+  "cooling": {
+    "Processor": 32,
+    "TOTAL": 32
+  },
+  "ec_hid": {
+    "devices": [
+      {
+        "hidraw": "/dev/hidraw0",
+        "vendor": "0x048D",
+        "product": "0xC193",
+        "name": "ITE Lenovo Lighting (keyboard white backlight)",
+        "modalias": "hid:b0003g0001v0000048Dp0000C193"
+      },
+      {
+        "hidraw": "/dev/hidraw1",
+        "vendor": "0x048D",
+        "product": "0xC193",
+        "name": "ITE Lenovo Lighting (keyboard white backlight)",
+        "modalias": "hid:b0003g0001v0000048Dp0000C193"
+      },
+      {
+        "hidraw": "/dev/hidraw12",
+        "vendor": "0x048D",
+        "product": "0xC197",
+        "name": "ITE Device 8258 (EC HID \u2014 keyboard RGB / fan control)",
+        "modalias": "hid:b0003g0001v0000048Dp0000C197"
+      },
+      {
+        "hidraw": "/dev/hidraw16",
+        "vendor": "0x048D",
+        "product": "0x5003",
+        "name": "ITE 048D:5003",
+        "modalias": "hid:b0018g0001v0000048Dp00005003"
+      }
+    ],
+    "count": 4
+  },
+  "missing": {
+    "EC_CPU_temp": "WMI3 GetCPUTemp (method 18) \u2014 gamezone GUID 887B54E3-... needs kernel driver",
+    "EC_GPU_temp": "WMI3 GetGPUTemp (method 19) \u2014 gamezone GUID 887B54E3-... needs kernel driver",
+    "IC_board_temp": "EC memory read at 0xFE00D400 \u2014 needs legion-laptop or ec_sys module",
+    "VRM_temps": "EC memory only \u2014 needs kernel module",
+    "CPU_power_limits_PPT": "capdata01 PPT attrs \u2014 not supported on 83RU/SMCN upstream yet",
+    "fan_curve_10point": "EC registers F9F0-F9F9 via WMI3 SET_TABLE \u2014 needs kernel module",
+    "gpu_memory_junction": "Not exposed by NVIDIA driver at all"
+  }
+}

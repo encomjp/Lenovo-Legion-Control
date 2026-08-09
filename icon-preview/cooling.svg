@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Cooling">
+  <title>Cooling</title>
+  <circle cx="256" cy="256" r="43" fill="#12658a"/>
+  <path d="M262 214c4-83 38-134 85-128 45 7 56 68 19 109-28 32-66 34-104 19Z" fill="#48b7e8"/>
+  <path d="M294 278c70 43 96 100 65 134-32 34-88 13-106-38-13-38 4-72 41-96Z" fill="#238ebd"/>
+  <path d="M218 278c-75 37-136 30-154-13-17-43 30-85 83-77 41 5 64 34 71 90Z" fill="#70cbed"/>
+</svg>

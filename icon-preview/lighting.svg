@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Lighting">
+  <title>Lighting</title>
+  <path d="M173 316c-26-21-43-56-43-94a126 126 0 1 1 209 94c-19 17-28 34-28 53H201c0-21-9-36-28-53Z" fill="#fff1a8" stroke="#d79b00" stroke-width="38" stroke-linejoin="round"/>
+  <path d="M201 431h110M201 369h110" fill="none" stroke="#876000" stroke-width="38" stroke-linecap="round"/>
+  <path d="M256 38v21M101 85l-17-17M411 85l17-17M66 222H38M474 222h-23" fill="none" stroke="#efb400" stroke-width="36" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,8 @@
+Testing fan_target write access:
+fan1_target: current=0, writable=YES
+fan2_target: current=0, writable=YES
+fan4_target: current=0, writable=YES
+---
+yogafan:
+fan1_input
+fan2_input

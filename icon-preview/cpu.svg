@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Cpu">
+  <title>Cpu</title>
+  <rect x="132" y="132" width="248" height="248" rx="43" fill="#fff0e5" stroke="#e26a1b" stroke-width="38"/>
+  <rect x="196" y="196" width="120" height="120" rx="21" fill="#e26a1b"/>
+  <path d="M192 75v58M320 75v58M192 379v58M320 379v58M75 192h58M75 320h58M379 192h58M379 320h58" fill="none" stroke="#9c3d00" stroke-width="36" stroke-linecap="round"/>
+</svg>

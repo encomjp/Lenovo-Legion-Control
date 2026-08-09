@@ -1,0 +1,53 @@
+{
+  "sysfs_hwmon": {
+    "cpu_Tctl": 64.875,
+    "cpu_Tccd1": 64.375,
+    "cpu_Tccd2": 76.5,
+    "igpu_PPT_W": 0.023,
+    "igpu_edge": 58.0,
+    "nvme_hwmon2_Composite": 33.85,
+    "nvme_hwmon3_Composite": 36.85,
+    "nvme_hwmon3_Sensor 1": 43.85,
+    "nvme_hwmon3_Sensor 2": 36.85,
+    "ram_dim_0": 45.5,
+    "ram_dim_1": 40.0,
+    "ethernet": 34.0,
+    "wifi": 32.0
+  },
+  "dgpu_nvidia_smi": {
+    "dgpu_temp_C": 50.0,
+    "dgpu_power_W": 27.95,
+    "dgpu_clock_MHz": 1170.0
+  },
+  "ec_temps_devport": {
+    "ec_cpu_temp_C": 64,
+    "ec_dgpu_temp_C": 49,
+    "ec_board_temp_C": 46,
+    "ec_chipset_temp_C": 41,
+    "ec_unk_temp_C": 45,
+    "ec_pch_temp_C": 21,
+    "ec_ram_area_temp_C": 29
+  },
+  "fans": {
+    "fan1": {
+      "rpm": 2200,
+      "target": 0
+    },
+    "fan2": {
+      "rpm": 2100,
+      "target": 0
+    },
+    "fan4": {
+      "rpm": 2900,
+      "target": 0
+    }
+  },
+  "battery": {
+    "battery_pct": 100,
+    "battery_status": "Not charging",
+    "battery_charge_type": "Fast [Standard] Long_Life",
+    "battery_voltage_V": 17.27,
+    "battery_cycles": 8
+  },
+  "platform_profile": "performance"
+}

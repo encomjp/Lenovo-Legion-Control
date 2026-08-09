@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Menu">
+  <title>Menu</title>
+  <path d="M85 139h342M85 256h342M85 373h342" fill="none" stroke="#5a5a63" stroke-width="43" stroke-linecap="round"/>
+  <circle cx="85" cy="139" r="21" fill="#c8102e"/>
+  <circle cx="85" cy="256" r="21" fill="#e26a1b"/>
+  <circle cx="85" cy="373" r="21" fill="#3979b8"/>
+</svg>

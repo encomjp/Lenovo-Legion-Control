@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Donate">
+  <title>Donate</title>
+  <path d="M256 431S77 323 77 190A96 96 0 0 1 256 141a96 96 0 0 1 179 49c0 133-179 241-179 241Z" fill="#fbe7eb" stroke="#c8102e" stroke-width="38" stroke-linejoin="round"/>
+  <path d="M256 177v145M207 224c6-21 24-34 49-34 28 0 47 15 47 36 0 56-96 23-96 70 0 23 21 38 51 38 26 0 45-11 53-32" fill="none" stroke="#c8102e" stroke-width="33" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,147 @@
+ucsi_source_psy_USBC000:003-isa-0000
+Adapter: ISA adapter
+in0:
+  in0_input: 0.000
+  in0_min: 0.000
+  in0_max: 0.000
+curr1:
+  curr1_input: 0.000
+  curr1_max: 0.000
+
+spd5118-i2c-10-50
+Adapter: SMBus PIIX4 adapter port 0 at 0b00
+temp1:
+  temp1_input: 42.250
+  temp1_max: 55.000
+  temp1_min: 0.000
+  temp1_crit: 85.000
+  temp1_lcrit: 0.000
+  temp1_max_alarm: 0.000
+  temp1_min_alarm: 0.000
+  temp1_crit_alarm: 0.000
+  temp1_lcrit_alarm: 0.000
+
+ucsi_source_psy_USBC000:001-isa-0000
+Adapter: ISA adapter
+in0:
+  in0_input: 0.000
+  in0_min: 0.000
+  in0_max: 0.000
+curr1:
+  curr1_input: 0.000
+  curr1_max: 0.000
+
+yogafan-isa-0000
+Adapter: ISA adapter
+fan1:
+  fan1_input: 0.000
+fan2:
+  fan2_input: 0.000
+
+r8169_0_700:00-mdio-0
+Adapter: MDIO adapter
+temp1:
+  temp1_input: 34.500
+  temp1_max: 120.000
+
+amdgpu-pci-0800
+Adapter: PCI adapter
+vddgfx:
+  in0_input: 1.314
+vddnb:
+  in1_input: 0.844
+edge:
+  temp1_input: 52.000
+PPT:
+  power1_input: 0.012
+sclk:
+  freq1_input: 2040000000.000
+
+nvme-pci-0300
+Adapter: PCI adapter
+Composite:
+  temp1_input: 34.850
+  temp1_max: 83.850
+  temp1_min: -20.150
+  temp1_crit: 88.850
+  temp1_alarm: 0.000
+
+spd5118-i2c-10-51
+Adapter: SMBus PIIX4 adapter port 0 at 0b00
+temp1:
+  temp1_input: 38.500
+  temp1_max: 55.000
+  temp1_min: 0.000
+  temp1_crit: 85.000
+  temp1_lcrit: 0.000
+  temp1_max_alarm: 0.000
+  temp1_min_alarm: 0.000
+  temp1_crit_alarm: 0.000
+  temp1_lcrit_alarm: 0.000
+
+ucsi_source_psy_USBC000:002-isa-0000
+Adapter: ISA adapter
+in0:
+  in0_input: 0.000
+  in0_min: 0.000
+  in0_max: 0.000
+curr1:
+  curr1_input: 0.000
+  curr1_max: 0.000
+
+lenovo_wmi_other-virtual-0
+Adapter: Virtual device
+fan1:
+  fan1_input: 1800.000
+  fan1_min: 1700.000
+  fan1_max: 5200.000
+  fan1_div: 100.000
+fan2:
+  fan2_input: 1800.000
+  fan2_min: 1700.000
+  fan2_max: 5400.000
+  fan2_div: 100.000
+fan4:
+  fan4_input: 2500.000
+  fan4_min: 1500.000
+  fan4_max: 6500.000
+  fan4_div: 100.000
+
+iwlwifi_1-virtual-0
+Adapter: Virtual device
+temp1:
+  temp1_input: 32.000
+
+k10temp-pci-00c3
+Adapter: PCI adapter
+Tctl:
+  temp1_input: 58.750
+Tccd1:
+  temp3_input: 52.000
+Tccd2:
+  temp4_input: 53.625
+
+nvme-pci-0200
+Adapter: PCI adapter
+Composite:
+  temp1_input: 33.850
+  temp1_max: 82.850
+  temp1_min: -273.150
+  temp1_crit: 84.850
+  temp1_alarm: 0.000
+Sensor 1:
+  temp2_input: 43.850
+  temp2_max: 65261.850
+  temp2_min: -273.150
+Sensor 2:
+  temp3_input: 36.850
+  temp3_max: 65261.850
+  temp3_min: -273.150
+
+BAT0-acpi-0
+Adapter: ACPI interface
+in0:
+  in0_input: 17.271
+power1:
+  power1_input: 0.000
+

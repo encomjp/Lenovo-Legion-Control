@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Tray">
+  <title>Tray</title>
+  <rect x="64" y="64" width="384" height="384" rx="96" fill="#26262a"/>
+  <path d="M154 143v197h158" fill="none" stroke="#f7f7f8" stroke-width="49" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M213 143h107l-36 43H213z" fill="#c8102e"/>
+  <circle cx="386" cy="386" r="66" fill="#26262a"/>
+  <circle cx="386" cy="386" r="43" fill="#42c96b"/>
+</svg>

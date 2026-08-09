@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Profiles">
+  <title>Profiles</title>
+  <path d="M149 68h175l81 83v292H149z" fill="#f3eaff" stroke="#7950b5" stroke-width="38" stroke-linejoin="round"/>
+  <path d="M324 68v85h85" fill="#d9c4f5" stroke="#7950b5" stroke-width="38" stroke-linejoin="round"/>
+  <path d="M213 235h128M213 310h128M213 384h85" fill="none" stroke="#7950b5" stroke-width="36" stroke-linecap="round"/>
+  <path d="M85 133v269" fill="none" stroke="#b18adc" stroke-width="38" stroke-linecap="round"/>
+</svg>
