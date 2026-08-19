@@ -1,13 +1,14 @@
 //! Persistent app settings (`~/.config/legion-control/settings.json`).
 
 use crate::keyboard::{RgbEffect, RgbZone};
+use crate::thermal::ThermalConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZoneEffect {
@@ -189,6 +190,8 @@ pub struct AppConfig {
     /// First-launch welcome dialog already shown.
     #[serde(default)]
     pub welcome_seen: bool,
+    #[serde(default)]
+    pub thermal: ThermalConfig,
 }
 
 fn default_lighting_mode() -> String {
@@ -228,6 +231,7 @@ impl Default for AppConfig {
             profiles: HashMap::new(),
             active_profile: String::new(),
             welcome_seen: false,
+            thermal: ThermalConfig::default(),
         }
     }
 }
