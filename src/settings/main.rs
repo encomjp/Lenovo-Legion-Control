@@ -415,8 +415,8 @@ fn build_ui(app: &adw::Application) {
     );
     stack.add_titled(
         &page_shell(&build_thermal_card(&toast_overlay, &daemon_gate)),
-        Some("cooling-thermal"),
-        "Thermal",
+        Some("cpu-thermal"),
+        "CPU Thermal",
     );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
@@ -586,6 +586,7 @@ fn build_ui(app: &adw::Application) {
         "CPU",
         &[
             ("Features", "Boost and threading"),
+            ("Thermal", "Max temperature"),
             ("Power limits", "CPU and GPU limits"),
             ("Undervolt", "CPU offset"),
             ("Stability test", "5-minute check"),
@@ -599,7 +600,6 @@ fn build_ui(app: &adw::Application) {
             ("GPU fan", "Graphics fan"),
             ("Aux fan", "Chassis fan"),
             ("Reset fans", "Return to curve"),
-            ("Thermal", "CPU throttle"),
         ],
     );
     let (lighting_sec, lighting_list) = make_section(
@@ -847,6 +847,7 @@ fn build_ui(app: &adw::Application) {
         &cpu_list,
         &[
             ("cpu-features", "CPU Features"),
+            ("cpu-thermal", "Max Temperature"),
             ("cpu-power", "CPU Power Limits"),
             ("cpu-undervolt", "CPU Undervolt"),
             ("cpu-stability", "CPU Stability"),
@@ -860,7 +861,6 @@ fn build_ui(app: &adw::Application) {
             ("cooling-gpu", "GPU Fan"),
             ("cooling-aux", "Aux Fan"),
             ("cooling-reset", "Reset Fans"),
-            ("cooling-thermal", "Thermal"),
         ],
         show_page.clone(),
     );
@@ -3033,184 +3033,242 @@ fn build_fan_reset_page(apply_queue: &ApplyQueue, gate: &DaemonGate) -> gtk::Box
     page
 }
 
+const THERMAL_TJMAX_WARNING: &str = "\
+96–98 °C is above the 9955HX3D TjMax (95 °C). Sustained use above TjMax can \
+degrade the CPU or reduce its lifespan.
+
+Only continue if you accept this risk.";
+
 fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("CPU clock throttling when hot");
-    let group = pref_group("Thermal Throttle", Some("Clamp scaling_max_freq when hot"));
+    // Garage Lab page — SwitchRow + ActionRow with scale, like CPU features / PPT.
+    let page = page_lede("Cap CPU clocks when hot — restores 7 °C below the limit.");
+    let group = pref_group(
+        "Thermal throttle",
+        Some("Governor clamps scaling_max_freq when the CPU is hot (5.46→4.60 GHz in 200 MHz/s, 1 s poll) and restores when it cools. Uses TjMax 95 °C as the hardware failsafe."),
+    );
     tip(
         &group,
-        "Caps the CPU frequency when the processor is hot — restores when it cools down",
+        "Daemon-native governor ported from cpu-throttle-95.sh — live temps use k10temp Tctl/Tccd2",
     );
 
-    let enabled_switch = adw::SwitchRow::builder()
-        .title("Throttling enabled")
-        .subtitle("Clamp CPU frequency above the limit")
+    let enabled = adw::SwitchRow::builder()
+        .title("Thermal throttle")
+        .subtitle("Off · no frequency clamp")
         .active(false)
         .build();
     tip(
-        &enabled_switch,
-        "On = daemon steps scaling_max_freq when hot; Off = no clamp",
+        &enabled,
+        "On = daemon steps scaling_max_freq when temp ≥ max; Off = no clamp",
     );
-    group.add(&enabled_switch);
+    group.add(&enabled);
 
-    let scale_row = adw::ActionRow::builder()
-        .title("Max temperature")
-        .subtitle("Throttle threshold in °C")
-        .activatable(false)
-        .build();
-    let value_label = gtk::Label::new(Some("90 °C"));
-    value_label.add_css_class("numeric");
-    value_label.add_css_class("scale-value");
-    value_label.set_width_chars(6);
-    let adjustment = gtk::Adjustment::new(90.0, 70.0, 98.0, 1.0, 5.0, 0.0);
-    let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adjustment));
+    let value = gtk::Label::new(Some("90 °C"));
+    value.add_css_class("numeric");
+    value.add_css_class("scale-value");
+    let adj = gtk::Adjustment::new(90.0, 70.0, 98.0, 1.0, 5.0, 0.0);
+    let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adj));
     scale.set_draw_value(false);
     scale.set_digits(0);
     scale.set_hexpand(true);
-    scale.set_width_request(220);
+    scale.set_width_request(180);
+    value.set_width_chars(6);
+    value.set_xalign(1.0);
+    tip(&scale, "Maximum temperature — restore point is 7 °C below");
+    tip(&value, "Current threshold");
+    let temp_row = adw::ActionRow::builder()
+        .title("Maximum temperature")
+        .subtitle("Throttle at this temp · restores at 83 °C")
+        .activatable(false)
+        .build();
     tip(
-        &scale,
-        "70–98 °C · 96–98 °C exceeds TjMax 95 °C and needs acknowledgement",
+        &temp_row,
+        "70–98 °C slider — 96–98 °C needs explicit confirmation (above TjMax)",
     );
-    scale_row.add_suffix(&scale);
-    scale_row.add_suffix(&value_label);
-    group.add(&scale_row);
+    temp_row.add_suffix(&scale);
+    temp_row.add_suffix(&value);
+    group.add(&temp_row);
 
-    let restore_label = gtk::Label::new(Some("Restore at 83 °C"));
-    restore_label.add_css_class("dim-label");
-    restore_label.set_halign(Align::Start);
-    restore_label.set_margin_start(12);
-    restore_label.set_margin_bottom(2);
-    tip(
-        &restore_label,
-        "Clocks step back up when temperature falls to this restore point (max − 7 °C)",
-    );
-    group.add(&restore_label);
-
-    let warning = gtk::Label::new(Some(
-        "96–98 °C exceeds TjMax 95 °C — sustained use may damage hardware.",
-    ));
-    warning.add_css_class("thermal-warning");
-    warning.set_wrap(true);
-    warning.set_halign(Align::Start);
-    warning.set_margin_start(12);
-    warning.set_visible(false);
-    tip(
-        &warning,
-        "Above TjMax: only continue if you accept the risk",
-    );
-    group.add(&warning);
-
-    let ack_check = gtk::CheckButton::with_label("I understand");
-    ack_check.set_halign(Align::Start);
-    ack_check.set_margin_start(12);
-    ack_check.set_margin_bottom(4);
-    ack_check.set_visible(false);
-    tip(
-        &ack_check,
-        "Acknowledge 96–98 °C exceeds the CPU's rated maximum",
-    );
-    group.add(&ack_check);
-
-    let status_row = gtk::Box::new(Orientation::Horizontal, 12);
-    status_row.set_margin_top(4);
+    // Live readout — same glass metric chips as Overview, no extra warning widget.
+    let chips = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .max_children_per_line(3)
+        .min_children_per_line(2)
+        .homogeneous(true)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    chips.add_css_class("metric-grid");
+    chips.set_margin_top(12);
     let (tctl_chip, tctl_v, tctl_d) =
-        metric_chip_tip("Tctl", Some("k10temp Tctl — main CPU temperature"));
+        metric_chip_tip("Tctl", Some("k10temp Tctl — main package temp"));
     let (tccd2_chip, tccd2_v, tccd2_d) =
-        metric_chip_tip("Tccd2", Some("k10temp CCD2 temperature (fallback CCD)"));
-    let (freq_chip, freq_v, freq_d) =
-        metric_chip_tip("Max freq", Some("Current scaling_max_freq across CPUs"));
-    status_row.append(&tctl_chip);
-    status_row.append(&tccd2_chip);
-    status_row.append(&freq_chip);
-    group.add(&status_row);
+        metric_chip_tip("Tccd2", Some("k10temp Tccd2 — secondary CCD temp"));
+    let (freq_chip, freq_v, freq_d) = metric_chip_tip(
+        "Max freq",
+        Some("Current scaling_max_freq across online CPUs"),
+    );
+    chips.append(&tctl_chip);
+    chips.append(&tccd2_chip);
+    chips.append(&freq_chip);
 
     page.append(&group);
-    gate.track(&page);
+    page.append(&chips);
+    gate.track(&group);
+    gate.track(&chips);
 
+    // Shared state
     let suppress: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let acknowledged: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let last_max: Rc<Cell<u8>> = Rc::new(Cell::new(90));
+    let acked: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
 
-    let do_set_thermal: Rc<dyn Fn()> = Rc::new({
+    let fmt_throttle_sub = |on: bool, max: u8| -> String {
+        if on {
+            format!(
+                "On · cap at {max} °C · restores at {} °C",
+                max.saturating_sub(7)
+            )
+        } else {
+            "Off · no frequency clamp".into()
+        }
+    };
+    let fmt_temp_sub = |max: u8| -> String {
+        format!(
+            "Throttle at {max} °C · restores at {} °C",
+            max.saturating_sub(7)
+        )
+    };
+
+    // Immediate daemon write (no hysteresis UI, no inline ack).
+    let do_apply = {
         let scale_c = scale.clone();
-        let enabled_c = enabled_switch.clone();
-        let acknowledged_c = acknowledged.clone();
+        let enabled_c = enabled.clone();
+        let toast_c = toast.clone();
+        let suppress_c = suppress.clone();
+        let last_max_c = last_max.clone();
+        let acked_c = acked.clone();
+        let temp_row_c = temp_row.clone();
+        let value_c = value.clone();
+        Rc::new(move |max_temp: u8, enabled_val: bool, acknowledge: bool| {
+            let enabled_cc = enabled_c.clone();
+            let toast_cc = toast_c.clone();
+            let suppress_cc = suppress_c.clone();
+            let last_max_cc = last_max_c.clone();
+            let acked_cc = acked_c.clone();
+            run_daemon_command_async(
+                DaemonCommand::SetThermal {
+                    enabled: enabled_val,
+                    max_temp,
+                    acknowledge,
+                },
+                move |result| match result {
+                    Ok(DaemonResponse::ThermalStatus(st)) => {
+                        suppress_cc.set(true);
+                        enabled_cc.set_active(st.config.enabled);
+                        enabled_cc
+                            .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
+                        // scale signal is suppressed so we set raw value without re-triggering
+                        let adj = enabled_cc.parent().and_then(|_| None::<gtk::Adjustment>);
+                        let _ = adj;
+                        suppress_cc.set(false);
+                        // Persist ack state: daemon accepted this max, so if it was ≥96 we are acked
+                        if st.config.max_temp >= 96 {
+                            acked_cc.set(true);
+                        } else {
+                            acked_cc.set(false);
+                        }
+                        last_max_cc.set(st.config.max_temp);
+                    }
+                    Ok(DaemonResponse::Error(e)) => toast_error(&toast_cc, &e),
+                    Ok(other) => toast_error(&toast_cc, &format!("Unexpected response: {other:?}")),
+                    Err(e) => toast_error(&toast_cc, &e),
+                },
+            );
+        })
+    };
+
+    // Debounced apply from slider — gate 96–98 through confirm_risk.
+    let do_apply_debounced: Rc<dyn Fn()> = {
+        let scale_c = scale.clone();
+        let enabled_c = enabled.clone();
         let debounce_c = debounce.clone();
         let toast_c = toast.clone();
         let suppress_c = suppress.clone();
-        let warning_c = warning.clone();
-        let ack_c = ack_check.clone();
-        let value_c = value_label.clone();
-        let restore_c = restore_label.clone();
-        move || {
+        let last_max_c = last_max.clone();
+        let acked_c = acked.clone();
+        let temp_row_c = temp_row.clone();
+        let value_c = value.clone();
+        let do_apply_c = do_apply.clone();
+        Rc::new(move || {
             let ticket = debounce_c.get().wrapping_add(1);
             debounce_c.set(ticket);
             let scale_cc = scale_c.clone();
             let enabled_cc = enabled_c.clone();
-            let acknowledged_cc = acknowledged_c.clone();
             let toast_cc = toast_c.clone();
             let suppress_cc = suppress_c.clone();
-            let warning_cc = warning_c.clone();
-            let ack_cc = ack_c.clone();
+            let last_max_cc = last_max_c.clone();
+            let acked_cc = acked_c.clone();
+            let temp_row_cc = temp_row_c.clone();
             let value_cc = value_c.clone();
-            let restore_cc = restore_c.clone();
             let debounce_cc = debounce_c.clone();
+            let do_apply_cc = do_apply_c.clone();
             glib::timeout_add_local_once(Duration::from_millis(140), move || {
                 if debounce_cc.get() != ticket {
                     return;
                 }
                 let max_temp = scale_cc.value().round().clamp(70.0, 98.0) as u8;
-                let enabled = enabled_cc.is_active();
-                let acknowledge = acknowledged_cc.get();
+                let enabled_val = enabled_cc.is_active();
+                // Live label + subtitle — always reflect slider immediately
                 value_cc.set_text(&format!("{max_temp} °C"));
-                restore_cc.set_text(&format!("Restore at {} °C", max_temp.saturating_sub(7)));
-                let needs_ack = max_temp >= 96;
-                warning_cc.set_visible(needs_ack);
-                ack_cc.set_visible(needs_ack);
-                if needs_ack && !acknowledge {
+                temp_row_cc.set_subtitle(&fmt_temp_sub(max_temp));
+                suppress_cc.set(true);
+                enabled_cc.set_subtitle(&fmt_throttle_sub(enabled_val, max_temp));
+                suppress_cc.set(false);
+                if max_temp >= 96 && !acked_cc.get() {
+                    let scale_for_dialog = scale_cc.clone();
+                    let suppress_for_dialog = suppress_cc.clone();
+                    let last = last_max_cc.get();
+                    let do_apply_ok = do_apply_cc.clone();
+                    confirm_risk(
+                        &scale_cc,
+                        "Exceed TjMax 95 °C?",
+                        THERMAL_TJMAX_WARNING,
+                        &format!("Use {max_temp} °C anyway"),
+                        move |ok| {
+                            if !ok {
+                                suppress_for_dialog.set(true);
+                                scale_for_dialog.set_value(last as f64);
+                                value_cc.set_text(&format!("{last} °C"));
+                                temp_row_cc.set_subtitle(&fmt_temp_sub(last));
+                                let en = enabled_cc.is_active();
+                                enabled_cc.set_subtitle(&fmt_throttle_sub(en, last));
+                                suppress_for_dialog.set(false);
+                                return;
+                            }
+                            acked_cc.set(true);
+                            do_apply_ok(max_temp, enabled_val, true);
+                        },
+                    );
                     return;
                 }
-                run_daemon_command_async(
-                    DaemonCommand::SetThermal {
-                        enabled,
-                        max_temp,
-                        acknowledge,
-                    },
-                    move |result| match result {
-                        Ok(DaemonResponse::ThermalStatus(st)) => {
-                            suppress_cc.set(true);
-                            enabled_cc.set_active(st.config.enabled);
-                            scale_cc.set_value(st.config.max_temp as f64);
-                            value_cc.set_text(&format!("{} °C", st.config.max_temp));
-                            restore_cc.set_text(&format!("Restore at {} °C", st.restore_temp));
-                            let hot = st.config.max_temp >= 96;
-                            warning_cc.set_visible(hot);
-                            ack_cc.set_visible(hot);
-                            if !hot {
-                                acknowledged_cc.set(false);
-                                ack_cc.set_active(false);
-                            }
-                            suppress_cc.set(false);
-                        }
-                        Ok(DaemonResponse::Error(e)) => toast_error(&toast_cc, &e),
-                        Ok(other) => {
-                            toast_error(&toast_cc, &format!("Unexpected response: {other:?}"))
-                        }
-                        Err(e) => toast_error(&toast_cc, &e),
-                    },
-                );
+                if max_temp < 96 {
+                    acked_cc.set(false);
+                }
+                let ack = acked_cc.get();
+                do_apply_cc(max_temp, enabled_val, ack);
             });
-        }
-    });
+        })
+    };
 
+    // Initial load
     {
         let scale_c = scale.clone();
-        let enabled_c = enabled_switch.clone();
-        let value_c = value_label.clone();
-        let restore_c = restore_label.clone();
-        let warning_c = warning.clone();
-        let ack_c = ack_check.clone();
+        let enabled_c = enabled.clone();
+        let value_c = value.clone();
+        let temp_row_c = temp_row.clone();
         let suppress_c = suppress.clone();
+        let last_max_c = last_max.clone();
+        let acked_c = acked.clone();
         let tctl_v_c = tctl_v.clone();
         let tctl_d_c = tctl_d.clone();
         let tccd2_v_c = tccd2_v.clone();
@@ -3225,12 +3283,13 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             match result {
                 Ok(DaemonResponse::ThermalStatus(st)) => {
                     enabled_c.set_active(st.config.enabled);
+                    enabled_c
+                        .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                     scale_c.set_value(st.config.max_temp as f64);
                     value_c.set_text(&format!("{} °C", st.config.max_temp));
-                    restore_c.set_text(&format!("Restore at {} °C", st.restore_temp));
-                    let hot = st.config.max_temp >= 96;
-                    warning_c.set_visible(hot);
-                    ack_c.set_visible(hot);
+                    temp_row_c.set_subtitle(&fmt_temp_sub(st.config.max_temp));
+                    last_max_c.set(st.config.max_temp);
+                    acked_c.set(st.config.max_temp >= 96);
                     let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
                     let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
                     if let Some(c) = tctl_c {
@@ -3251,7 +3310,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         tccd2_d_c.set_text("no sensor");
                         tint_temp(&tccd2_chip_c, 0.0);
                     }
-                    freq_v_c.set_text(&format!("{} kHz", st.cur_max_freq));
+                    freq_v_c.set_text(&format!("{:.2} GHz", st.cur_max_freq as f64 / 1_000_000.0));
                     freq_d_c.set_text(if st.active { "clamped" } else { "full" });
                     let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
                     if tint_c.is_finite() {
@@ -3280,65 +3339,63 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     }
 
     {
-        let do_set = do_set_thermal.clone();
+        let do_apply_c = do_apply.clone();
         let suppress_c = suppress.clone();
-        enabled_switch.connect_active_notify(move |_| {
+        let scale_c = scale.clone();
+        let acked_c = acked.clone();
+        enabled.connect_active_notify(move |row| {
             if suppress_c.get() {
                 return;
             }
-            do_set();
+            let on = row.is_active();
+            let max_temp = scale_c.value().round().clamp(70.0, 98.0) as u8;
+            row.set_subtitle(&fmt_throttle_sub(on, max_temp));
+            if max_temp >= 96 && !acked_c.get() {
+                let row_c = row.clone();
+                let scale_cc = scale_c.clone();
+                let suppress_cc = suppress_c.clone();
+                let acked_cc = acked_c.clone();
+                let do_apply_ok = do_apply_c.clone();
+                confirm_risk(
+                    row,
+                    "Exceed TjMax 95 °C?",
+                    THERMAL_TJMAX_WARNING,
+                    &format!("Use {max_temp} °C anyway"),
+                    move |ok| {
+                        if !ok {
+                            suppress_cc.set(true);
+                            row_c.set_active(!on);
+                            row_c.set_subtitle(&fmt_throttle_sub(!on, max_temp));
+                            suppress_cc.set(false);
+                            return;
+                        }
+                        acked_cc.set(true);
+                        do_apply_ok(max_temp, on, true);
+                    },
+                );
+                suppress_c.set(true);
+                row.set_active(!on);
+                row.set_subtitle(&fmt_throttle_sub(!on, max_temp));
+                suppress_c.set(false);
+                return;
+            }
+            let ack = acked_c.get();
+            do_apply_c(max_temp, on, ack);
         });
     }
 
     {
-        let do_set = do_set_thermal.clone();
+        let debounced = do_apply_debounced.clone();
         let suppress_c = suppress.clone();
-        let acknowledged_c = acknowledged.clone();
-        let ack_c = ack_check.clone();
-        let warning_c = warning.clone();
-        let scale_c = scale.clone();
-        let value_c = value_label.clone();
-        let restore_c = restore_label.clone();
         scale.connect_value_changed(move |_| {
             if suppress_c.get() {
                 return;
             }
-            let v = scale_c.value().round().clamp(70.0, 98.0) as u8;
-            value_c.set_text(&format!("{v} °C"));
-            restore_c.set_text(&format!("Restore at {} °C", v.saturating_sub(7)));
-            let needs_ack = v >= 96;
-            warning_c.set_visible(needs_ack);
-            ack_c.set_visible(needs_ack);
-            if needs_ack && !acknowledged_c.get() {
-                return;
-            }
-            if !needs_ack {
-                acknowledged_c.set(false);
-                let was_suppressed = suppress_c.get();
-                suppress_c.set(true);
-                ack_c.set_active(false);
-                suppress_c.set(was_suppressed);
-            }
-            do_set();
+            debounced();
         });
     }
 
-    {
-        let do_set = do_set_thermal.clone();
-        let suppress_c = suppress.clone();
-        let acknowledged_c = acknowledged.clone();
-        ack_check.connect_toggled(move |cb| {
-            if suppress_c.get() {
-                return;
-            }
-            let on = cb.is_active();
-            acknowledged_c.set(on);
-            if on {
-                do_set();
-            }
-        });
-    }
-
+    // Poll live temps
     let tctl_v_p = tctl_v.clone();
     let tctl_d_p = tctl_d.clone();
     let tccd2_v_p = tccd2_v.clone();
@@ -3382,7 +3439,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         tccd2_d_c.set_text("no sensor");
                         tint_temp(&tccd2_chip_c, 0.0);
                     }
-                    freq_v_c.set_text(&format!("{} kHz", st.cur_max_freq));
+                    freq_v_c.set_text(&format!("{:.2} GHz", st.cur_max_freq as f64 / 1_000_000.0));
                     freq_d_c.set_text(if st.active { "clamped" } else { "full" });
                     let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
                     if tint_c.is_finite() {

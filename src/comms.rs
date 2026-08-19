@@ -260,9 +260,7 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         } => format!("SetCurveOptimizerPersistence({enabled},{offset})"),
         DaemonCommand::GetThermal => "GetThermal".into(),
         DaemonCommand::SetThermal {
-            enabled,
-            max_temp,
-            ..
+            enabled, max_temp, ..
         } => format!("SetThermal({enabled},{max_temp})"),
         DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
     }
@@ -335,6 +333,9 @@ mod tests {
         };
         let bytes = bincode::serialize(&cmd).unwrap();
         let back: DaemonCommand = bincode::deserialize(&bytes).unwrap();
-        assert!(matches!(back, DaemonCommand::SetThermal { max_temp: 90, .. }));
+        assert!(matches!(
+            back,
+            DaemonCommand::SetThermal { max_temp: 90, .. }
+        ));
     }
 }

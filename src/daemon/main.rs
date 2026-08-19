@@ -6,11 +6,11 @@
 use legion_core::comms::{
     bind_socket_path, cmd_is_write, cmd_label, DaemonCommand, DaemonResponse,
 };
+use legion_core::thermal::ThermalConfig;
 use legion_core::{
     battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
     undervolt,
 };
-use legion_core::thermal::ThermalConfig;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -136,9 +136,7 @@ fn main() {
     let thermal_cfg = Arc::new(RwLock::new(config::get().thermal.clone()));
     THERMAL_CONFIG.set(thermal_cfg.clone()).ok();
     let thermal_notify: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
-    THERMAL_NOTIFY
-        .set(thermal_notify.clone())
-        .ok();
+    THERMAL_NOTIFY.set(thermal_notify.clone()).ok();
 
     // Watch Spectrum HID + kernel USB faults; soft/USB auto-fix when dark.
     let shutdown_w = shutdown.clone();
@@ -285,8 +283,7 @@ fn thermal_governor(
             // Idle when disabled: wait up to 10s or until SetThermal notifies.
             let (lock, cvar) = &*notify;
             let guard = lock.lock().unwrap();
-            let (mut guard, _timeout) =
-                cvar.wait_timeout(guard, Duration::from_secs(10)).unwrap();
+            let (mut guard, _timeout) = cvar.wait_timeout(guard, Duration::from_secs(10)).unwrap();
             // reset flag
             *guard = false;
             drop(guard);
@@ -642,9 +639,7 @@ fn process_command(
             }
         }
         DaemonCommand::GetThermal => DaemonResponse::Thermal(config::get().thermal),
-        DaemonCommand::GetThermalStatus => {
-            DaemonResponse::ThermalStatus(build_thermal_status())
-        }
+        DaemonCommand::GetThermalStatus => DaemonResponse::ThermalStatus(build_thermal_status()),
         DaemonCommand::SetThermal {
             enabled,
             max_temp,
@@ -681,9 +676,7 @@ fn process_command(
                         );
                     }
                     Err(e) => {
-                        log::warn!(
-                            "systemctl disable --now cpu95-throttle.service failed: {e}"
-                        );
+                        log::warn!("systemctl disable --now cpu95-throttle.service failed: {e}");
                     }
                 }
             }

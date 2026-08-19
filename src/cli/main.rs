@@ -738,8 +738,7 @@ fn main() {
                         _ => 90,
                     }
                 };
-                if let Err(e) =
-                    legion_core::thermal::validate(effective_max, acknowledge_high_temp)
+                if let Err(e) = legion_core::thermal::validate(effective_max, acknowledge_high_temp)
                 {
                     eprintln!("error: {e}");
                     std::process::exit(2);
