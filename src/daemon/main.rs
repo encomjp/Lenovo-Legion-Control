@@ -7,15 +7,22 @@ use legion_core::comms::{
     bind_socket_path, cmd_is_write, cmd_label, DaemonCommand, DaemonResponse,
 };
 use legion_core::{
-    battery, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, undervolt,
+    battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
+    undervolt,
 };
+use legion_core::thermal::ThermalConfig;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
+
+/// Shared thermal config updated on SetThermal and read by the governor.
+static THERMAL_CONFIG: OnceLock<Arc<RwLock<ThermalConfig>>> = OnceLock::new();
+/// Condvar pair used to wake the governor when SetThermal changes the config.
+static THERMAL_NOTIFY: OnceLock<Arc<(Mutex<bool>, Condvar)>> = OnceLock::new();
 
 /// Snapshot of last-seen sensor values for throttled logging.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -125,6 +132,14 @@ fn main() {
     log::info!("legion_hwmon loaded={hwmon_loaded}");
     undervolt::start_persistence_worker();
 
+    // ── thermal governor shared state ──
+    let thermal_cfg = Arc::new(RwLock::new(config::get().thermal.clone()));
+    THERMAL_CONFIG.set(thermal_cfg.clone()).ok();
+    let thermal_notify: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+    THERMAL_NOTIFY
+        .set(thermal_notify.clone())
+        .ok();
+
     // Watch Spectrum HID + kernel USB faults; soft/USB auto-fix when dark.
     let shutdown_w = shutdown.clone();
     if let Err(e) = std::thread::Builder::new()
@@ -134,6 +149,19 @@ fn main() {
         log::error!("failed to start rgb-watchdog thread: {e}");
     } else {
         log::info!("rgb-watchdog thread started");
+    }
+
+    // Thermal governor thread (alongside rgb-watchdog)
+    let shutdown_t = shutdown.clone();
+    let thermal_cfg_t = thermal_cfg.clone();
+    let thermal_notify_t = thermal_notify.clone();
+    if let Err(e) = std::thread::Builder::new()
+        .name("thermal-governor".into())
+        .spawn(move || thermal_governor(shutdown_t, thermal_cfg_t, thermal_notify_t))
+    {
+        log::error!("failed to start thermal-governor thread: {e}");
+    } else {
+        log::info!("thermal-governor thread started");
     }
 
     let mut last_sensors = Instant::now() - Duration::from_secs(60);
@@ -212,6 +240,137 @@ fn send_response(stream: &mut UnixStream, resp: DaemonResponse) -> std::io::Resu
     let data = bincode::serialize(&resp)
         .map_err(|e| std::io::Error::other(format!("Serialize: {}", e)))?;
     stream.write_all(&data)
+}
+
+fn build_thermal_status() -> thermal::ThermalStatus {
+    let cfg = config::get().thermal;
+    let (tctl, tccd2) = thermal::read_thermal_temps();
+    let cur_max = thermal::read_cur_max().unwrap_or(0);
+    let restore_temp = cfg.max_temp.saturating_sub(thermal::HYSTERESIS as u8);
+    let active = cfg.enabled && cur_max != 0 && cur_max < thermal::MAX_FULL;
+    thermal::ThermalStatus {
+        config: cfg,
+        cur_max_freq: cur_max,
+        tctl_mC: tctl,
+        tccd2_mC: tccd2,
+        active,
+        restore_temp,
+    }
+}
+
+fn thermal_governor(
+    shutdown: Arc<AtomicBool>,
+    cfg: Arc<RwLock<ThermalConfig>>,
+    notify: Arc<(Mutex<bool>, Condvar)>,
+) {
+    let mut warned_missing = false;
+    while !shutdown.load(Ordering::Relaxed) {
+        let (tctl, tccd2) = thermal::read_thermal_temps();
+        let cur_max_opt = thermal::read_cur_max();
+        let (enabled, _max_temp) = {
+            let g = cfg.read().unwrap();
+            (g.enabled, g.max_temp)
+        };
+
+        if tctl.is_none() && tccd2.is_none() && !warned_missing {
+            log::warn!(
+                "thermal governor: k10temp not found — status will show None temps, no freq writes"
+            );
+            warned_missing = true;
+        } else if tctl.is_some() || tccd2.is_some() {
+            warned_missing = false;
+        }
+
+        if !enabled {
+            // Idle when disabled: wait up to 10s or until SetThermal notifies.
+            let (lock, cvar) = &*notify;
+            let guard = lock.lock().unwrap();
+            let (mut guard, _timeout) =
+                cvar.wait_timeout(guard, Duration::from_secs(10)).unwrap();
+            // reset flag
+            *guard = false;
+            drop(guard);
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            continue;
+        }
+
+        // Enabled but no temps: cannot compute, sleep 1s
+        if tctl.is_none() && tccd2.is_none() {
+            // respect shutdown with short sleeps
+            for _ in 0..10 {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            continue;
+        }
+
+        let temp_mC = match (tctl, tccd2) {
+            (Some(a), Some(b)) => a.max(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => unreachable!(),
+        };
+
+        let cur = match cur_max_opt {
+            Some(v) => v,
+            None => {
+                log::warn!("thermal governor: cannot read scaling_max_freq — no throttle step");
+                std::thread::sleep(thermal::INTERVAL);
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        let cfg_snapshot = cfg.read().unwrap().clone();
+        if let Some(target) = thermal::compute_target(cur, temp_mC, &cfg_snapshot) {
+            match thermal::write_all_cpus(target) {
+                Ok(()) => {
+                    log::info!(
+                        "thermal governor: {}°C (max {}°C, restore {}°C) cur {} → {} kHz",
+                        temp_mC as f64 / 1000.0,
+                        cfg_snapshot.max_temp,
+                        cfg_snapshot
+                            .max_temp
+                            .saturating_sub(thermal::HYSTERESIS as u8),
+                        cur,
+                        target
+                    );
+                }
+                Err(e) => {
+                    log::warn!("thermal governor: write_all_cpus({}) failed: {e}", target);
+                }
+            }
+        } else {
+            log::trace!(
+                "thermal governor: hold temp {:.1}°C cur {} kHz (max {}°C)",
+                temp_mC as f64 / 1000.0,
+                cur,
+                cfg_snapshot.max_temp
+            );
+        }
+
+        // Sleep 1s when enabled, respecting shutdown
+        // Use segmented sleep so shutdown is noticed within ~100ms
+        for _ in 0..10 {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+    }
+    log::info!("thermal-governor thread stopped");
 }
 
 fn process_command(
@@ -481,6 +640,54 @@ fn process_command(
                     Err(error) => DaemonResponse::Error(error),
                 }
             }
+        }
+        DaemonCommand::GetThermal => DaemonResponse::Thermal(config::get().thermal),
+        DaemonCommand::GetThermalStatus => {
+            DaemonResponse::ThermalStatus(build_thermal_status())
+        }
+        DaemonCommand::SetThermal {
+            enabled,
+            max_temp,
+            acknowledge,
+        } => {
+            if let Err(e) = thermal::validate(max_temp, acknowledge) {
+                return DaemonResponse::Error(e);
+            }
+            let was_enabled = config::get().thermal.enabled;
+            config::update(|c| c.thermal = ThermalConfig { enabled, max_temp });
+            if let Some(shared) = THERMAL_CONFIG.get() {
+                if let Ok(mut g) = shared.write() {
+                    *g = ThermalConfig { enabled, max_temp };
+                }
+            }
+            if let Some(notify) = THERMAL_NOTIFY.get() {
+                let (lock, cvar) = &**notify;
+                if let Ok(mut flag) = lock.lock() {
+                    *flag = true;
+                    cvar.notify_one();
+                }
+            }
+            if enabled && !was_enabled {
+                match std::process::Command::new("systemctl")
+                    .args(["disable", "--now", "cpu95-throttle.service"])
+                    .status()
+                {
+                    Ok(st) if st.success() => {
+                        log::info!("disabled legacy cpu95-throttle.service");
+                    }
+                    Ok(st) => {
+                        log::warn!(
+                            "systemctl disable --now cpu95-throttle.service failed: status {st}"
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "systemctl disable --now cpu95-throttle.service failed: {e}"
+                        );
+                    }
+                }
+            }
+            DaemonResponse::ThermalStatus(build_thermal_status())
         }
     };
 
