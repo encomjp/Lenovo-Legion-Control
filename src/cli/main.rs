@@ -134,6 +134,32 @@ enum Commands {
         #[arg(long)]
         i_understand_instability_risk: bool,
     },
+    /// Thermal throttle control
+    Thermal {
+        #[command(subcommand)]
+        command: ThermalCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ThermalCmd {
+    /// Show thermal throttle status
+    Status,
+    /// Set thermal throttle (max 70–98°C, 96–98 needs ack)
+    Set {
+        /// Max temperature 70–98 (default 90). Enables if --off not given.
+        #[arg(long)]
+        max_temp: Option<u8>,
+        /// Disable throttle (enabled=false)
+        #[arg(long)]
+        off: bool,
+        /// Explicitly enable (default when max_temp given)
+        #[arg(long)]
+        on: bool,
+        /// Acknowledge 96–98°C exceeds TjMax 95°C
+        #[arg(long)]
+        acknowledge_high_temp: bool,
+    },
 }
 
 fn main() {
@@ -686,6 +712,56 @@ fn main() {
                 }
             }
         }
+        Commands::Thermal { command } => match command {
+            ThermalCmd::Status => match send_command(DaemonCommand::GetThermalStatus) {
+                Ok(DaemonResponse::ThermalStatus(s)) => print_thermal_status(&s),
+                Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
+                Err(e) => eprintln!("error: {e}"),
+                _ => eprintln!("error: unexpected response"),
+            },
+            ThermalCmd::Set {
+                max_temp,
+                off,
+                on,
+                acknowledge_high_temp,
+            } => {
+                if off && on {
+                    eprintln!("error: --off and --on are mutually exclusive");
+                    std::process::exit(2);
+                }
+                let enabled = !off;
+                let effective_max = if let Some(v) = max_temp {
+                    v
+                } else {
+                    match send_command(DaemonCommand::GetThermalStatus) {
+                        Ok(DaemonResponse::ThermalStatus(s)) => s.config.max_temp,
+                        _ => 90,
+                    }
+                };
+                if let Err(e) =
+                    legion_core::thermal::validate(effective_max, acknowledge_high_temp)
+                {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                }
+                match send_command(DaemonCommand::SetThermal {
+                    enabled,
+                    max_temp: effective_max,
+                    acknowledge: acknowledge_high_temp,
+                }) {
+                    Ok(DaemonResponse::ThermalStatus(s)) => print_thermal_status(&s),
+                    Ok(DaemonResponse::Error(e)) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
+                    _ => eprintln!("error: unexpected response"),
+                }
+            }
+        },
     }
 }
 
@@ -756,6 +832,23 @@ fn rgb_status_local() {
     }
 }
 
+fn print_thermal_status(s: &legion_core::thermal::ThermalStatus) {
+    let on_off = if s.config.enabled { "on" } else { "off" };
+    let state = if s.active { "throttling" } else { "idle" };
+    let tctl = s
+        .tctl_mC
+        .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
+        .unwrap_or_else(|| "n/a".into());
+    let tccd2 = s
+        .tccd2_mC
+        .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
+        .unwrap_or_else(|| "n/a".into());
+    println!(
+        "Thermal: {} · max {}°C (restore {}°C) · cur {} kHz · Tctl {} / Tccd2 {} · {}",
+        on_off, s.config.max_temp, s.restore_temp, s.cur_max_freq, tctl, tccd2, state
+    );
+}
+
 fn rgb_fix_local() {
     let report = legion_core::rgb_panic::troubleshoot();
     for s in report.steps {
@@ -800,6 +893,10 @@ fn normalize_profile(name: &str) -> String {
 fn print_sensors(resp: Result<DaemonResponse, String>) {
     match resp {
         Ok(DaemonResponse::Sensors(s)) => {
+            let cpu_power = match send_command(DaemonCommand::GetCpuPower) {
+                Ok(DaemonResponse::CpuPower(w)) if w > 0.5 => Some(w),
+                _ => None,
+            };
             println!("┌─ Legion Sensors ─────────────────────────────────────┐");
             println!("│  Profile   {:<42} │", friendly_profile(&s.profile));
             println!("├─ CPU ────────────────────────────────────────────────┤");
@@ -811,6 +908,12 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 "│  EC   {:>5.1}°C                                        │",
                 s.ec_cpu
             );
+            if let Some(w) = cpu_power {
+                println!(
+                    "│  CPU power {:>5.1} W                                  │",
+                    w
+                );
+            }
             println!("├─ GPU ────────────────────────────────────────────────┤");
             println!(
                 "│  iGPU {:>5.1}°C  {:>5.2} W                               │",
