@@ -378,14 +378,14 @@ fn build_ui(app: &adw::Application) {
         "CPU Features",
     );
     stack.add_titled(
+        &page_shell(&build_cpu_tuning_page(&toast_overlay, &daemon_gate)),
+        Some("cpu-tuning"),
+        "CPU Tuning",
+    );
+    stack.add_titled(
         &page_shell(&build_cpu_power_page(&toast_overlay)),
         Some("cpu-power"),
         "CPU Power",
-    );
-    stack.add_titled(
-        &page_shell(&build_cpu_undervolt_page(&toast_overlay)),
-        Some("cpu-undervolt"),
-        "CPU Undervolt",
     );
     stack.add_titled(
         &page_shell(&build_cpu_stability_page(&toast_overlay)),
@@ -412,11 +412,6 @@ fn build_ui(app: &adw::Application) {
         &page_shell(&build_fan_reset_page(&apply_queue, &daemon_gate)),
         Some("cooling-reset"),
         "Reset Fans",
-    );
-    stack.add_titled(
-        &page_shell(&build_thermal_card(&toast_overlay, &daemon_gate)),
-        Some("cpu-thermal"),
-        "CPU Thermal",
     );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
@@ -586,9 +581,8 @@ fn build_ui(app: &adw::Application) {
         "CPU",
         &[
             ("Features", "Boost and threading"),
-            ("Thermal", "Max temperature"),
+            ("Tuning", "Thermal + undervolt"),
             ("Power limits", "CPU and GPU limits"),
-            ("Undervolt", "CPU offset"),
             ("Stability test", "5-minute check"),
         ],
     );
@@ -847,9 +841,8 @@ fn build_ui(app: &adw::Application) {
         &cpu_list,
         &[
             ("cpu-features", "CPU Features"),
-            ("cpu-thermal", "Max Temperature"),
+            ("cpu-tuning", "CPU Tuning"),
             ("cpu-power", "CPU Power Limits"),
-            ("cpu-undervolt", "CPU Undervolt"),
             ("cpu-stability", "CPU Stability"),
         ],
         show_page.clone(),
@@ -2066,8 +2059,10 @@ fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
     page
 }
 
-fn build_cpu_undervolt_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("");
+fn build_cpu_tuning_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+    let page = page_lede("Max temperature and Curve Optimizer — both survive reboot when enabled.");
+    // Thermal first (universal), undervolt second (GraniteRidge-only).
+    page.append(&build_thermal_card(toast_overlay, gate));
     page.append(&build_curve_optimizer(toast_overlay));
     page
 }
