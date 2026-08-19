@@ -18,4 +18,5 @@ pub mod models;
 pub mod profile;
 pub mod rgb_panic;
 pub mod sensors;
+pub mod thermal;
 pub mod undervolt;
