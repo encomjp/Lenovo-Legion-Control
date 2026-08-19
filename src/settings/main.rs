@@ -413,6 +413,11 @@ fn build_ui(app: &adw::Application) {
         Some("cooling-reset"),
         "Reset Fans",
     );
+    stack.add_titled(
+        &page_shell(&build_thermal_card(&toast_overlay, &daemon_gate)),
+        Some("cooling-thermal"),
+        "Thermal",
+    );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
         &page_shell(&battery_status_page),
@@ -594,6 +599,7 @@ fn build_ui(app: &adw::Application) {
             ("GPU fan", "Graphics fan"),
             ("Aux fan", "Chassis fan"),
             ("Reset fans", "Return to curve"),
+            ("Thermal", "CPU throttle"),
         ],
     );
     let (lighting_sec, lighting_list) = make_section(
@@ -854,6 +860,7 @@ fn build_ui(app: &adw::Application) {
             ("cooling-gpu", "GPU Fan"),
             ("cooling-aux", "Aux Fan"),
             ("cooling-reset", "Reset Fans"),
+            ("cooling-thermal", "Thermal"),
         ],
         show_page.clone(),
     );
@@ -884,7 +891,11 @@ fn build_ui(app: &adw::Application) {
         ],
         show_page.clone(),
     );
-    bind_sub(&profiles_list, &[("profiles", "Profiles")], show_page.clone());
+    bind_sub(
+        &profiles_list,
+        &[("profiles", "Profiles")],
+        show_page.clone(),
+    );
     {
         let tabs = lighting_tabs.clone();
         let show = show_page.clone();
@@ -3019,6 +3030,375 @@ fn build_fan_reset_page(apply_queue: &ApplyQueue, gate: &DaemonGate) -> gtk::Box
     gated.append(&reset);
     gate.track(&gated);
     page.append(&gated);
+    page
+}
+
+fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+    let page = page_lede("CPU clock throttling when hot");
+    let group = pref_group("Thermal Throttle", Some("Clamp scaling_max_freq when hot"));
+    tip(
+        &group,
+        "Caps the CPU frequency when the processor is hot — restores when it cools down",
+    );
+
+    let enabled_switch = adw::SwitchRow::builder()
+        .title("Throttling enabled")
+        .subtitle("Clamp CPU frequency above the limit")
+        .active(false)
+        .build();
+    tip(
+        &enabled_switch,
+        "On = daemon steps scaling_max_freq when hot; Off = no clamp",
+    );
+    group.add(&enabled_switch);
+
+    let scale_row = adw::ActionRow::builder()
+        .title("Max temperature")
+        .subtitle("Throttle threshold in °C")
+        .activatable(false)
+        .build();
+    let value_label = gtk::Label::new(Some("90 °C"));
+    value_label.add_css_class("numeric");
+    value_label.add_css_class("scale-value");
+    value_label.set_width_chars(6);
+    let adjustment = gtk::Adjustment::new(90.0, 70.0, 98.0, 1.0, 5.0, 0.0);
+    let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adjustment));
+    scale.set_draw_value(false);
+    scale.set_digits(0);
+    scale.set_hexpand(true);
+    scale.set_width_request(220);
+    tip(
+        &scale,
+        "70–98 °C · 96–98 °C exceeds TjMax 95 °C and needs acknowledgement",
+    );
+    scale_row.add_suffix(&scale);
+    scale_row.add_suffix(&value_label);
+    group.add(&scale_row);
+
+    let restore_label = gtk::Label::new(Some("Restore at 83 °C"));
+    restore_label.add_css_class("dim-label");
+    restore_label.set_halign(Align::Start);
+    restore_label.set_margin_start(12);
+    restore_label.set_margin_bottom(2);
+    tip(
+        &restore_label,
+        "Clocks step back up when temperature falls to this restore point (max − 7 °C)",
+    );
+    group.add(&restore_label);
+
+    let warning = gtk::Label::new(Some(
+        "96–98 °C exceeds TjMax 95 °C — sustained use may damage hardware.",
+    ));
+    warning.add_css_class("thermal-warning");
+    warning.set_wrap(true);
+    warning.set_halign(Align::Start);
+    warning.set_margin_start(12);
+    warning.set_visible(false);
+    tip(
+        &warning,
+        "Above TjMax: only continue if you accept the risk",
+    );
+    group.add(&warning);
+
+    let ack_check = gtk::CheckButton::with_label("I understand");
+    ack_check.set_halign(Align::Start);
+    ack_check.set_margin_start(12);
+    ack_check.set_margin_bottom(4);
+    ack_check.set_visible(false);
+    tip(
+        &ack_check,
+        "Acknowledge 96–98 °C exceeds the CPU's rated maximum",
+    );
+    group.add(&ack_check);
+
+    let status_row = gtk::Box::new(Orientation::Horizontal, 12);
+    status_row.set_margin_top(4);
+    let (tctl_chip, tctl_v, tctl_d) =
+        metric_chip_tip("Tctl", Some("k10temp Tctl — main CPU temperature"));
+    let (tccd2_chip, tccd2_v, tccd2_d) =
+        metric_chip_tip("Tccd2", Some("k10temp CCD2 temperature (fallback CCD)"));
+    let (freq_chip, freq_v, freq_d) =
+        metric_chip_tip("Max freq", Some("Current scaling_max_freq across CPUs"));
+    status_row.append(&tctl_chip);
+    status_row.append(&tccd2_chip);
+    status_row.append(&freq_chip);
+    group.add(&status_row);
+
+    page.append(&group);
+    gate.track(&page);
+
+    let suppress: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let acknowledged: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+
+    let do_set_thermal: Rc<dyn Fn()> = Rc::new({
+        let scale_c = scale.clone();
+        let enabled_c = enabled_switch.clone();
+        let acknowledged_c = acknowledged.clone();
+        let debounce_c = debounce.clone();
+        let toast_c = toast.clone();
+        let suppress_c = suppress.clone();
+        let warning_c = warning.clone();
+        let ack_c = ack_check.clone();
+        let value_c = value_label.clone();
+        let restore_c = restore_label.clone();
+        move || {
+            let ticket = debounce_c.get().wrapping_add(1);
+            debounce_c.set(ticket);
+            let scale_cc = scale_c.clone();
+            let enabled_cc = enabled_c.clone();
+            let acknowledged_cc = acknowledged_c.clone();
+            let toast_cc = toast_c.clone();
+            let suppress_cc = suppress_c.clone();
+            let warning_cc = warning_c.clone();
+            let ack_cc = ack_c.clone();
+            let value_cc = value_c.clone();
+            let restore_cc = restore_c.clone();
+            let debounce_cc = debounce_c.clone();
+            glib::timeout_add_local_once(Duration::from_millis(140), move || {
+                if debounce_cc.get() != ticket {
+                    return;
+                }
+                let max_temp = scale_cc.value().round().clamp(70.0, 98.0) as u8;
+                let enabled = enabled_cc.is_active();
+                let acknowledge = acknowledged_cc.get();
+                value_cc.set_text(&format!("{max_temp} °C"));
+                restore_cc.set_text(&format!("Restore at {} °C", max_temp.saturating_sub(7)));
+                let needs_ack = max_temp >= 96;
+                warning_cc.set_visible(needs_ack);
+                ack_cc.set_visible(needs_ack);
+                if needs_ack && !acknowledge {
+                    return;
+                }
+                run_daemon_command_async(
+                    DaemonCommand::SetThermal {
+                        enabled,
+                        max_temp,
+                        acknowledge,
+                    },
+                    move |result| match result {
+                        Ok(DaemonResponse::ThermalStatus(st)) => {
+                            suppress_cc.set(true);
+                            enabled_cc.set_active(st.config.enabled);
+                            scale_cc.set_value(st.config.max_temp as f64);
+                            value_cc.set_text(&format!("{} °C", st.config.max_temp));
+                            restore_cc.set_text(&format!("Restore at {} °C", st.restore_temp));
+                            let hot = st.config.max_temp >= 96;
+                            warning_cc.set_visible(hot);
+                            ack_cc.set_visible(hot);
+                            if !hot {
+                                acknowledged_cc.set(false);
+                                ack_cc.set_active(false);
+                            }
+                            suppress_cc.set(false);
+                        }
+                        Ok(DaemonResponse::Error(e)) => toast_error(&toast_cc, &e),
+                        Ok(other) => {
+                            toast_error(&toast_cc, &format!("Unexpected response: {other:?}"))
+                        }
+                        Err(e) => toast_error(&toast_cc, &e),
+                    },
+                );
+            });
+        }
+    });
+
+    {
+        let scale_c = scale.clone();
+        let enabled_c = enabled_switch.clone();
+        let value_c = value_label.clone();
+        let restore_c = restore_label.clone();
+        let warning_c = warning.clone();
+        let ack_c = ack_check.clone();
+        let suppress_c = suppress.clone();
+        let tctl_v_c = tctl_v.clone();
+        let tctl_d_c = tctl_d.clone();
+        let tccd2_v_c = tccd2_v.clone();
+        let tccd2_d_c = tccd2_d.clone();
+        let freq_v_c = freq_v.clone();
+        let freq_d_c = freq_d.clone();
+        let tctl_chip_c = tctl_chip.clone();
+        let tccd2_chip_c = tccd2_chip.clone();
+        let freq_chip_c = freq_chip.clone();
+        run_daemon_command_async(DaemonCommand::GetThermalStatus, move |result| {
+            suppress_c.set(true);
+            match result {
+                Ok(DaemonResponse::ThermalStatus(st)) => {
+                    enabled_c.set_active(st.config.enabled);
+                    scale_c.set_value(st.config.max_temp as f64);
+                    value_c.set_text(&format!("{} °C", st.config.max_temp));
+                    restore_c.set_text(&format!("Restore at {} °C", st.restore_temp));
+                    let hot = st.config.max_temp >= 96;
+                    warning_c.set_visible(hot);
+                    ack_c.set_visible(hot);
+                    let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
+                    let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
+                    if let Some(c) = tctl_c {
+                        tctl_v_c.set_text(&format!("{c:.1} °C"));
+                        tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });
+                        tint_temp(&tctl_chip_c, c);
+                    } else {
+                        tctl_v_c.set_text("—");
+                        tctl_d_c.set_text("no sensor");
+                        tint_temp(&tctl_chip_c, 0.0);
+                    }
+                    if let Some(c) = tccd2_c {
+                        tccd2_v_c.set_text(&format!("{c:.1} °C"));
+                        tccd2_d_c.set_text("");
+                        tint_temp(&tccd2_chip_c, c);
+                    } else {
+                        tccd2_v_c.set_text("—");
+                        tccd2_d_c.set_text("no sensor");
+                        tint_temp(&tccd2_chip_c, 0.0);
+                    }
+                    freq_v_c.set_text(&format!("{} kHz", st.cur_max_freq));
+                    freq_d_c.set_text(if st.active { "clamped" } else { "full" });
+                    let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
+                    if tint_c.is_finite() {
+                        tint_temp(&freq_chip_c, tint_c);
+                    } else {
+                        tint_temp(&freq_chip_c, 0.0);
+                    }
+                }
+                Ok(DaemonResponse::Error(e)) => {
+                    tctl_v_c.set_text("—");
+                    tctl_d_c.set_text(&e);
+                    tccd2_v_c.set_text("—");
+                    freq_v_c.set_text("—");
+                }
+                Ok(other) => {
+                    tctl_v_c.set_text("—");
+                    tctl_d_c.set_text(&format!("{other:?}"));
+                }
+                Err(e) => {
+                    tctl_v_c.set_text("—");
+                    tctl_d_c.set_text(&e);
+                }
+            }
+            suppress_c.set(false);
+        });
+    }
+
+    {
+        let do_set = do_set_thermal.clone();
+        let suppress_c = suppress.clone();
+        enabled_switch.connect_active_notify(move |_| {
+            if suppress_c.get() {
+                return;
+            }
+            do_set();
+        });
+    }
+
+    {
+        let do_set = do_set_thermal.clone();
+        let suppress_c = suppress.clone();
+        let acknowledged_c = acknowledged.clone();
+        let ack_c = ack_check.clone();
+        let warning_c = warning.clone();
+        let scale_c = scale.clone();
+        let value_c = value_label.clone();
+        let restore_c = restore_label.clone();
+        scale.connect_value_changed(move |_| {
+            if suppress_c.get() {
+                return;
+            }
+            let v = scale_c.value().round().clamp(70.0, 98.0) as u8;
+            value_c.set_text(&format!("{v} °C"));
+            restore_c.set_text(&format!("Restore at {} °C", v.saturating_sub(7)));
+            let needs_ack = v >= 96;
+            warning_c.set_visible(needs_ack);
+            ack_c.set_visible(needs_ack);
+            if needs_ack && !acknowledged_c.get() {
+                return;
+            }
+            if !needs_ack {
+                acknowledged_c.set(false);
+                let was_suppressed = suppress_c.get();
+                suppress_c.set(true);
+                ack_c.set_active(false);
+                suppress_c.set(was_suppressed);
+            }
+            do_set();
+        });
+    }
+
+    {
+        let do_set = do_set_thermal.clone();
+        let suppress_c = suppress.clone();
+        let acknowledged_c = acknowledged.clone();
+        ack_check.connect_toggled(move |cb| {
+            if suppress_c.get() {
+                return;
+            }
+            let on = cb.is_active();
+            acknowledged_c.set(on);
+            if on {
+                do_set();
+            }
+        });
+    }
+
+    let tctl_v_p = tctl_v.clone();
+    let tctl_d_p = tctl_d.clone();
+    let tccd2_v_p = tccd2_v.clone();
+    let tccd2_d_p = tccd2_d.clone();
+    let freq_v_p = freq_v.clone();
+    let freq_d_p = freq_d.clone();
+    let tctl_chip_p = tctl_chip.clone();
+    let tccd2_chip_p = tccd2_chip.clone();
+    let freq_chip_p = freq_chip.clone();
+    glib::timeout_add_local(Duration::from_secs(2), move || {
+        let tctl_v_c = tctl_v_p.clone();
+        let tctl_d_c = tctl_d_p.clone();
+        let tccd2_v_c = tccd2_v_p.clone();
+        let tccd2_d_c = tccd2_d_p.clone();
+        let freq_v_c = freq_v_p.clone();
+        let freq_d_c = freq_d_p.clone();
+        let tctl_chip_c = tctl_chip_p.clone();
+        let tccd2_chip_c = tccd2_chip_p.clone();
+        let freq_chip_c = freq_chip_p.clone();
+        run_daemon_command_async(
+            DaemonCommand::GetThermalStatus,
+            move |result| match result {
+                Ok(DaemonResponse::ThermalStatus(st)) => {
+                    let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
+                    let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
+                    if let Some(c) = tctl_c {
+                        tctl_v_c.set_text(&format!("{c:.1} °C"));
+                        tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });
+                        tint_temp(&tctl_chip_c, c);
+                    } else {
+                        tctl_v_c.set_text("—");
+                        tctl_d_c.set_text("no sensor");
+                        tint_temp(&tctl_chip_c, 0.0);
+                    }
+                    if let Some(c) = tccd2_c {
+                        tccd2_v_c.set_text(&format!("{c:.1} °C"));
+                        tccd2_d_c.set_text("");
+                        tint_temp(&tccd2_chip_c, c);
+                    } else {
+                        tccd2_v_c.set_text("—");
+                        tccd2_d_c.set_text("no sensor");
+                        tint_temp(&tccd2_chip_c, 0.0);
+                    }
+                    freq_v_c.set_text(&format!("{} kHz", st.cur_max_freq));
+                    freq_d_c.set_text(if st.active { "clamped" } else { "full" });
+                    let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
+                    if tint_c.is_finite() {
+                        tint_temp(&freq_chip_c, tint_c);
+                    } else {
+                        tint_temp(&freq_chip_c, 0.0);
+                    }
+                }
+                Ok(DaemonResponse::Error(e)) => tctl_d_c.set_text(&e),
+                Err(e) => tctl_d_c.set_text(&e),
+                _ => {}
+            },
+        );
+        glib::ControlFlow::Continue
+    });
+
     page
 }
 

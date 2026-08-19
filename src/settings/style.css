@@ -755,3 +755,13 @@ scale trough highlight {
     font-size: 0.82rem;
     min-width: 3.2rem;
 }
+
+.thermal-warning {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #a70e26;
+    background: alpha(#c8102e, 0.1);
+    border: 1px solid alpha(#c8102e, 0.22);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
