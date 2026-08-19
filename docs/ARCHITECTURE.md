@@ -31,14 +31,19 @@ flowchart LR
     DAEMON --> NVIDIA[/usr/bin/nvidia-smi/]
     DAEMON --> HID[HID/hidraw\nRGB and recovery]
     DAEMON --> SMU[optional ryzen_smu\nCurve Optimizer]
+    DAEMON --> THERMAL[thermal governor\nk10temp → scaling_max_freq\n1s poll, 200 kHz steps]
+
+    THERMAL --> HWMON
+    THERMAL --> SYSFS
 
     CLI -. direct RGB commands .-> HID
     GUI -. lighting paths may use core HID .-> HID
 
-    CONFIG[User settings\n$XDG_CONFIG_HOME/legion-control/settings.json]
+    CONFIG[User settings\n$XDG_CONFIG_HOME/legion-control/settings.json\nthermal: ThermalConfig VERSION 4]
     LOGS[Logging\nring buffer and optional files]
     PERSIST[Curve Optimizer state\n/var/lib and /run]
     GUI --> CONFIG
+    DAEMON --> CONFIG
     DAEMON --> LOGS
     DAEMON --> PERSIST
 ```
@@ -70,6 +75,7 @@ For the focused user-to-hardware explanation of Linux interfaces and HID behavio
 - `profile` — platform profiles and firmware attributes.
 - `rgb_panic` — RGB diagnosis, USB reset, and HID recovery.
 - `sensors` — aggregation of hwmon, sysfs, battery, and dGPU readings.
+- `thermal` — thermal throttle governor (`ThermalConfig`/`ThermalStatus`, `compute_target`, `validate`, `k10temp` and `scaling_max_freq` helpers).
 - `undervolt` — optional AMD Curve Optimizer access and persistence.
 
 The crate-level documentation states the intended hardware split: sensors use sysfs/hwmon, fan control uses WMI-backed hwmon interfaces, and keyboard RGB uses USB HID (`src/lib.rs`).
@@ -86,10 +92,11 @@ The crate-level documentation states the intended hardware split: sensors use sy
 6. Make the listener nonblocking and detect/log hardware capabilities.
 7. Start the Curve Optimizer persistence worker.
 8. Start the RGB watchdog thread.
-9. Accept clients and process each connection synchronously.
-10. On clean shutdown, clear the persistence armed marker and remove the socket.
+9. Start the thermal governor thread (alongside the RGB watchdog).
+10. Accept clients and process each connection synchronously.
+11. On clean shutdown, clear the persistence armed marker and remove the socket.
 
-The command dispatcher is `process_command` in `src/daemon/main.rs`. It maps `DaemonCommand` variants to the relevant core module and returns a `DaemonResponse`. `cmd_is_write` in `src/comms.rs` is used for logging and timing; it is not an authorization mechanism.
+The command dispatcher is `process_command` in `src/daemon/main.rs`. It maps `DaemonCommand` variants to the relevant core module and returns a `DaemonResponse`. `cmd_is_write` in `src/comms.rs` is used for logging and timing; it is not an authorization mechanism. The thermal surface is `GetThermal` → `Thermal(ThermalConfig)`, `SetThermal { enabled, max_temp, acknowledge }` → `ThermalStatus` (with `validate` `70..=98` and ack for `96–98`), and `GetThermalStatus` → `ThermalStatus`; first successful `SetThermal(enabled=true)` best-effort `systemctl disable --now cpu95-throttle.service` (warn-only) to avoid double-clamping the deprecated external service.
 
 The accept loop handles one client at a time (`src/daemon/main.rs`). A slow hardware operation therefore occupies the daemon’s command-processing path until it returns. NVIDIA calls have a three-second response timeout, but the implementation does not retain a child-process handle to terminate a timed-out subprocess (`src/dgpu.rs`).
 
@@ -116,7 +123,16 @@ legion-cli logs 50
 legion-cli set-log-level debug
 ```
 
-These command forms are defined in `src/cli/main.rs`. Fan target `0` means automatic mode (`src/fans.rs`).
+These command forms are defined in `src/cli/main.rs`. Fan target `0` means automatic mode (`src/fans.rs`). Thermal throttle is:
+
+```bash
+legion-cli thermal status
+legion-cli thermal set --max-temp 85
+legion-cli thermal set --max-temp 98 --acknowledge-high-temp
+legion-cli thermal set --off
+```
+
+`thermal status` prints `Thermal: {on|off} · max {n}°C (restore {n-7}°C) · cur {freq} kHz · Tctl {t} / Tccd2 {t} · {idle|throttling}` via `GetThermalStatus`; `thermal set` validates `70..=98` (ack for `96–98` exceeds TjMax `95°C`) then sends `SetThermal` (`src/thermal.rs` / `src/cli/main.rs`).
 
 ### GTK GUI
 
@@ -132,6 +148,8 @@ These command forms are defined in `src/cli/main.rs`. Fan target `0` means autom
 The GUI normally uses `send_command` for daemon operations. `src/settings/queue.rs` collects rapid slider changes, remembers fan values, waits 140 ms after the latest change, and then sends `SetFanTarget` and `SetFwAttr` commands from a worker thread. This prevents a stream of intermediate slider values from becoming individual writes.
 
 The GUI checks daemon availability and can attempt to start the system service using, in order, `systemctl start legion-control`, `run0 systemctl start legion-control`, and `pkexec systemctl start legion-control` (`src/settings/main.rs`). PolicyKit is also used for the fixed setup helper, not as a general authorization layer for socket commands.
+
+The Cooling page contains a **Thermal Throttle** card (`Clamp scaling_max_freq when hot`) built by `build_thermal_card` in `src/settings/main.rs`: `GtkSwitch` for `enabled`, `GtkScale` `70–98` with `Restore at {max-7}°C` label and `140 ms` debounced `SetThermal` (like `queue.rs`), warning `GtkLabel.warning` + `CheckButton "I understand"` gated to `≥96°C` (`acknowledge`), and live `Tctl`/`Tccd2`/`max_freq` chips tinted via `tint_temp` (`≥90 red, ≥78 amber`) polling `GetThermalStatus` every `2s`.
 
 ### KDE Plasma widget
 
@@ -232,6 +250,10 @@ RGB panic recovery (`src/rgb_panic.rs`) can inspect HID/kernel state, change sys
 
 For report-size, device-matching, and `hidraw` troubleshooting context, see the [Hardware and HID guide](HARDWARE-AND-HID.md).
 
+### Thermal Throttle governor
+
+`src/thermal.rs` exposes the pure core: constants `MAX_FULL 5_460_527` / `MIN 4_600_000` / `STEP 200_000` / `HYSTERESIS 7` / `INTERVAL 1s`, `ThermalConfig { enabled, max_temp: 70..=98 default 90 }` and `ThermalStatus { config, cur_max_freq, tctl_mC, tccd2_mC, active, restore_temp }`, plus `validate`, `compute_target(cur_max, temp_mC, &cfg) -> Option<u32>`, and hwmon helpers `read_thermal_temps()` (`k10temp` `temp1_input` / `temp4_input` fallback `temp3_input` in milli-°C), `read_cur_max()` (`cpu0/cpufreq/scaling_max_freq`), `write_all_cpus(freq)` (`cpu[0-9]*/cpufreq/scaling_max_freq`). The `thermal-governor` thread in `src/daemon/main.rs` shares `Arc<RwLock<ThermalConfig>>` + `Condvar` with the `SetThermal` handler, samples `max(Tctl,Tccd2)` vs `max_temp`/`restore = max-7`, steps `compute_target` (`≥max` throttle / `≤restore` restore), writes via `write_all_cpus` with `info!`/`warn!` logging, sleeps `1s` when enabled (else `10s`/`Condvar::wait_timeout`), and respects `shutdown`. `96–98°C` requires `acknowledge=true` because it exceeds TjMax `95°C`. `cpu95-throttle.service` is deprecated: first `enabled=true` best-effort `systemctl disable --now` it.
+
 ### Optional Curve Optimizer
 
 `src/undervolt.rs` accesses the optional `ryzen_smu` sysfs interface:
@@ -260,7 +282,7 @@ or, when `XDG_CONFIG_HOME` is unset:
 $HOME/.config/legion-control/settings.json
 ```
 
-The settings store is process-local (`OnceLock<Mutex<AppConfig>>`). Loading a missing or invalid file falls back to defaults; updates serialize and write the JSON file after creating its parent directory. The stored application state includes lighting, per-key colors, brightness, logo state, charge limit, keyboard layout, restore-on-launch state, last-session power fields, named profiles, and welcome-dialog state as defined by `AppConfig` in `src/config.rs`.
+The settings store is process-local (`OnceLock<Mutex<AppConfig>>`). Loading a missing or invalid file falls back to defaults; updates serialize and write the JSON file after creating its parent directory. The stored application state includes lighting, per-key colors, brightness, logo state, charge limit, keyboard layout, restore-on-launch state, last-session power fields, named profiles, welcome-dialog state, and `thermal: ThermalConfig` (`VERSION 4`, `#[serde(default)]` → `enabled=false, max_temp=90` for old files) as defined by `AppConfig` in `src/config.rs`. `src/thermal.rs` documents the stepping constants and validation.
 
 The ordinary GUI settings file is user-scoped. The source does not show the root daemon loading this file, so ordinary restore-on-launch behavior should be treated as application/UI-owned. This is separate from system-wide Curve Optimizer persistence.
 
@@ -387,6 +409,7 @@ legion-cli rgb-status
 | NVIDIA | `src/dgpu.rs` | `/usr/bin/nvidia-smi` queries and timeout |
 | Keyboard/RGB | `src/keyboard.rs` | HID discovery, feature reports, RGB, brightness, logo |
 | RGB recovery | `src/rgb_panic.rs` | Diagnosis, USB reset, HID recovery |
+| Thermal throttle | `src/thermal.rs`, `src/daemon/main.rs:thermal_governor` | `ThermalConfig`/`ThermalStatus`, `compute_target`/`validate`, `thermal-governor` thread; `k10temp` → `scaling_max_freq` |
 | Curve Optimizer | `src/undervolt.rs` | `ryzen_smu`, validation, baseline, persistence |
 | Configuration | `src/config.rs` | User JSON settings and profiles |
 | Logging | `src/logging.rs` | Ring buffer, optional files, retention, runtime reload |
@@ -432,6 +455,7 @@ These are implementation observations rather than proposed behavior changes. Har
 - `src/keyboard.rs`
 - `src/rgb_panic.rs`
 - `src/undervolt.rs`
+- `src/thermal.rs`
 - `src/config.rs`
 - `src/logging.rs`
 - `src/setup-helper/main.rs`

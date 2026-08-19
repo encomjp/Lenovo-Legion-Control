@@ -371,7 +371,50 @@ The GUI's CPU → Undervolt page exposes the same capability-gated range, Apply,
 
 No CLI command is provided for an arbitrary iGPU voltage or unrestricted SMU/MSR tuning.
 
-## 6. Troubleshooting checklist
+## 6. Thermal Throttle governor (`scaling_max_freq` clamp)
+
+Daemon-native replacement for the external `cpu-throttle-95.sh` + `cpu95-throttle.service`. The `legion-daemon` thermal governor watches `k10temp` (`Tctl` + `Tccd2`, `max` of the two) and clamps `cpu*/cpufreq/scaling_max_freq` between `5_460_527` kHz (full) and `4_600_000` kHz in `200_000` kHz steps, polling every `1s`. It throttles when `temp ≥ max_temp` and restores only when `temp ≤ max_temp − 7°C` (fixed `7°C` hysteresis, `restore = max − 7`). The hardware TjMax `95°C` remains the failsafe if the daemon stops. Persistence is `AppConfig.thermal` in `settings.json` (`VERSION 4`, `#[serde(default)]` so old files migrate to `enabled=false, max_temp=90`).
+
+> **Deprecation:** `cpu95-throttle.service` is superseded. On the first `SetThermal(enabled=true)` the daemon best-effort runs `systemctl disable --now cpu95-throttle.service` (warn-only on failure) to avoid double-clamping. The bash file may remain on disk but should stay disabled.
+
+Valid `max_temp` is `70–98` (`default 90`). `96–98°C` exceeds TjMax `95°C` and requires explicit acknowledgement.
+
+### CLI: `legion-cli thermal`
+
+```bash
+# Show live status (config + live temps/freq + idle/throttling)
+legion-cli thermal status
+# Thermal: on · max 90°C (restore 83°C) · cur 5460527 kHz · Tctl 68.4°C / Tccd2 64.2°C · idle
+
+# Enable (or re-configure) — enables if currently off
+legion-cli thermal set --max-temp 85
+
+# Expert 96–98°C — requires acknowledgement
+legion-cli thermal set --max-temp 98 --acknowledge-high-temp
+
+# Disable
+legion-cli thermal set --off
+
+# Explicit enable with a value
+legion-cli thermal set --on --max-temp 90
+```
+
+`status` calls `GetThermalStatus` and prints `on|off`, `max` and `restore`, `cur` `scaling_max_freq`, `Tctl`/`Tccd2`, and `idle` vs `throttling`. `set` validates locally (`70..=98`, ack for `96–98`) then sends `SetThermal { enabled, max_temp, acknowledge }`; without `--max-temp` it reuses the current `max_temp` from `GetThermalStatus` (default `90` if the daemon is unreachable). `--off` and `--on` are mutually exclusive; `--max-temp` without `--off` implies `enabled=true`.
+
+CLI implementation is in [`src/cli/main.rs`](../src/cli/main.rs); validation and stepping math live in [`src/thermal.rs`](../src/thermal.rs) (`validate`, `compute_target`).
+
+### GUI: Cooling → Thermal Throttle
+
+In `legion-settings` **Cooling**, the **Thermal Throttle** card (`Clamp scaling_max_freq when hot`) contains:
+
+1. **Enable** `GtkSwitch` bound to `thermal.enabled` — toggles `SetThermal` immediately.
+2. **Max temp** `GtkScale` `70–98` step `1` with `"{n}°C"` value label; sensitive only when enabled. Moves update a read-only `Restore at {max−7}°C` label. Value changes are debounced `140 ms` before `SetThermal`.
+3. **Warning row** hidden until `scale ≥96` — `GtkLabel` with CSS class `warning` text `"96–98°C exceeds TjMax (95°C) — instability risk"` and a `GtkCheckButton "I understand"` (`acknowledge`). `SetThermal` for `≥96` only succeeds when checked.
+4. **Live status row** — two chips `Tctl` / `Tccd2` and `max_freq` (e.g. `68.4°C / 64.2°C · 5.46 GHz`) tinted via `tint_temp` (`≥90 red, ≥78 amber`), plus `Throttling` vs `Idle`. Polls `GetThermalStatus` every `2s`; errors surface as a transient `Toast`.
+
+Page load reads `GetThermal` once to populate the switch/scale; the poll keeps chips live. The queue reuses the existing `140 ms` coalescing pattern from [`src/settings/queue.rs`](../src/settings/queue.rs).
+
+## 7. Troubleshooting checklist
 
 1. Confirm the service is running:
    ```bash
