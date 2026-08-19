@@ -76,6 +76,13 @@ pub enum DaemonCommand {
         offset: i16,
         acknowledge: bool,
     },
+    GetThermal,
+    SetThermal {
+        enabled: bool,
+        max_temp: u8,
+        acknowledge: bool,
+    },
+    GetThermalStatus,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -126,6 +133,8 @@ pub enum DaemonResponse {
     RecentLogs(String),
     CurveOptimizer(crate::undervolt::CurveOptimizerStatus),
     CurveOptimizerPersistence(crate::undervolt::CurveOptimizerPersistence),
+    Thermal(crate::thermal::ThermalConfig),
+    ThermalStatus(crate::thermal::ThermalStatus),
 }
 
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
@@ -249,6 +258,13 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::SetCurveOptimizerPersistence {
             enabled, offset, ..
         } => format!("SetCurveOptimizerPersistence({enabled},{offset})"),
+        DaemonCommand::GetThermal => "GetThermal".into(),
+        DaemonCommand::SetThermal {
+            enabled,
+            max_temp,
+            ..
+        } => format!("SetThermal({enabled},{max_temp})"),
+        DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
     }
 }
 
@@ -276,6 +292,8 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
         DaemonResponse::RecentLogs(_) => "RecentLogs",
         DaemonResponse::CurveOptimizer(_) => "CurveOptimizer",
         DaemonResponse::CurveOptimizerPersistence(_) => "CurveOptimizerPersistence",
+        DaemonResponse::Thermal(_) => "Thermal",
+        DaemonResponse::ThermalStatus(_) => "ThermalStatus",
     }
 }
 
@@ -299,6 +317,24 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::ResetCurveOptimizer
             | DaemonCommand::ResetCurveOptimizerAcknowledged { .. }
             | DaemonCommand::SetCurveOptimizerPersistence { .. }
+            | DaemonCommand::SetThermal { .. }
             | DaemonCommand::FixRgbPanic
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thermal_ipc_round_trip() {
+        let cmd = DaemonCommand::SetThermal {
+            enabled: true,
+            max_temp: 90,
+            acknowledge: false,
+        };
+        let bytes = bincode::serialize(&cmd).unwrap();
+        let back: DaemonCommand = bincode::deserialize(&bytes).unwrap();
+        assert!(matches!(back, DaemonCommand::SetThermal { max_temp: 90, .. }));
+    }
 }
