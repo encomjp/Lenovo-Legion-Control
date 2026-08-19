@@ -387,11 +387,6 @@ fn build_ui(app: &adw::Application) {
         Some("cpu-power"),
         "CPU Power",
     );
-    stack.add_titled(
-        &page_shell(&build_cpu_stability_page(&toast_overlay)),
-        Some("cpu-stability"),
-        "CPU Stability",
-    );
     for (id, title, fan_id) in [
         ("cooling-cpu", "CPU Fan", 1),
         ("cooling-gpu", "GPU Fan", 2),
@@ -581,9 +576,8 @@ fn build_ui(app: &adw::Application) {
         "CPU",
         &[
             ("Features", "Boost and threading"),
-            ("Tuning", "Thermal + undervolt"),
+            ("Tuning", "Thermal + undervolt + stability"),
             ("Power limits", "CPU and GPU limits"),
-            ("Stability test", "5-minute check"),
         ],
     );
     let (cooling_sec, cooling_list) = make_section(
@@ -843,7 +837,6 @@ fn build_ui(app: &adw::Application) {
             ("cpu-features", "CPU Features"),
             ("cpu-tuning", "CPU Tuning"),
             ("cpu-power", "CPU Power Limits"),
-            ("cpu-stability", "CPU Stability"),
         ],
         show_page.clone(),
     );
@@ -2060,11 +2053,32 @@ fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 }
 
 fn build_cpu_tuning_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Max temperature and Curve Optimizer — both survive reboot when enabled.");
-    // Thermal first (universal), undervolt second (GraniteRidge-only).
+    let page = page_lede("Thermal, undervolt, stability — tweak, persist, then validate.");
+    // Order: thermal (universal) → undervolt (GraniteRidge) → stability validator.
     page.append(&build_thermal_card(toast_overlay, gate));
     page.append(&build_curve_optimizer(toast_overlay));
+    page.append(&build_stability_group(toast_overlay));
     page
+}
+
+fn build_stability_group(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+    // Reuse the existing stability page's group — extract the group only, no page wrapper.
+    let page = build_cpu_stability_page(toast_overlay);
+    // build_cpu_stability_page returns a gtk::Box with one PreferencesGroup child; unwrap it.
+    // Fallback: build inline if structure changes — keep a minimal group.
+    if let Some(child) = page.first_child() {
+        if let Ok(group) = child.clone().downcast::<adw::PreferencesGroup>() {
+            return group;
+        }
+    }
+    // Fallback recompose — should never hit.
+    let g = pref_group("Stability test", Some("5 minutes · all CPU threads"));
+    let row = adw::ActionRow::builder()
+        .title("Stability test")
+        .subtitle("5 minutes")
+        .build();
+    g.add(&row);
+    g
 }
 
 const STABILITY_TEST_SECS: u64 = 300;
