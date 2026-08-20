@@ -756,4 +756,55 @@ scale trough highlight {
     min-width: 3.2rem;
 }
 
+/* Thermal slider: cool→hot gradient + muted when throttling off */
+.thermal-scale trough {
+    background: linear-gradient(to right, #2d7dd6 0%, #d9981a 52%, #c8102e 100%);
+}
+
+.thermal-scale.muted trough {
+    background: alpha(currentColor, 0.08);
+}
+
+.thermal-scale.muted {
+    opacity: 0.42;
+}
+
+.thermal-scale.muted highlight {
+    background: alpha(currentColor, 0.12);
+}
+
+.thermal-scale .tjmax-mark {
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #a70e26;
+    opacity: 0.72;
+}
+
+.thermal-validate-row {
+    margin-top: 8px;
+    border-left: 2px solid alpha(#d9981a, 0.22);
+    padding-left: 10px;
+}
+
+.thermal-tctl-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 99px;
+    background: white;
+    border: 1px solid alpha(black, 0.14);
+    box-shadow: 0 0 0 3px alpha(#2d7dd6, 0.18);
+    margin-top: -6px;
+}
+
+.thermal-tctl-dot.hot {
+    background: #c8102e;
+    box-shadow: 0 0 0 3px alpha(#c8102e, 0.20);
+}
+
+.thermal-tctl-dot.warm {
+    background: #d9981a;
+    box-shadow: 0 0 0 3px alpha(#d9981a, 0.22);
+}
+
 

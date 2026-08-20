@@ -1668,6 +1668,8 @@ fn update_curve_optimizer_ui(
     ui.apply_button.set_sensitive(status.available);
     ui.reset_button.set_sensitive(status.available);
     ui.offset_scale.set_sensitive(status.available);
+    // Gate startup: must verify an offset first — daemon enforces this too, but UI should be honest early.
+    // Keep switch sensitive only if available; subtitle hint is handled in persistence UI refresh.
     ui.startup_switch.set_sensitive(status.available);
 
     if !status.available {
@@ -1720,7 +1722,13 @@ fn update_curve_optimizer_persistence_ui(
             status.offset
         ));
     } else {
-        ui.startup_switch.set_subtitle("Off");
+        // Hint flow: must Apply & verify first before enabling startup.
+        let hint = if ui.offset_scale.is_sensitive() {
+            "Off · Apply and verify an offset first"
+        } else {
+            "Off"
+        };
+        ui.startup_switch.set_subtitle(hint);
     }
     ui.persistence_suppress.set(false);
     Ok(())
@@ -2055,8 +2063,10 @@ fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 fn build_cpu_tuning_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("Thermal, undervolt, stability — tweak, persist, then validate.");
     // Order: thermal (universal) → undervolt (GraniteRidge) → stability validator.
-    page.append(&build_thermal_card(toast_overlay, gate));
-    page.append(&build_curve_optimizer(toast_overlay));
+    let thermal = build_thermal_card(toast_overlay, gate);
+    let co = build_curve_optimizer(toast_overlay);
+    page.append(&thermal);
+    page.append(&co);
     page.append(&build_stability_group(toast_overlay));
     page
 }
@@ -3076,6 +3086,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     value.add_css_class("scale-value");
     let adj = gtk::Adjustment::new(90.0, 70.0, 98.0, 1.0, 5.0, 0.0);
     let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adj));
+    scale.add_css_class("thermal-scale");
     scale.set_draw_value(false);
     scale.set_digits(0);
     scale.set_hexpand(true);
@@ -3095,7 +3106,43 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     );
     temp_row.add_suffix(&scale);
     temp_row.add_suffix(&value);
+    // TjMax tick labels under the trough
+    let scale_marks = gtk::Box::new(Orientation::Horizontal, 0);
+    scale_marks.add_css_class("scale-marks");
+    scale_marks.set_hexpand(true);
+    scale_marks.set_halign(Align::Fill);
+    let mark_70 = gtk::Label::new(Some("70"));
+    mark_70.set_halign(Align::Start);
+    mark_70.set_hexpand(true);
+    let mark_95 = gtk::Label::new(Some("95 TjMax"));
+    mark_95.set_halign(Align::Center);
+    mark_95.set_hexpand(true);
+    let mark_98 = gtk::Label::new(Some("98"));
+    mark_98.set_halign(Align::End);
+    mark_98.set_hexpand(true);
+    scale_marks.append(&mark_70);
+    scale_marks.append(&mark_95);
+    scale_marks.append(&mark_98);
     group.add(&temp_row);
+    group.add(&scale_marks);
+
+    // Muted slider when throttling off — also used by initial load + toggle.
+    let apply_mute: Rc<dyn Fn(bool)> = {
+        let scale_c = scale.clone();
+        let row_c = temp_row.clone();
+        let marks_c = scale_marks.clone();
+        Rc::new(move |on: bool| {
+            if on {
+                scale_c.remove_css_class("muted");
+                row_c.set_sensitive(true);
+                marks_c.set_opacity(1.0);
+            } else {
+                scale_c.add_css_class("muted");
+                row_c.set_sensitive(false);
+                marks_c.set_opacity(0.42);
+            }
+        })
+    };
 
     // Live readout — same glass metric chips as Overview, no extra warning widget.
     let chips = gtk::FlowBox::builder()
@@ -3287,6 +3334,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let tctl_chip_c = tctl_chip.clone();
         let tccd2_chip_c = tccd2_chip.clone();
         let freq_chip_c = freq_chip.clone();
+        let apply_mute_c = apply_mute.clone();
         run_daemon_command_async(DaemonCommand::GetThermalStatus, move |result| {
             suppress_c.set(true);
             match result {
@@ -3299,6 +3347,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     temp_row_c.set_subtitle(&fmt_temp_sub(st.config.max_temp));
                     last_max_c.set(st.config.max_temp);
                     acked_c.set(st.config.max_temp >= 96);
+                    apply_mute_c(st.config.enabled);
                     let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
                     let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
                     if let Some(c) = tctl_c {
@@ -3352,6 +3401,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let suppress_c = suppress.clone();
         let scale_c = scale.clone();
         let acked_c = acked.clone();
+        let apply_mute_c = apply_mute.clone();
         enabled.connect_active_notify(move |row| {
             if suppress_c.get() {
                 return;
@@ -3359,12 +3409,13 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             let on = row.is_active();
             let max_temp = scale_c.value().round().clamp(70.0, 98.0) as u8;
             row.set_subtitle(&fmt_throttle_sub(on, max_temp));
+            (*apply_mute_c)(on);
             if max_temp >= 96 && !acked_c.get() {
                 let row_c = row.clone();
-                let scale_cc = scale_c.clone();
-                let suppress_cc = suppress_c.clone();
+                let suppress_c2 = suppress_c.clone();
                 let acked_cc = acked_c.clone();
                 let do_apply_ok = do_apply_c.clone();
+                let apply_mute_ok = apply_mute_c.clone();
                 confirm_risk(
                     row,
                     "Exceed TjMax 95 °C?",
@@ -3372,14 +3423,16 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     &format!("Use {max_temp} °C anyway"),
                     move |ok| {
                         if !ok {
-                            suppress_cc.set(true);
+                            suppress_c2.set(true);
                             row_c.set_active(!on);
                             row_c.set_subtitle(&fmt_throttle_sub(!on, max_temp));
-                            suppress_cc.set(false);
+                            (*apply_mute_ok)(false);
+                            suppress_c2.set(false);
                             return;
                         }
                         acked_cc.set(true);
                         do_apply_ok(max_temp, on, true);
+                        (*apply_mute_ok)(on);
                     },
                 );
                 suppress_c.set(true);
@@ -3390,6 +3443,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             }
             let ack = acked_c.get();
             do_apply_c(max_temp, on, ack);
+            (*apply_mute_c)(on);
         });
     }
 
@@ -3404,7 +3458,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         });
     }
 
-    // Poll live temps
     let tctl_v_p = tctl_v.clone();
     let tctl_d_p = tctl_d.clone();
     let tccd2_v_p = tccd2_v.clone();
