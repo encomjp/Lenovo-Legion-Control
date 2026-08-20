@@ -44,11 +44,27 @@ fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
 
 fn main() {
     legion_core::logging::init("legion-settings");
-    log::info!("starting GUI (pid={})", std::process::id());
+    let hidden = std::env::args().any(|a| a == "--hidden" || a == "--tray" || a == "--autostart");
+    if hidden {
+        log::info!("starting GUI hidden to tray (pid={})", std::process::id());
+    } else {
+        log::info!("starting GUI (pid={})", std::process::id());
+    }
+    // Stash --hidden so build_ui can hide the window and keep tray.
+    std::env::set_var("LEGION_HIDDEN", if hidden { "1" } else { "0" });
 
     let app = adw::Application::builder()
         .application_id("com.encomjp.legion-settings")
         .build();
+    // Register --hidden flag so GApplication doesn't treat it as unknown.
+    app.add_main_option(
+        "hidden",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start hidden to tray (for autostart)",
+        None,
+    );
 
     app.connect_startup(|_| {
         let _ = adw::init();
@@ -1040,7 +1056,13 @@ fn build_ui(app: &adw::Application) {
         glib::ControlFlow::Continue
     });
 
-    window.present();
+    let hidden = std::env::var("LEGION_HIDDEN").is_ok_and(|v| v == "1");
+    if hidden {
+        // Autostart: stay in tray, do not pop window. Tray thread still handles Show via menu.
+        window.set_visible(false);
+    } else {
+        window.present();
+    }
 }
 
 fn apply_conn_status(
@@ -2115,12 +2137,42 @@ fn set_autostart(enabled: bool) -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create autostart dir: {e}"))?;
     let dest = dir.join("com.encomjp.legion-settings.desktop");
     if enabled {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("data/gui/com.encomjp.legion-settings.desktop");
-        let content = std::fs::read_to_string(&src).unwrap_or_else(|_| {
-            "[Desktop Entry]\nName=Legion Control\nExec=legion-settings\nIcon=com.encomjp.legion-settings\nType=Application\n".into()
+        // Resolve installed .desktop first (survives packaging), fall back to source tree.
+        let installed = [
+            "/usr/local/share/applications/com.encomjp.legion-settings.desktop",
+            "/usr/share/applications/com.encomjp.legion-settings.desktop",
+        ];
+        let mut content: Option<String> = None;
+        for p in installed {
+            if let Ok(s) = std::fs::read_to_string(p) {
+                content = Some(s);
+                break;
+            }
+        }
+        let mut content = content.unwrap_or_else(|| {
+            std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("data/gui/com.encomjp.legion-settings.desktop"),
+            )
+            .unwrap_or_else(|_| {
+                "[Desktop Entry]\nName=Legion Control\nExec=legion-settings\nIcon=com.encomjp.legion-settings\nType=Application\n".into()
+            })
         });
-        // Ensure Exec launches the installed binary; add X-GNOME-Autostart if needed.
+        // Ensure it autostarts hidden to tray — no window pop on login.
+        if !content.contains("Exec=") {
+            content.push_str("\nExec=legion-settings --hidden\n");
+        } else if !content.contains("--hidden") {
+            content = content.replace("Exec=legion-settings", "Exec=legion-settings --hidden");
+        }
+        if !content.contains("X-GNOME-Autostart-enabled") {
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str("X-GNOME-Autostart-enabled=true\n");
+        }
+        if !content.contains("Hidden=") {
+            content.push_str("Hidden=false\n");
+        }
         std::fs::write(&dest, content).map_err(|e| format!("Cannot write autostart entry: {e}"))?;
     } else {
         let _ = std::fs::remove_file(&dest);
