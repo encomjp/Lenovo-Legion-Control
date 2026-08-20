@@ -1805,9 +1805,10 @@ fn set_curve_optimizer_persistence_async(
 }
 
 fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group(
-        "Curve Optimizer",
-        Some("All-core CPU offset. Unstable values can crash the system."),
+    let group = pref_group("Curve Optimizer", Some(""));
+    tip(
+        &group,
+        "All-core CPU offset via ryzen_smu. Unstable values can crash the system.",
     );
 
     let status_row = adw::ActionRow::builder()
@@ -1831,8 +1832,13 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
 
     let offset_row = adw::ActionRow::builder()
         .title("All-core offset")
+        .subtitle("")
         .activatable(false)
         .build();
+    tip(
+        &offset_row,
+        "All-core Curve Optimizer offset (-30..0, more negative = more undervolt)",
+    );
     let offset_value = gtk::Label::new(Some("—"));
     offset_value.add_css_class("numeric");
     offset_value.set_width_chars(4);
@@ -1849,9 +1855,10 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
 
     let actions_row = adw::ActionRow::builder()
         .title("Current session")
-        .subtitle("Verified by firmware readback")
+        .subtitle("")
         .activatable(false)
         .build();
+    tip(&actions_row, "Verified by firmware readback via ryzen_smu");
     let reset_button = gtk::Button::builder()
         .label("Reset")
         .valign(Align::Center)
@@ -2060,14 +2067,87 @@ fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
     page
 }
 
+fn autostart_enabled() -> bool {
+    dirs::config_dir()
+        .map(|d| {
+            d.join("autostart")
+                .join("com.encomjp.legion-settings.desktop")
+        })
+        .is_some_and(|p| p.exists())
+}
+
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    let Some(dir) = dirs::config_dir().map(|d| d.join("autostart")) else {
+        return Err("Cannot locate autostart directory".into());
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create autostart dir: {e}"))?;
+    let dest = dir.join("com.encomjp.legion-settings.desktop");
+    if enabled {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("data/gui/com.encomjp.legion-settings.desktop");
+        let content = std::fs::read_to_string(&src).unwrap_or_else(|_| {
+            "[Desktop Entry]\nName=Legion Control\nExec=legion-settings\nIcon=com.encomjp.legion-settings\nType=Application\n".into()
+        });
+        // Ensure Exec launches the installed binary; add X-GNOME-Autostart if needed.
+        std::fs::write(&dest, content).map_err(|e| format!("Cannot write autostart entry: {e}"))?;
+    } else {
+        let _ = std::fs::remove_file(&dest);
+    }
+    Ok(())
+}
+
 fn build_cpu_tuning_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Thermal, undervolt, stability — tweak, persist, then validate.");
-    // Order: thermal (universal) → undervolt (GraniteRidge) → stability validator.
+    let page = page_lede("");
+    // Cards on top — squares/overview style, then tuning controls below. Tooltips (hover) carry the how-to.
     let thermal = build_thermal_card(toast_overlay, gate);
     let co = build_curve_optimizer(toast_overlay);
+    // Autostart as a small row on this Tuning tab (hover tip explains it).
+    let autostart_row = adw::SwitchRow::builder()
+        .title("Launch at login")
+        .subtitle(if autostart_enabled() {
+            "On · opens on login"
+        } else {
+            "Off"
+        })
+        .active(autostart_enabled())
+        .build();
+    tip(
+        &autostart_row,
+        "Adds Legion Control to Desktop autostart (~/.config/autostart) so tuning controls are available after login. System daemon (fans/profile) starts separately via systemd.",
+    );
+    let autostart_toast = toast_overlay.clone();
+    autostart_row.connect_active_notify(move |row| {
+        let on = row.is_active();
+        match set_autostart(on) {
+            Ok(()) => {
+                row.set_subtitle(if on { "On · opens on login" } else { "Off" });
+                toast_ok(
+                    &autostart_toast,
+                    if on {
+                        "Autostart enabled"
+                    } else {
+                        "Autostart disabled"
+                    },
+                );
+            }
+            Err(e) => {
+                row.set_active(!on);
+                toast_error(&autostart_toast, &e);
+            }
+        }
+    });
+    let autostart_group = pref_group("Startup", None);
+    tip(
+        &autostart_group,
+        "Login autostart for the Settings app (user session). The root daemon autostarts via systemd regardless.",
+    );
+    autostart_group.add(&autostart_row);
+    // Order: chips-first tuning (thermal) already has its own chips on top internally;
+    // then undervolt + stability + autostart.
     page.append(&thermal);
     page.append(&co);
     page.append(&build_stability_group(toast_overlay));
+    page.append(&autostart_group);
     page
 }
 
@@ -3059,15 +3139,12 @@ degrade the CPU or reduce its lifespan.
 Only continue if you accept this risk.";
 
 fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    // Garage Lab page — SwitchRow + ActionRow with scale, like CPU features / PPT.
-    let page = page_lede("Cap CPU clocks when hot — restores 7 °C below the limit.");
-    let group = pref_group(
-        "Thermal throttle",
-        Some("Governor clamps scaling_max_freq when the CPU is hot (5.46→4.60 GHz in 200 MHz/s, 1 s poll) and restores when it cools. Uses TjMax 95 °C as the hardware failsafe."),
-    );
+    // Design: chips on top (like Overview), controls below, visible labels minimal — details in tooltips (hover).
+    let page = page_lede("");
+    let group = pref_group("Thermal throttle", None);
     tip(
         &group,
-        "Daemon-native governor ported from cpu-throttle-95.sh — live temps use k10temp Tctl/Tccd2",
+        "Governor clamps scaling_max_freq when hot (5.46→4.60 GHz in 200 MHz/s, 1 s poll), restores 7 °C below. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp Tctl/Tccd2).",
     );
 
     let enabled = adw::SwitchRow::builder()
@@ -3144,7 +3221,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         })
     };
 
-    // Live readout — same glass metric chips as Overview, no extra warning widget.
+    // Chips on top — same pattern as Overview (readout first, controls second).
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
@@ -3154,7 +3231,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .row_spacing(12)
         .build();
     chips.add_css_class("metric-grid");
-    chips.set_margin_top(12);
+    chips.set_margin_bottom(12);
     let (tctl_chip, tctl_v, tctl_d) =
         metric_chip_tip("Tctl", Some("k10temp Tctl — main package temp"));
     let (tccd2_chip, tccd2_v, tccd2_d) =
@@ -3167,8 +3244,8 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     chips.append(&tccd2_chip);
     chips.append(&freq_chip);
 
-    page.append(&group);
     page.append(&chips);
+    page.append(&group);
     gate.track(&group);
     gate.track(&chips);
 
