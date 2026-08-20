@@ -1,12 +1,12 @@
 # Legion Control — TODO
 
-Last updated: 2026-07-21
+Last updated: 2026-08-19
 
 ## High priority
 
 ### Power-button / mode LED
 - **Dropped for now** — not Spectrum; EC-tied to platform profile.
-- Dumps: `research/ec-mode-dumps/`, notes in `SPECTRUM-ZONES.md`.
+- Dumps: `research/ec-mode-dumps/`, notes in `research/SPECTRUM-ZONES.md`.
 
 ### Install / daemon
 - Prefer `~/.local/bin/legion-*` until refreshed with `sudo ./scripts/enable-root-daemon.sh`.
@@ -27,8 +27,26 @@ Last updated: 2026-07-21
 
 | Path | Role |
 |------|------|
-| `lenovo-legion-tool/src/settings/` | GUI |
+| `lenovo-legion-tool/src/settings/` | GTK4/libadwaita GUI |
+| `lenovo-legion-tool/src/daemon/main.rs` | root `legion-daemon` (socket server) |
+| `lenovo-legion-tool/src/cli/main.rs` | `legion-cli` client |
 | `lenovo-legion-tool/src/keyboard.rs` | Spectrum HID / zones / per-key |
-| `lenovo-legion-tool/src/config.rs` | Persistent settings |
+| `lenovo-legion-tool/src/config.rs` | Persistent settings (`settings.json`) |
+| `lenovo-legion-tool/driver/` | `legion_hwmon` kernel driver + DKMS |
+| `lenovo-legion-tool/kde-widget/` | Optional KDE Plasma 6 QML widget |
+| `driver/` | EC-RAM / EC-WMI kernel PoCs |
+| `research/` | EC, hwmon, WMI, and Spectrum research + dumps |
 | `research/ui-shots/` | UX screenshots |
 | `research/SPECTRUM-ZONES.md` | Zone / effect notes |
+| `icon-preview/index.html` | SVG icon gallery |
+
+## Layout
+
+```
+.                       monorepo root (branch main)
+├── lenovo-legion-tool/ Rust app + nested git repo (branch master)
+├── research/           research notes + dumps + UI shots
+├── driver/             EC/WMI kernel PoCs
+├── icon-preview/       SVG icon gallery
+└── docs/superpowers/   KDE-native widget plans/specs
+```
