@@ -408,6 +408,16 @@ fn build_ui(app: &adw::Application) {
         Some("cooling-reset"),
         "Reset Fans",
     );
+    // Overview keeps all fan cards on one glance page — existing per-fan pages stay (no removals).
+    stack.add_titled(
+        &page_shell(&build_cooling_overview_page(
+            &toast_overlay,
+            &apply_queue,
+            &daemon_gate,
+        )),
+        Some("cooling-overview"),
+        "Cooling Overview",
+    );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
         &page_shell(&battery_status_page),
@@ -584,6 +594,7 @@ fn build_ui(app: &adw::Application) {
         include_bytes!("../../data/icons/cooling.svg"),
         "Cooling",
         &[
+            ("Overview", "All fans at a glance"),
             ("CPU fan", "Processor fan"),
             ("GPU fan", "Graphics fan"),
             ("Aux fan", "Chassis fan"),
@@ -843,6 +854,7 @@ fn build_ui(app: &adw::Application) {
     bind_sub(
         &cooling_list,
         &[
+            ("cooling-overview", "Overview"),
             ("cooling-cpu", "CPU Fan"),
             ("cooling-gpu", "GPU Fan"),
             ("cooling-aux", "Aux Fan"),
@@ -1855,10 +1867,13 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
 
     let actions_row = adw::ActionRow::builder()
         .title("Current session")
-        .subtitle("")
+        .subtitle("Verified by firmware readback")
         .activatable(false)
         .build();
-    tip(&actions_row, "Verified by firmware readback via ryzen_smu");
+    tip(
+        &actions_row,
+        "Verified by firmware readback via ryzen_smu (daemon checks SMU probe before applying)",
+    );
     let reset_button = gtk::Button::builder()
         .label("Reset")
         .valign(Align::Center)
@@ -3132,6 +3147,67 @@ fn build_fan_reset_page(apply_queue: &ApplyQueue, gate: &DaemonGate) -> gtk::Box
     page
 }
 
+fn build_cooling_overview_page(
+    toast_overlay: &adw::ToastOverlay,
+    apply_queue: &ApplyQueue,
+    gate: &DaemonGate,
+) -> gtk::Box {
+    let page = page_lede(
+        "All fans at a glance — use CPU/GPU/Aux pages for per-fan tuning, or reset when done.",
+    );
+    let overview = pref_group(
+        "Fans overview",
+        Some("Readout from daemon · changes apply without leaving this tab"),
+    );
+    tip(
+        &overview,
+        "Same fan_card controls as the per-fan pages, stacked for overview",
+    );
+    let channels = legion_core::fans::channels();
+    for ch in &channels {
+        overview.add(&fan_card(
+            ch.id,
+            &ch.title,
+            ch.min_rpm as f64,
+            ch.max_rpm as f64,
+            toast_overlay,
+            apply_queue,
+        ));
+    }
+    if channels.is_empty() {
+        overview.add(&property_row(
+            "No fans detected",
+            "Check the daemon and HWMon",
+            Some("Fan channels missing — check legion-control service"),
+        ));
+    }
+    let reset = pref_group("Automatic mode", Some("Clear all fixed RPM targets"));
+    let btn = primary_button_tip(
+        "All fans automatic",
+        Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
+    );
+    let queue = apply_queue.clone();
+    let fan_ids: Vec<u8> = channels.iter().map(|c| c.id).collect();
+    btn.connect_clicked(move |_| {
+        for fan in &fan_ids {
+            queue.set_fan(*fan, 0);
+        }
+    });
+    let row = adw::ActionRow::builder()
+        .title("Reset all")
+        .subtitle("Clears any manual RPM targets")
+        .activatable(false)
+        .build();
+    tip(&row, "Recommended after testing loud manual speeds");
+    row.add_suffix(&btn);
+    reset.add(&row);
+    page.append(&overview);
+    page.append(&reset);
+    gate.track(&overview);
+    gate.track(&reset);
+    page
+}
+
 const THERMAL_TJMAX_WARNING: &str = "\
 96–98 °C is above the 9955HX3D TjMax (95 °C). Sustained use above TjMax can \
 degrade the CPU or reduce its lifespan.
@@ -3221,7 +3297,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         })
     };
 
-    // Chips on top — same pattern as Overview (readout first, controls second).
+    // Tuning: chips on top inside the same card — Overview square grouping, not detached.
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
@@ -3243,7 +3319,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     chips.append(&tctl_chip);
     chips.append(&tccd2_chip);
     chips.append(&freq_chip);
-
+    // Keep chips visually grouped with the thermal card — inside page but before controls.
     page.append(&chips);
     page.append(&group);
     gate.track(&group);
