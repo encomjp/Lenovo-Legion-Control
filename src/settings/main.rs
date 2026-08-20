@@ -2072,11 +2072,28 @@ fn build_cpu_features_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate)
 fn build_cpu_power_page(_toast_overlay: &adw::ToastOverlay) -> gtk::Box {
     let page = page_lede("");
     let note = pref_group("Custom watts", None);
+    tip(
+        &note,
+        "Power limits (CPU PPT / GPU) live on Home when Mode is Custom — this tab is a pointer so you do not hunt for them",
+    );
     let tip_row = adw::ActionRow::builder()
         .title("Edit on Home")
-        .subtitle("Choose Custom mode to unlock the power sliders")
+        .subtitle("Custom mode unlocks the sliders")
         .activatable(false)
         .build();
+    tip(
+        &tip_row,
+        "Choose Custom in Home → Power mode to unlock CPU PPT and GPU power sliders. Other modes use firmware defaults.",
+    );
+    let go_home = primary_button_tip(
+        "Open Power on Home",
+        Some("Power limits live on Home — switch Mode to Custom to edit CPU PPT and GPU watts"),
+    );
+    let toast = _toast_overlay.clone();
+    go_home.connect_clicked(move |_| {
+        toast_ok(&toast, "Go to Home → Power mode → Custom to edit watts");
+    });
+    tip_row.add_suffix(&go_home);
     note.add(&tip_row);
     page.append(&note);
     page
@@ -3688,7 +3705,7 @@ fn fan_card(
         4 => "Auxiliary chassis fan",
         _ => "Fan control for this channel",
     };
-    let group = pref_group(title, Some(sec_tip));
+    let group = pref_group(title, None);
     tip(&group, sec_tip);
 
     let rpm_l = gtk::Label::new(Some(&legion_core::fans::rpm_label(fan)));
@@ -3863,16 +3880,50 @@ fn build_battery_pages(
     toast_overlay: &adw::ToastOverlay,
     gate: &DaemonGate,
 ) -> (gtk::Box, gtk::Box) {
-    let status_page = page_lede("Charge, health, and battery details");
-    let limit_page = page_lede("Choose how far the battery charges");
+    let status_page = page_lede("");
+    let limit_page = page_lede("");
 
-    let hero = pref_group(
-        "Battery",
-        Some("Live charge and status from the laptop’s battery gauge"),
+    // Chips on top — like Overview / Thermal: Capacity · Voltage · Power · Health
+    let chips = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .max_children_per_line(4)
+        .min_children_per_line(2)
+        .homogeneous(true)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    chips.add_css_class("metric-grid");
+    chips.set_margin_bottom(12);
+    let (cap_chip, cap_v, cap_d) = metric_chip_tip("Capacity", None);
+    tip(
+        &cap_chip,
+        "Battery charge level from sysfs BAT0/capacity — 0–100%",
     );
+    let (volt_chip, volt_v, volt_d) = metric_chip_tip("Voltage", None);
+    tip(
+        &volt_chip,
+        "Pack voltage in volts — drops as the pack empties",
+    );
+    let (power_chip, power_v, power_d) = metric_chip_tip("Power", None);
+    tip(
+        &power_chip,
+        "Watts in or out right now — positive while charging, drain while on battery",
+    );
+    let (health_chip, health_v, health_d) = metric_chip_tip("Health", None);
+    tip(
+        &health_chip,
+        "Wear vs design capacity — 100% is a fresh pack",
+    );
+    chips.append(&cap_chip);
+    chips.append(&volt_chip);
+    chips.append(&power_chip);
+    chips.append(&health_chip);
+    status_page.append(&chips);
+
+    let hero = pref_group("Battery", None);
     tip(
         &hero,
-        "Values update every few seconds from sysfs — no daemon needed for readouts",
+        "Live charge and status from the laptop's battery gauge — updates every few seconds from sysfs, no daemon needed for readouts",
     );
 
     let pct_row = adw::ActionRow::builder()
@@ -3889,20 +3940,21 @@ fn build_battery_pages(
         .build();
     tip(
         &st_row,
-        "Charging = plugged in · Discharging = on battery · Full = topped up",
+        "Charging = plugged in · Discharging = on battery · Full = topped up · Not charging = holding at limit",
     );
     st_row.add_css_class("property");
     hero.add(&pct_row);
     hero.add(&st_row);
     status_page.append(&hero);
 
-    let stats = pref_group(
-        "Details",
-        Some("Extra battery stats — expand when you need them"),
+    let stats = pref_group("Details", None);
+    tip(
+        &stats,
+        "Extra battery stats — expand when you need them: voltage, power, energy, health, cycles, pack identity",
     );
     let details_exp = adw::ExpanderRow::builder()
         .title("Show details")
-        .subtitle("Voltage · power · energy · health · cycles · cell")
+        .subtitle("")
         .build();
     tip(
         &details_exp,
@@ -3932,6 +3984,7 @@ fn build_battery_pages(
         .into_iter()
         .map(|(title, tip_text)| {
             let row = property_row(title, "—", Some(tip_text));
+            tip(&row, tip_text);
             details_exp.add_row(&row);
             row
         })
@@ -3939,15 +3992,10 @@ fn build_battery_pages(
     stats.add(&details_exp);
     status_page.append(&stats);
 
-    let lim = pref_group(
-        "Charge limit and status",
-        Some(
-            "Caps how far the battery charges while plugged in — helps longevity when you leave the laptop on AC",
-        ),
-    );
+    let lim = pref_group("Charge limit", None);
     tip(
         &lim,
-        "60% conserve · 80% balanced life · 100% full tank — needs the legion-control service",
+        "60% conserve · 80% balanced life · 100% full tank — caps how far the battery charges while plugged in, helps longevity; needs the legion-control service",
     );
     let pills = gtk::Box::new(Orientation::Horizontal, 12);
     pills.set_halign(Align::Center);
@@ -3995,12 +4043,12 @@ fn build_battery_pages(
     }
     let pill_row = adw::ActionRow::builder()
         .title("Stop charging at")
-        .subtitle("60%, 80%, or 100%")
+        .subtitle("")
         .activatable(false)
         .build();
     tip(
         &pill_row,
-        "Lenovo conservation / long-life modes — the selected button is highlighted in red",
+        "Lenovo conservation / long-life modes — 60% conserve, 80% long life, 100% full — selected button highlighted in red",
     );
     pill_row.add_suffix(&pills);
     lim.add(&pill_row);
@@ -4014,17 +4062,66 @@ fn build_battery_pages(
     let cycles_l = detail_rows[4].clone();
     let cell_l = detail_rows[5].clone();
 
+    // Keep chips + rows in sync every 3 s
+    let cap_v_c = cap_v.clone();
+    let cap_d_c = cap_d.clone();
+    let volt_v_c = volt_v.clone();
+    let volt_d_c = volt_d.clone();
+    let power_v_c = power_v.clone();
+    let power_d_c = power_d.clone();
+    let health_v_c = health_v.clone();
+    let health_d_c = health_d.clone();
+    let cap_chip_c = cap_chip.clone();
+    let volt_chip_c = volt_chip.clone();
+    let power_chip_c = power_chip.clone();
+    let health_chip_c = health_chip.clone();
     glib::timeout_add_local(Duration::from_secs(3), move || {
         if let Some(pct) = legion_core::battery::capacity() {
             pct_row.set_subtitle(&format!("{pct}%"));
+            cap_v_c.set_text(&format!("{pct}%"));
+            cap_d_c.set_text(&legion_core::battery::status().unwrap_or_default());
             st_row
                 .set_subtitle(&legion_core::battery::status().unwrap_or_else(|| "Unknown".into()));
+            // Tint capacity chip: warm when discharging low, hot when very low? Use level thresholds.
+            cap_chip_c.remove_css_class("hot");
+            cap_chip_c.remove_css_class("warm");
+            if pct <= 20 {
+                cap_chip_c.add_css_class("hot");
+            } else if pct <= 40 {
+                cap_chip_c.add_css_class("warm");
+            }
         }
         if let Some(v) = legion_core::battery::voltage() {
             volt_l.set_subtitle(&format!("{v:.2} V"));
+            volt_v_c.set_text(&format!("{v:.2} V"));
+            volt_d_c.set_text("");
+            volt_chip_c.remove_css_class("hot");
+            volt_chip_c.remove_css_class("warm");
+        } else {
+            volt_v_c.set_text("—");
+            volt_d_c.set_text("no sensor");
         }
         if let Some(p) = legion_core::battery::power_w() {
             pow_l.set_subtitle(&format!("{p:.1} W"));
+            power_v_c.set_text(&format!("{p:.1} W"));
+            // detail: charging vs discharging
+            let st = legion_core::battery::status().unwrap_or_default();
+            power_d_c.set_text(if st == "Charging" {
+                "charging"
+            } else if st == "Discharging" {
+                "discharging"
+            } else {
+                ""
+            });
+            power_chip_c.remove_css_class("hot");
+            power_chip_c.remove_css_class("warm");
+            if p.abs() > 45.0 {
+                power_chip_c.add_css_class("warm");
+            }
+        } else {
+            pow_l.set_subtitle("—");
+            power_v_c.set_text("—");
+            power_d_c.set_text("no sensor");
         }
         if let (Some(n), Some(f)) = (
             legion_core::battery::energy_now_wh(),
@@ -4034,6 +4131,18 @@ fn build_battery_pages(
         }
         if let Some(h) = legion_core::battery::health_pct() {
             health_l.set_subtitle(&format!("{h:.0}%"));
+            health_v_c.set_text(&format!("{h:.0}%"));
+            health_d_c.set_text(if h < 80.0 { "worn" } else { "good" });
+            health_chip_c.remove_css_class("hot");
+            health_chip_c.remove_css_class("warm");
+            if h < 70.0 {
+                health_chip_c.add_css_class("hot");
+            } else if h < 85.0 {
+                health_chip_c.add_css_class("warm");
+            }
+        } else {
+            health_v_c.set_text("—");
+            health_d_c.set_text("no sensor");
         }
         if let Some(c) = legion_core::battery::cycles() {
             cycles_l.set_subtitle(&format!("{c}"));
