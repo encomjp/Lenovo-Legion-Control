@@ -236,7 +236,9 @@ fn boot_baseline(current: &[i16]) -> Vec<i16> {
 
 fn validate_driver() -> Result<(u32, String, String), String> {
     if !Path::new(DRIVER).is_dir() {
-        return Err("ryzen_smu is not installed or loaded".into());
+        return Err(
+            "ryzen_smu driver is not loaded — open About → Setup and press 'Install' for AMD ryzen_smu (needs dkms + kernel headers)".into(),
+        );
     }
     let codename = read_trimmed(&format!("{DRIVER}/codename"))
         .ok_or("ryzen_smu did not expose a CPU codename")?

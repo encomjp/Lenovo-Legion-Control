@@ -515,14 +515,32 @@ fn build_ui(app: &adw::Application) {
         &[("Manage", "Save and restore presets")],
     );
     nav_box.append(&profiles_sec);
-    // Discoverability (NN/g Heuristic 6: recognition over recall): leave the
-    // most-visited groups open on cold launch so the primary destinations
-    // are visible without hunting for chevrons. CPU stays closed — its rows
-    // are power-user territory; Lighting is opened on first selection.
-    cooling_rev.set_reveal_child(true);
-    cooling_chev.add_css_class("open");
-    battery_rev.set_reveal_child(true);
-    battery_chev.add_css_class("open");
+    // Discoverability: EVERY section is expanded on cold launch so every page
+    // is exactly one click away (NN/g Heuristic 6: recognition over recall —
+    // no hunting through collapsed chevrons). Sections stay collapsible for
+    // users who want a compact rail.
+    for rev in [
+        &cpu_rev,
+        &cooling_rev,
+        &lighting_rev,
+        &battery_rev,
+        &fix_rev,
+        &profiles_rev,
+        &about_rev,
+    ] {
+        rev.set_reveal_child(true);
+    }
+    for chev in [
+        &cpu_chev,
+        &cooling_chev,
+        &lighting_chev,
+        &battery_chev,
+        &fix_chev,
+        &profiles_chev,
+        &about_chev,
+    ] {
+        chev.add_css_class("open");
+    }
     nav_box.append(&about_sec);
     scroll.set_child(Some(&nav_box));
     sidebar_box.append(&scroll);

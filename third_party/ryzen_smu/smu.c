@@ -10,6 +10,25 @@
 
 #include "smu.h"
 
+/* Kernel ≥ 6.x removed the cpuid_eax/cpuid_ebx helpers from <asm/processor.h>;
+ * provide equivalent local wrappers so the module builds on current kernels. */
+static inline u32 smu_cpuid_eax(u32 leaf)
+{
+	u32 a, b, c, d;
+	asm volatile("cpuid"
+		     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+		     : "a"(leaf));
+	return a;
+}
+
+static inline u32 smu_cpuid_ebx(u32 leaf)
+{
+	u32 a, b, c, d;
+	asm volatile("cpuid"
+		     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+		     : "a"(leaf));
+	return b;
+}
 static struct {
   enum smu_processor_codename codename;
 
@@ -238,7 +257,7 @@ int smu_resolve_cpu_class(struct pci_dev *dev) {
   // https://en.wikichip.org/wiki/amd/cpuid
   // Res. + ExtFamily + ExtModel + Res. + BaseFamily + BaseModel + Stepping
   // See: CPUID_Fn00000001_EAX
-  cpuid = cpuid_eax(0x00000001);
+  cpuid = smu_cpuid_eax(0x00000001);
 
   cpu_family = ((cpuid & 0xf00) >> 8) + ((cpuid & 0xff00000) >> 20);
   cpu_model = ((cpuid & 0xf0000) >> 12) + ((cpuid & 0xf0) >> 4);
@@ -246,7 +265,7 @@ int smu_resolve_cpu_class(struct pci_dev *dev) {
 
   // Combines "PkgType" and "Reserved"
   // See: CPUID_Fn80000001_EBX
-  pkg_type = cpuid_ebx(0x80000001) >> 28;
+  pkg_type = smu_cpuid_ebx(0x80000001) >> 28;
 
   pr_info("CPUID: family 0x%X, model 0x%X, stepping 0x%X, package 0x%X",
           cpu_family, cpu_model, stepping, pkg_type);

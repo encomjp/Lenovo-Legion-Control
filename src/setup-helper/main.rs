@@ -56,27 +56,33 @@ fn install_ryzen_smu() -> Result<(), String> {
     let modprobe = executable(&["/usr/bin/modprobe", "/usr/sbin/modprobe"])?;
     let source = source_dir()?;
 
+    // DKMS can hold builds for several kernels at once (e.g. after switching
+    // LTS → bore) and the registered source copy may predate bundle updates
+    // (e.g. compatibility patches). Cleanest guarantee: drop any previous
+    // registration and re-add from the bundled source, which (a) always uses
+    // the current driver source and (b) builds for the running kernel only.
     let status = Command::new(dkms)
         .arg("status")
         .output()
         .map_err(|e| format!("cannot query DKMS: {e}"))?;
     let dkms_status = String::from_utf8_lossy(&status.stdout);
-    let registration = dkms_status
+    if dkms_status
         .lines()
-        .find(|line| line.starts_with(&format!("ryzen_smu/{DKMS_VERSION}")));
-    let registered = registration.is_some();
-    let installed = registration.is_some_and(|line| line.contains("installed"));
-    if !registered {
-        let status = Command::new(make)
-            .arg("dkms-install")
-            .current_dir(&source)
-            .status()
-            .map_err(|e| format!("cannot build ryzen_smu: {e}"))?;
-        if !status.success() {
-            return Err(format!("ryzen_smu DKMS build failed with {status}"));
-        }
-    } else if !installed {
-        run(dkms, &["install", &format!("ryzen_smu/{DKMS_VERSION}")])?;
+        .any(|line| line.starts_with(&format!("ryzen_smu/{DKMS_VERSION}")))
+    {
+        // Best-effort: uninstalls for every kernel, keeps /usr/src tidy.
+        let _ = Command::new(dkms)
+            .args(["remove", &format!("ryzen_smu/{DKMS_VERSION}"), "--all"])
+            .status();
+    }
+
+    let status = Command::new(make)
+        .arg("dkms-install")
+        .current_dir(&source)
+        .status()
+        .map_err(|e| format!("cannot build ryzen_smu: {e}"))?;
+    if !status.success() {
+        return Err(format!("ryzen_smu DKMS build failed with {status}"));
     }
 
     fs::write("/etc/modules-load.d/ryzen_smu.conf", "ryzen_smu\n")
