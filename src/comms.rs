@@ -450,4 +450,75 @@ mod tests {
         let out = sanitize_log(&long);
         assert!(out.chars().count() == 65 && out.ends_with('…'));
     }
+
+    #[test]
+    fn sanitize_log_escapes_cr_and_tab() {
+        assert_eq!(sanitize_log("a\rb"), "a\\rb");
+        assert!(sanitize_log("a\tb").contains('\t'));
+    }
+
+    #[test]
+    fn cmd_kind_is_bounded_and_independent_of_payload() {
+        // Client-controlled strings must not create distinct map keys.
+        for name in ["foo", "bar\nbaz", "x".repeat(200).as_str()] {
+            assert_eq!(cmd_kind(&DaemonCommand::SetProfile(name.to_string())), "SetProfile");
+        }
+        assert_eq!(
+            cmd_kind(&DaemonCommand::SetFwAttr {
+                name: "ppt_pl1_spl".into(),
+                value: "9999".into()
+            }),
+            "SetFwAttr"
+        );
+        assert_eq!(cmd_kind(&DaemonCommand::SetLogLevel("trace\ninject".into())), "SetLogLevel");
+    }
+
+    #[test]
+    fn cmd_label_sanitizes_injected_newlines() {
+        let label = cmd_label(&DaemonCommand::SetProfile("foo\nbar".into()));
+        assert!(!label.contains('\n'));
+        assert!(label.contains("\\n"));
+    }
+
+    #[test]
+    fn ipc_frame_rejects_oversized_payload_via_limit() {
+        // A normal command serializes well under the cap; a huge string must
+        // fail to serialize when the bincode limit is enforced.
+        let normal = DaemonCommand::GetSensors;
+        assert!(bincode_opts().serialize(&normal).is_ok());
+        let huge = DaemonCommand::SetProfile("x".repeat((MAX_FRAME_BYTES + 1) as usize));
+        assert!(bincode_opts().serialize(&huge).is_err());
+    }
+
+    #[test]
+    fn socket_candidates_never_includes_tmp() {
+        // The /tmp fallback was removed to block daemon impersonation.
+        // socket_candidates must only contain /run and (optionally) XDG_RUNTIME_DIR.
+        let saved = std::env::var("XDG_RUNTIME_DIR").ok();
+        unsafe {
+            // SAFETY: single-threaded test — env is not mutated concurrently here.
+            std::env::remove_var("XDG_RUNTIME_DIR");
+        }
+        let cands = socket_candidates();
+        assert!(cands.iter().any(|p| p == std::path::Path::new(SYSTEM_SOCKET)));
+        assert!(!cands.iter().any(|p| p.starts_with("/tmp")));
+        if let Some(v) = saved {
+            unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) };
+        }
+    }
+
+    #[test]
+    fn bind_socket_path_errors_without_xdg_when_unprivileged() {
+        if unsafe { libc::geteuid() } == 0 {
+            // Root always binds the system socket — no env dependency.
+            assert_eq!(bind_socket_path().unwrap().to_str().unwrap(), SYSTEM_SOCKET);
+            return;
+        }
+        let saved = std::env::var("XDG_RUNTIME_DIR").ok();
+        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+        assert!(bind_socket_path().is_err());
+        if let Some(v) = saved {
+            unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) };
+        }
+    }
 }

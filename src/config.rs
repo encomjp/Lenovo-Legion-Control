@@ -618,3 +618,78 @@ pub fn set_keyboard_layout(layout: &str) {
         cfg.last_session.keyboard_layout = layout.into();
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialise tests that mutate process-wide env vars.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_isolated_config_dir(f: impl FnOnce(PathBuf)) {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("legion-test-{}-{}", std::process::id(), {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static CTR: AtomicU64 = AtomicU64::new(0);
+            CTR.fetch_add(1, Ordering::Relaxed)
+        }));
+        let prev = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
+        let _ = fs::create_dir_all(dir.join("legion-control"));
+        f(dir.clone());
+        let _ = fs::remove_dir_all(&dir);
+        match prev {
+            Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+        }
+    }
+
+    #[test]
+    fn write_disk_is_atomic_and_readable() {
+        with_isolated_config_dir(|base| {
+            let mut cfg = AppConfig::default();
+            cfg.brightness = 7;
+            cfg.charge_limit = 80;
+            write_disk(&cfg);
+            let loaded = load_from_disk();
+            assert_eq!(loaded.brightness, 7);
+            assert_eq!(loaded.charge_limit, 80);
+            // No .tmp left behind.
+            let cfg_dir = base.join("legion-control");
+            for e in fs::read_dir(&cfg_dir).unwrap() {
+                let name = e.unwrap().file_name().to_string_lossy().to_string();
+                assert!(!name.contains(".tmp-"), "tmp file left behind: {name}");
+            }
+        });
+    }
+
+    #[test]
+    fn corrupt_file_is_preserved_not_silently_lost() {
+        with_isolated_config_dir(|base| {
+            let path = base.join("legion-control").join("settings.json");
+            let _ = fs::create_dir_all(path.parent().unwrap());
+            fs::write(&path, "{ not valid json").unwrap();
+            let loaded = load_from_disk();
+            assert_eq!(loaded.brightness, AppConfig::default().brightness);
+            assert!(!path.exists(), "corrupt file should have been moved away");
+            let cfg_dir = base.join("legion-control");
+            let mut found_backup = false;
+            for e in fs::read_dir(&cfg_dir).unwrap() {
+                let name = e.unwrap().file_name().to_string_lossy().to_string();
+                if name.contains(".corrupt-") {
+                    found_backup = true;
+                }
+            }
+            assert!(found_backup, "corrupt backup not created");
+        });
+    }
+
+    #[test]
+    fn missing_file_returns_defaults() {
+        with_isolated_config_dir(|_| {
+            let loaded = load_from_disk();
+            assert_eq!(loaded.version, AppConfig::default().version);
+        });
+    }
+}

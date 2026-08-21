@@ -394,3 +394,41 @@ pub fn uptime() -> String {
         .unwrap_or(0);
     format!("{}m {}s", secs / 60, secs % 60)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_valid_json_object(s: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(s).is_ok()
+    }
+
+    #[test]
+    fn json_escape_handles_backslash_newline_and_ctrl() {
+        let msg = "a\"b\\c\nd\re\tf\u{0001}g";
+        let escaped = json_escape(msg);
+        assert_eq!(escaped, "a\\\"b\\\\c\\nd\\re\\tf\\u0001g");
+        // Must round-trip as a valid JSON string literal.
+        assert!(is_valid_json_object(&format!(r#"{{"msg":"{}"}}"#, escaped)));
+    }
+
+    #[test]
+    fn json_escape_leaves_plain_text_untouched() {
+        assert_eq!(json_escape("hello world"), "hello world");
+    }
+
+    #[test]
+    fn json_log_line_is_valid_json_even_with_hostile_message() {
+        let msg = "hello\"world\\oops\nnew\tline";
+        let json_line = format!(r#"{{"msg":"{}"}}"#, json_escape(msg));
+        assert!(
+            is_valid_json_object(&json_line),
+            "produced invalid JSON: {json_line}"
+        );
+    }
+
+    #[test]
+    fn json_escape_empty() {
+        assert_eq!(json_escape(""), "");
+    }
+}

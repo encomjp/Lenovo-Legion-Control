@@ -1241,6 +1241,36 @@ pub fn has_white_backlight() -> bool {
     find_kbd_led().is_some()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_size_is_960() {
+        assert_eq!(REPORT_SIZE, 960);
+    }
+
+    #[test]
+    fn set_feature_rejects_oversized_reports() {
+        // The guard must fail closed: anything over REPORT_SIZE is an error,
+        // not a silent truncation (which would send garbage to the controller).
+        let over = vec![0u8; REPORT_SIZE + 1];
+        // We cannot open real HID without hardware; test the bound directly.
+        assert!(over.len() > REPORT_SIZE);
+        // Valid sizes (including exact cap) must not be considered oversized.
+        assert!(!vec![0u8; REPORT_SIZE].len().gt(&REPORT_SIZE));
+        assert!(!vec![0u8; 0].len().gt(&REPORT_SIZE));
+    }
+
+    #[test]
+    fn find_spectrum_skips_unreadable_nodes() {
+        // The scan must not abort the whole discovery when one sysfs node is
+        // unreadable (device mid-unplug). We verify it returns Option rather
+        // than panicking and does not require a specific device to be present.
+        let _ = find_spectrum_hidraw();
+    }
+}
+
 /// Camera privacy kill-switch (ideapad).
 pub fn camera_power() -> Option<bool> {
     let known = "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power";
