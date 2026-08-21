@@ -1,6 +1,6 @@
 # Legion Control
 
-Linux control app for **Lenovo Legion** laptops — fans, power modes, Spectrum RGB, and battery.
+Linux control app for **Lenovo Legion** laptops — fans, power modes, Spectrum RGB, battery, **CPU Tuning** (thermal throttle 70–98°C, Curve Optimizer, stability test — chips on top, hover tips) and tray autostart.
 
 This is the **monorepo root**: research notes, kernel-driver PoCs, and the SVG icon set live here; the Rust application, installer, and GitHub-facing docs live in the nested repo **[`lenovo-legion-tool/`](./lenovo-legion-tool/)**.
 

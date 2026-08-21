@@ -22,6 +22,8 @@ Last updated: 2026-08-19
 - Fan Auto shows “Auto” instead of “0 rpm”.
 - Richer battery details on Power page.
 - CLI `effect … --zone keyboard|front|rear|logo|chassis`.
+- **2026-08-20 Tuning batch:** CPU Tuning tab — Thermal throttle (70–98°C, governor, TjMax 95), Curve Optimizer (-30..0, startup persistence), Stability 5-min on one page; tooltips-only, chips on top, tray autostart `--hidden`, speaker false-positive fix for USB headset, Cooling collapsed to Fans.
+- **UX Laws pass (2026-08-20 evening):** Glass made opaque (no YouTube bleed), thermal trough blue→red gradient + 95 TjMax tick + muted when off, `GHz` unify, tints consistent, `CPU → Tuning` chips on top inside card.
 
 ## Key paths
 
