@@ -28,6 +28,7 @@ const PERSISTENCE_DIR: &str = "/var/lib/legion-control";
 const PERSISTENCE_FILE: &str = "/var/lib/legion-control/curve-optimizer.json";
 const ARMED_FILE: &str = "/var/lib/legion-control/curve-optimizer.armed";
 const BOOT_BASELINE_FILE: &str = "/run/legion-control/curve-optimizer-baseline.json";
+const HISTORY_FILE: &str = "/var/lib/legion-control/curve-optimizer-history.json";
 const STARTUP_DELAY: Duration = Duration::from_secs(60);
 const VALIDATION_WINDOW: Duration = Duration::from_secs(300);
 
@@ -48,6 +49,9 @@ pub struct CurveOptimizerStatus {
     pub current: Vec<i16>,
     /// Values observed before Legion Control performs its first write.
     pub boot_baseline: Vec<i16>,
+    /// Previous offset before the last successful Apply (restores with one click).
+    #[serde(default)]
+    pub previous: Option<i16>,
     pub minimum: i16,
     pub maximum: i16,
     pub temporary_only: bool,
@@ -76,6 +80,7 @@ impl CurveOptimizerStatus {
             firmware_version: None,
             current: Vec::new(),
             boot_baseline: Vec::new(),
+            previous: None,
             minimum: MIN_OFFSET,
             maximum: MAX_OFFSET,
             temporary_only: true,
@@ -185,6 +190,18 @@ fn read_all_16() -> Result<Vec<i16>, String> {
     Ok(values)
 }
 
+fn read_history() -> Option<i16> {
+    serde_json::from_str::<i16>(&fs::read_to_string(HISTORY_FILE).ok()?).ok()
+}
+
+fn write_history(offset: i16) {
+    let _ = fs::create_dir_all(PERSISTENCE_DIR);
+    let _ = fs::write(
+        HISTORY_FILE,
+        serde_json::to_string(&offset).unwrap_or_else(|_| offset.to_string()),
+    );
+}
+
 fn boot_baseline(current: &[i16]) -> Vec<i16> {
     BASELINE
         .get_or_init(|| {
@@ -271,6 +288,7 @@ pub fn status() -> CurveOptimizerStatus {
         }
     };
     let baseline = boot_baseline(&current);
+    let previous = read_history();
     CurveOptimizerStatus {
         available: true,
         reason: "Read-only firmware probe accepted".into(),
@@ -279,6 +297,7 @@ pub fn status() -> CurveOptimizerStatus {
         firmware_version: Some(firmware),
         current,
         boot_baseline: baseline,
+        previous,
         minimum: MIN_OFFSET,
         maximum: MAX_OFFSET,
         temporary_only: true,
@@ -297,6 +316,11 @@ pub fn set_all(offset: i16) -> Result<CurveOptimizerStatus, String> {
     if !before.available {
         return Err(before.reason);
     }
+    let previous_offset = before
+        .current
+        .first()
+        .copied()
+        .filter(|v| before.current.iter().all(|x| x == v) && *v != offset);
     let _guard = ACCESS
         .lock()
         .map_err(|_| "Curve Optimizer access lock is poisoned")?;
@@ -307,6 +331,9 @@ pub fn set_all(offset: i16) -> Result<CurveOptimizerStatus, String> {
         return Err(format!("SMU read-back mismatch after apply: {readback:?}"));
     }
     drop(_guard);
+    if let Some(prev) = previous_offset {
+        write_history(prev);
+    }
     if let Some(mut config) = load_persistence_config() {
         if config.enabled && config.offset != offset {
             config.enabled = false;

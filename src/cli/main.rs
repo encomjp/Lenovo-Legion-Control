@@ -802,6 +802,9 @@ fn print_curve_optimizer(status: &legion_core::undervolt::CurveOptimizerStatus) 
                 .collect::<Vec<_>>()
                 .join(" ")
         );
+        if let Some(prev) = status.previous {
+            println!("previous: {prev}");
+        }
     }
     println!(
         "allowed temporary range: {}..={}",

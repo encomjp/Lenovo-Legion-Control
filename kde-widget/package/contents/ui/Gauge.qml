@@ -28,14 +28,15 @@ Item {
     Shape {
         anchors.fill: parent
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
-            strokeColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
-            strokeWidth: 5
+            strokeColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+            strokeWidth: 4.5
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap
             PathAngleArc {
                 centerX: gauge.width / 2; centerY: gauge.height / 2
-                radiusX: gauge.size / 2 - 6; radiusY: gauge.size / 2 - 6
+                radiusX: gauge.size / 2 - 7; radiusY: gauge.size / 2 - 7
                 startAngle: 135; sweepAngle: 270
             }
         }
@@ -43,56 +44,57 @@ Item {
     Shape {
         anchors.fill: parent
         antialiasing: true
+        preferredRendererType: Shape.CurveRenderer
         ShapePath {
             strokeColor: gauge.arcColor
-            strokeWidth: 5
+            strokeWidth: 4.5
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap
             PathAngleArc {
                 centerX: gauge.width / 2; centerY: gauge.height / 2
-                radiusX: gauge.size / 2 - 6; radiusY: gauge.size / 2 - 6
+                radiusX: gauge.size / 2 - 7; radiusY: gauge.size / 2 - 7
                 startAngle: 135; sweepAngle: Math.max(0.5, gauge.normalized * 270)
                 Behavior on sweepAngle { NumberAnimation { duration: 520; easing.type: Easing.OutCubic } }
-            }
-        }
-    }
-    // hot threshold tick
-    Shape {
-        anchors.fill: parent
-        antialiasing: true
-        visible: gauge.value >= 0
-        ShapePath {
-            strokeColor: Qt.rgba(232/255, 86/255, 110/255, 0.55)
-            strokeWidth: 1.5
-            fillColor: "transparent"
-            PathAngleArc {
-                centerX: gauge.width/2; centerY: gauge.height/2
-                radiusX: gauge.size/2 - 6; radiusY: gauge.size/2 - 6
-                startAngle: 135 + 270*0.88; sweepAngle: 2.5
             }
         }
     }
 
     Column {
         anchors.centerIn: parent
-        spacing: 0
-        Text {
+        spacing: 1
+        width: gauge.size - 16
+
+        Row {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: value < 0 || isNaN(value) ? "—" : Math.round(value).toString()
-            font.pixelSize: gauge.size * 0.32
-            font.weight: Font.DemiBold
-            font.letterSpacing: -1.0
-            color: gauge.arcColor
-            Behavior on color { ColorAnimation { duration: 320 } }
+            spacing: 1
+            Text {
+                text: value < 0 || isNaN(value) ? "—" : Math.round(value).toString()
+                font.pixelSize: gauge.size * 0.30
+                font.weight: Font.DemiBold
+                font.letterSpacing: -0.8
+                color: gauge.arcColor
+                Behavior on color { ColorAnimation { duration: 320 } }
+            }
+            Text {
+                text: gauge.unit
+                anchors.baseline: parent.children[0].baseline
+                font.pixelSize: gauge.size * 0.13
+                font.weight: Font.Medium
+                color: gauge.arcColor
+                opacity: 0.85
+            }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
             text: gauge.label.toUpperCase()
-            font.pixelSize: gauge.size * 0.095
-            font.letterSpacing: 1.2
+            font.pixelSize: Math.max(9, gauge.size * 0.11)
+            font.letterSpacing: 1.0
             font.weight: Font.Medium
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
             color: Kirigami.Theme.textColor
-            opacity: 0.50
+            opacity: 0.55
             visible: gauge.label !== ""
         }
     }

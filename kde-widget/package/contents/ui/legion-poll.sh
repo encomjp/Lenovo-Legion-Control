@@ -5,7 +5,7 @@ set -u
 
 # Find legion-cli: check common install paths (widget runs in Plasma env, not user shell).
 CLI=""
-for p in /usr/local/bin/legion-cli /usr/bin/legion-cli "$HOME/.local/bin/legion-cli"; do
+for p in "$HOME/.local/bin/legion-cli" /usr/local/bin/legion-cli /usr/bin/legion-cli; do
   [[ -x "$p" ]] && CLI="$p" && break
 done
 [[ -z "$CLI" ]] && { echo "LEGION_CLI_NOT_FOUND=1"; exit 0; }
@@ -24,6 +24,7 @@ value() {
 }
 
 value CPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'Tctl\s+\K[0-9.]+' | head -1 || true)"
+value CPU_POWER "$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
 value IGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'iGPU\s+\K[0-9.]+' | head -1 || true)"
 value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[0-9.]+' | head -1 || true)"
 value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[0-9.]+\s+W' | head -1 | grep -oP '[0-9.]+' || true)"

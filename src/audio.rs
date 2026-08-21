@@ -61,10 +61,17 @@ pub fn diagnose() -> Diagnosis {
     let mut bass_off = false;
     let mut volume_low = false;
     if let Some(card) = hda_card {
-        speakers_muted = mixer_muted(card, "Speaker") || mixer_muted(card, "Master");
-        bass_off = mixer_switch_off(card, "Bass Speaker");
-        volume_low = mixer_pct(card, "Speaker").map(|p| p < 40).unwrap_or(false)
-            || mixer_pct(card, "Master").map(|p| p < 40).unwrap_or(false);
+        // Only treat ALSA mute/bass as a fault when there is no external sink stealing the default.
+        // Users who plug in USB headsets (SteelSeries etc.) keep Master muted on purpose — that is not a bug.
+        let uses_external = pactl_default_sink().as_deref().is_some_and(|s| {
+            s.starts_with("alsa_output.usb") || s.starts_with("bluez_") || s.contains("hdmi")
+        });
+        if !uses_external {
+            speakers_muted = mixer_muted(card, "Speaker") || mixer_muted(card, "Master");
+            bass_off = mixer_switch_off(card, "Bass Speaker");
+            volume_low = mixer_pct(card, "Speaker").map(|p| p < 40).unwrap_or(false)
+                || mixer_pct(card, "Master").map(|p| p < 40).unwrap_or(false);
+        }
     }
 
     let internal_sink = find_internal_analog_sink();

@@ -11,7 +11,7 @@ Item {
     property string fanValue: ""
     property bool muted: false
 
-    implicitHeight: 30
+    implicitHeight: 38
     Layout.fillWidth: true
     visible: label !== ""
 
@@ -28,23 +28,31 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: 2
         anchors.rightMargin: 2
-        spacing: Kirigami.Units.smallSpacing + 2
+        spacing: 8
 
-        Kirigami.Icon {
-            source: row.iconSource
-            isMask: true
-            color: Kirigami.Theme.textColor
-            implicitWidth: 14
-            implicitHeight: 14
+        Item {
+            Layout.preferredWidth: 18
+            Layout.minimumWidth: 18
+            Layout.maximumWidth: 18
+            Layout.preferredHeight: 18
             Layout.alignment: Qt.AlignVCenter
-            opacity: row.muted ? 0.30 : 0.55
+            Kirigami.Icon {
+                anchors.centerIn: parent
+                source: row.iconSource
+                isMask: true
+                color: Kirigami.Theme.textColor
+                width: 16
+                height: 16
+                opacity: row.muted ? 0.30 : 0.70
+            }
         }
 
         Text {
             text: row.label
-            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 1
             font.weight: Font.Medium
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
             Layout.alignment: Qt.AlignVCenter
             elide: Text.ElideRight
             color: Kirigami.Theme.textColor
@@ -55,6 +63,9 @@ Item {
             text: row.temperature === "--" ? "—" : row.temperature + "°C"
             font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 1
             font.weight: Font.DemiBold
+            Layout.preferredWidth: 58
+            Layout.minimumWidth: 58
+            Layout.maximumWidth: 58
             Layout.alignment: Qt.AlignVCenter
             horizontalAlignment: Text.AlignRight
             color: row.tempColor
@@ -63,25 +74,27 @@ Item {
         }
 
         Text {
-            text: row.secondaryValue
+            text: row.secondaryValue !== "" ? row.secondaryValue : " "
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
             Layout.preferredWidth: 52
+            Layout.minimumWidth: 52
+            Layout.maximumWidth: 52
             Layout.alignment: Qt.AlignVCenter
             horizontalAlignment: Text.AlignRight
             color: Kirigami.Theme.textColor
-            opacity: 0.62
-            visible: text !== ""
+            opacity: row.secondaryValue !== "" ? 0.68 : 0
         }
 
         Text {
-            text: row.fanValue
+            text: row.fanValue !== "" ? row.fanValue : " "
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-            Layout.preferredWidth: 76
+            Layout.preferredWidth: 72
+            Layout.minimumWidth: 72
+            Layout.maximumWidth: 72
             Layout.alignment: Qt.AlignVCenter
             horizontalAlignment: Text.AlignRight
             color: Kirigami.Theme.textColor
-            opacity: row.muted ? 0.35 : 0.72
-            visible: text !== ""
+            opacity: row.fanValue !== "" ? (row.muted ? 0.35 : 0.72) : 0
         }
     }
 }

@@ -10,22 +10,22 @@
 @define-color lab_surface #f3eee6;
 @define-color lab_rule alpha(currentColor, 0.10);
 @define-color lab_rule_strong alpha(currentColor, 0.14);
-@define-color glass_bg alpha(@theme_base_color, 0.38);
-@define-color glass_border alpha(white, 0.11);
-@define-color glass_highlight alpha(white, 0.07);
+@define-color glass_bg @theme_base_color;
+@define-color glass_border alpha(white, 0.10);
+@define-color glass_highlight alpha(white, 0.06);
 
 .glass-card {
-    background: alpha(@theme_base_color, 0.38);
-    border: 1px solid alpha(white, 0.11);
+    background: @theme_base_color;
+    border: 1px solid alpha(white, 0.10);
     border-radius: 16px;
-    box-shadow: 0 12px 40px alpha(black, 0.10), 0 1px 0 alpha(white, 0.07) inset;
+    box-shadow: 0 8px 28px alpha(black, 0.12);
 }
 
 .glass-panel {
-    background: alpha(@theme_base_color, 0.32);
+    background: @theme_base_color;
     border: 1px solid alpha(white, 0.09);
     border-radius: 14px;
-    box-shadow: 0 6px 24px alpha(black, 0.08);
+    box-shadow: 0 6px 20px alpha(black, 0.10);
 }
 
 /* ── Type ─────────────────────────────────────────────────────────── */
@@ -36,12 +36,12 @@
 }
 
 window.background {
-    background-color: alpha(@theme_bg_color, 0.93);
+    background-color: @theme_bg_color;
 }
 
 window {
-    background-color: transparent;
-    opacity: 0.985;
+    background-color: @theme_bg_color;
+    opacity: 1;
 }
 
 .navigation-sidebar:not(.sidebar-child):not(.nav-glass) row {
@@ -274,11 +274,11 @@ window {
 }
 
 .card {
-    background: alpha(@theme_base_color, 0.36);
-    border: 1px solid alpha(white, 0.11);
+    background: @theme_base_color;
+    border: 1px solid alpha(white, 0.08);
     border-radius: 16px;
     padding: 16px 16px;
-    box-shadow: 0 10px 32px alpha(black, 0.08), 0 1px 0 alpha(white, 0.06) inset;
+    box-shadow: 0 8px 24px alpha(black, 0.10);
 }
 
 .card + .card {

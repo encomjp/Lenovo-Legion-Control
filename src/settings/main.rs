@@ -403,36 +403,14 @@ fn build_ui(app: &adw::Application) {
         Some("cpu-power"),
         "CPU Power",
     );
-    for (id, title, fan_id) in [
-        ("cooling-cpu", "CPU Fan", 1),
-        ("cooling-gpu", "GPU Fan", 2),
-        ("cooling-aux", "Aux Fan", 4),
-    ] {
-        stack.add_titled(
-            &page_shell(&build_fan_channel_page(
-                fan_id,
-                &toast_overlay,
-                &apply_queue,
-                &daemon_gate,
-            )),
-            Some(id),
-            title,
-        );
-    }
-    stack.add_titled(
-        &page_shell(&build_fan_reset_page(&apply_queue, &daemon_gate)),
-        Some("cooling-reset"),
-        "Reset Fans",
-    );
-    // Overview keeps all fan cards on one glance page — existing per-fan pages stay (no removals).
     stack.add_titled(
         &page_shell(&build_cooling_overview_page(
             &toast_overlay,
             &apply_queue,
             &daemon_gate,
         )),
-        Some("cooling-overview"),
-        "Cooling Overview",
+        Some("cooling-fans"),
+        "Cooling Fans",
     );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
@@ -609,13 +587,7 @@ fn build_ui(app: &adw::Application) {
     let (cooling_sec, cooling_list) = make_section(
         include_bytes!("../../data/icons/cooling.svg"),
         "Cooling",
-        &[
-            ("Overview", "All fans at a glance"),
-            ("CPU fan", "Processor fan"),
-            ("GPU fan", "Graphics fan"),
-            ("Aux fan", "Chassis fan"),
-            ("Reset fans", "Return to curve"),
-        ],
+        &[("Fans", "All fans + reset")],
     );
     let (lighting_sec, lighting_list) = make_section(
         include_bytes!("../../data/icons/lighting.svg"),
@@ -869,13 +841,7 @@ fn build_ui(app: &adw::Application) {
     );
     bind_sub(
         &cooling_list,
-        &[
-            ("cooling-overview", "Overview"),
-            ("cooling-cpu", "CPU Fan"),
-            ("cooling-gpu", "GPU Fan"),
-            ("cooling-aux", "Aux Fan"),
-            ("cooling-reset", "Reset Fans"),
-        ],
+        &[("cooling-fans", "Cooling Fans")],
         show_page.clone(),
     );
     bind_sub(
@@ -1710,14 +1676,31 @@ fn update_curve_optimizer_ui(
         return Ok(());
     }
 
-    let current = offsets_text(&status.current).replace("All cores: ", "");
-    let baseline = offsets_text(&status.boot_baseline).replace("All cores: ", "");
-    let summary = if current == baseline {
-        format!("Current {current}")
-    } else {
-        format!("Current {current} · reset {baseline}")
-    };
-    ui.status_row.set_subtitle(&summary);
+    let current_val = status
+        .current
+        .first()
+        .copied()
+        .filter(|v| status.current.iter().all(|x| x == v));
+    let baseline_val = status
+        .boot_baseline
+        .first()
+        .copied()
+        .filter(|v| status.boot_baseline.iter().all(|x| x == v));
+    let prev = status.previous.filter(|p| Some(*p) != current_val);
+    // Subtitle: Current X · reset Y · previous Z (so you see old values you saved)
+    let mut subtitle = format!(
+        "Current {}",
+        offsets_text(&status.current).replace("All cores: ", "")
+    );
+    if let Some(b) = baseline_val {
+        if Some(b) != current_val {
+            subtitle.push_str(&format!(" · reset {b}"));
+        }
+    }
+    if let Some(p) = prev {
+        subtitle.push_str(&format!(" · previous {p}"));
+    }
+    ui.status_row.set_subtitle(&subtitle);
     ui.offset_scale
         .set_range(status.minimum as f64, status.maximum as f64);
     if let Some(current) = status
@@ -3284,8 +3267,10 @@ degrade the CPU or reduce its lifespan.
 Only continue if you accept this risk.";
 
 fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    // Design: chips on top (like Overview), controls below, visible labels minimal — details in tooltips (hover).
-    let page = page_lede("");
+    // Design: chips on top inside the card (no separate glass page leak) — Garage Lab glass correct.
+    let card = gtk::Box::new(Orientation::Vertical, 0);
+    card.add_css_class("card");
+    let page = gtk::Box::new(Orientation::Vertical, 18);
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
@@ -3366,7 +3351,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         })
     };
 
-    // Tuning: chips on top inside the same card — Overview square grouping, not detached.
+    // Chips inside the card — not floating on a transparent page (fixes glass bleed in ss1).
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
@@ -3376,7 +3361,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .row_spacing(12)
         .build();
     chips.add_css_class("metric-grid");
-    chips.set_margin_bottom(12);
+    chips.set_margin_bottom(4);
     let (tctl_chip, tctl_v, tctl_d) =
         metric_chip_tip("Tctl", Some("k10temp Tctl — main package temp"));
     let (tccd2_chip, tccd2_v, tccd2_d) =
@@ -3388,9 +3373,9 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     chips.append(&tctl_chip);
     chips.append(&tccd2_chip);
     chips.append(&freq_chip);
-    // Keep chips visually grouped with the thermal card — inside page but before controls.
-    page.append(&chips);
-    page.append(&group);
+    card.append(&chips);
+    card.append(&group);
+    page.append(&card);
     gate.track(&group);
     gate.track(&chips);
 

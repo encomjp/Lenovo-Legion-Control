@@ -13,7 +13,7 @@ Linux control software for Lenovo Legion laptops: a GTK4/libadwaita app, CLI, pr
 ## Features
 
 - Monitor CPU, GPU, battery, fans, and supported hwmon telemetry.
-- Control profiles, fan targets, CPU boost, SMT, and charge limits.
+- Control profiles, fan targets, CPU boost, SMT, charge limits, and **CPU Tuning** — thermal throttle (max-temp governor, 70–98°C) + Curve Optimizer undervolt + 5-min stability test on one tab (chips on top, controls below, hover tips, `--hidden` tray autostart).
 - Configure supported Gen 10 Spectrum RGB zones, effects, brightness, logo, and per-key colors.
 - Save profiles, automate supported controls with `legion-cli`, and use the optional Plasma 6 widget.
 
