@@ -233,8 +233,8 @@ fn build_ui(app: &adw::Application) {
     stack.set_vexpand(true);
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
-    let (battery_status_page, battery_limit_page) =
-        build_battery_pages(&toast_overlay, &daemon_gate);
+    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
+    let fix_page = build_fix_page(&toast_overlay, &daemon_gate);
     let (about_setup_page, about_help_page, about_hardware_page, about_storage_page) =
         build_about_pages(&toast_overlay);
 
@@ -278,30 +278,11 @@ fn build_ui(app: &adw::Application) {
     );
     stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
     stack.add_titled(
-        &page_shell(&battery_status_page),
+        &page_shell(&battery_page),
         Some("battery-status"),
-        "Battery Status",
+        "Battery",
     );
-    stack.add_titled(
-        &page_shell(&battery_limit_page),
-        Some("battery-limit"),
-        "Charge Limit",
-    );
-    stack.add_titled(
-        &page_shell(&build_fix_audio_page(&toast_overlay)),
-        Some("fix-audio"),
-        "Speaker Repair",
-    );
-    stack.add_titled(
-        &page_shell(&build_fix_lighting_page(&toast_overlay, &daemon_gate)),
-        Some("fix-lighting"),
-        "Lighting Repair",
-    );
-    stack.add_titled(
-        &page_shell(&build_fix_logs_page(&toast_overlay)),
-        Some("fix-logs"),
-        "Service Logs",
-    );
+    stack.add_titled(&page_shell(&fix_page), Some("fix"), "Fix");
     stack.add_titled(
         &page_shell(&build_profiles_page(
             &toast_overlay,
@@ -461,30 +442,17 @@ fn build_ui(app: &adw::Application) {
     let (lighting_sec, lighting_list, lighting_rev, lighting_chev) = make_section(
         include_bytes!("../../data/icons/lighting.svg"),
         "Lighting",
-        &[
-            ("Keyboard", "Whole-keyboard and per-key"),
-            ("Front", "Front bar"),
-            ("Rear", "Rear bar"),
-            ("Logo", "Lid logo"),
-            ("More", "Brightness and power"),
-        ],
+        &[("Lighting", "Zones and effects")],
     );
     let (battery_sec, battery_list, battery_rev, battery_chev) = make_section(
         include_bytes!("../../data/icons/battery.svg"),
         "Battery",
-        &[
-            ("Status", "Charge and status"),
-            ("Charge limit", "60, 80, or 100%"),
-        ],
+        &[("Battery", "Status and charge limit")],
     );
     let (fix_sec, fix_list, fix_rev, fix_chev) = make_section(
         include_bytes!("../../data/icons/fix.svg"),
         "Fix",
-        &[
-            ("Speakers", "Speaker diagnostics"),
-            ("Lighting", "Lighting recovery"),
-            ("Service logs", "Service output"),
-        ],
+        &[("Fix", "Diagnostics and repair")],
     );
     let (about_sec, about_list, about_rev, about_chev) = make_section(
         include_bytes!("../../data/icons/about.svg"),
@@ -515,18 +483,15 @@ fn build_ui(app: &adw::Application) {
         &[("Manage", "Save and restore presets")],
     );
     nav_box.append(&profiles_sec);
-    // Discoverability: EVERY section is expanded on cold launch so every page
-    // is exactly one click away (NN/g Heuristic 6: recognition over recall —
-    // no hunting through collapsed chevrons). Sections stay collapsible for
-    // users who want a compact rail.
+    // Density: only frequently-visited groups start expanded. Profiles and
+    // About stay collapsed — one click opens them, and they are rarely
+    // needed once configured.
     for rev in [
         &cpu_rev,
         &cooling_rev,
         &lighting_rev,
         &battery_rev,
         &fix_rev,
-        &profiles_rev,
-        &about_rev,
     ] {
         rev.set_reveal_child(true);
     }
@@ -536,8 +501,6 @@ fn build_ui(app: &adw::Application) {
         &lighting_chev,
         &battery_chev,
         &fix_chev,
-        &profiles_chev,
-        &about_chev,
     ] {
         chev.add_css_class("open");
     }
@@ -785,13 +748,8 @@ fn build_ui(app: &adw::Application) {
                 }
             }
             ensure_expanded(&rev, &chev);
-            if let Some((name, title)) = [
-                ("battery-status", "Battery Status"),
-                ("battery-limit", "Charge Limit"),
-            ]
-            .get(r.index() as usize)
-            {
-                show(name, title);
+            if r.index() == 0 {
+                show("battery-status", "Battery");
             }
         });
     }
@@ -808,14 +766,8 @@ fn build_ui(app: &adw::Application) {
                 }
             }
             ensure_expanded(&rev, &chev);
-            if let Some((name, title)) = [
-                ("fix-audio", "Speaker Repair"),
-                ("fix-lighting", "Lighting Repair"),
-                ("fix-logs", "Service Logs"),
-            ]
-            .get(r.index() as usize)
-            {
-                show(name, title);
+            if r.index() == 0 {
+                show("fix", "Fix");
             }
         });
     }
@@ -876,16 +828,11 @@ fn build_ui(app: &adw::Application) {
                 }
             }
             ensure_expanded(&rev, &chev);
-            let pages = [
-                ("keyboard", "Keyboard Lighting"),
-                ("front", "Front Lighting"),
-                ("rear", "Rear Lighting"),
-                ("logo", "Logo Lighting"),
-                ("more", "Lighting Options"),
-            ];
-            if let Some((name, title)) = pages.get(r.index() as usize) {
-                tabs.set_visible_child_name(name);
-                show("lighting", title);
+            if r.index() == 0 {
+                // The Lighting page has its own zone tabs (Keyboard/Front/
+                // Rear/Logo/More) — the sidebar no longer duplicates them.
+                tabs.set_visible_child_name("keyboard");
+                show("lighting", "Lighting");
             }
         });
     }
@@ -934,12 +881,9 @@ fn build_ui(app: &adw::Application) {
                 "cpu-tuning" => "CPU Tuning",
                 "cpu-power" => "CPU Power Limits",
                 "cooling-fans" => "Cooling Fans",
-                "lighting" => "Lighting",
-                "battery-status" => "Battery Status",
-                "battery-limit" => "Charge Limit",
-                "fix-audio" => "Speaker Repair",
-                "fix-lighting" => "Lighting Repair",
-                "fix-logs" => "Service Logs",
+                "lighting" | "lighting-keyboard" => "Lighting",
+                "battery-status" | "battery-limit" => "Battery",
+                "fix-audio" | "fix-lighting" | "fix-logs" | "fix" => "Fix",
                 "profiles" => "Profiles",
                 "about-setup" => "Setup",
                 "about-hardware" => "Hardware",
@@ -964,12 +908,16 @@ fn build_ui(app: &adw::Application) {
                 "cpu-tuning" => select(&cpu_list, &cpu_rev, &cpu_chev, 1),
                 "cpu-power" => select(&cpu_list, &cpu_rev, &cpu_chev, 2),
                 "cooling-fans" => select(&cooling_list, &cooling_rev, &cooling_chev, 0),
-                "lighting" => select(&lighting_list, &lighting_rev, &lighting_chev, 0),
-                "battery-status" => select(&battery_list, &battery_rev, &battery_chev, 0),
-                "battery-limit" => select(&battery_list, &battery_rev, &battery_chev, 1),
-                "fix-audio" => select(&fix_list, &fix_rev, &fix_chev, 0),
-                "fix-lighting" => select(&fix_list, &fix_rev, &fix_chev, 1),
-                "fix-logs" => select(&fix_list, &fix_rev, &fix_chev, 2),
+                // Merged pages: legacy ids all land on their single row.
+                "lighting" | "lighting-keyboard" => {
+                    select(&lighting_list, &lighting_rev, &lighting_chev, 0)
+                }
+                "battery-status" | "battery-limit" => {
+                    select(&battery_list, &battery_rev, &battery_chev, 0)
+                }
+                "fix-audio" | "fix-lighting" | "fix-logs" | "fix" => {
+                    select(&fix_list, &fix_rev, &fix_chev, 0)
+                }
                 "profiles" => select(&profiles_list, &profiles_rev, &profiles_chev, 0),
                 "about-setup" => select(&about_list, &about_rev, &about_chev, 0),
                 "about-hardware" => select(&about_list, &about_rev, &about_chev, 1),
@@ -4033,13 +3981,8 @@ fn fan_card(
 fn build_battery_pages(
     toast_overlay: &adw::ToastOverlay,
     gate: &DaemonGate,
-) -> (gtk::Box, gtk::Box) {
+) -> gtk::Box {
     let status_page = page_lede("");
-    // Heuristics 2+6+10: plain language inline — explain the 60/80/100
-    // choice so users don't have to hover or recall forum advice.
-    let limit_page = page_lede(
-        "On AC most of the day? Lower limits reduce wear — 60% desk, 80% daily, 100% travel.",
-    );
 
     // Chips on top — like Overview / Thermal: Capacity · Voltage · Power · Health
     let chips = gtk::FlowBox::builder()
@@ -4211,7 +4154,7 @@ fn build_battery_pages(
     pill_row.add_suffix(&pills);
     lim.add(&pill_row);
     gate.track(&lim);
-    limit_page.append(&lim);
+    status_page.append(&lim);
 
     let volt_l = detail_rows[0].clone();
     let pow_l = detail_rows[1].clone();
@@ -4331,7 +4274,7 @@ fn build_battery_pages(
         glib::ControlFlow::Continue
     });
 
-    (status_page, limit_page)
+    status_page
 }
 
 // ─── Troubleshoot ───────────────────────────────────────────────────────────
@@ -4339,6 +4282,77 @@ fn build_battery_pages(
 fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
     let page = page_lede("Speaker diagnostics and repair");
     page.append(&build_speakers_section(toast_overlay));
+    page
+}
+
+/// One "Fix" destination with an internal switcher instead of three sidebar
+/// rows — keeps the rail short while all diagnostics stay one click away.
+fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+    let page = page_lede("Diagnostics and repair — speakers, Spectrum RGB, service logs");
+
+    let switcher = gtk::Box::new(Orientation::Horizontal, 8);
+    switcher.add_css_class("lighting-switcher");
+    let speakers_btn = gtk::ToggleButton::with_label("Speakers");
+    speakers_btn.add_css_class("pill-btn");
+    speakers_btn.set_active(true);
+    let lighting_btn = gtk::ToggleButton::with_label("Lighting");
+    lighting_btn.add_css_class("pill-btn");
+    let logs_btn = gtk::ToggleButton::with_label("Service logs");
+    logs_btn.add_css_class("pill-btn");
+    lighting_btn.set_group(Some(&speakers_btn));
+    logs_btn.set_group(Some(&speakers_btn));
+    tip(
+        &switcher,
+        "Speaker audio issues · stuck or dark Spectrum RGB · recent control-service output",
+    );
+    switcher.append(&speakers_btn);
+    switcher.append(&lighting_btn);
+    switcher.append(&logs_btn);
+    page.append(&switcher);
+
+    let inner = adw::ViewStack::new();
+    inner.set_vexpand(true);
+    inner.add_titled(
+        &page_shell(&build_fix_audio_page(toast_overlay)),
+        Some("fix-audio"),
+        "Speakers",
+    );
+    inner.add_titled(
+        &page_shell(&build_fix_lighting_page(toast_overlay, gate)),
+        Some("fix-lighting"),
+        "Lighting",
+    );
+    inner.add_titled(
+        &page_shell(&build_fix_logs_page(toast_overlay)),
+        Some("fix-logs"),
+        "Logs",
+    );
+    // Wire the toggle row to the internal stack.
+    {
+        let inner_c = inner.clone();
+        speakers_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                inner_c.set_visible_child_name("fix-audio");
+            }
+        });
+    }
+    {
+        let inner_c = inner.clone();
+        lighting_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                inner_c.set_visible_child_name("fix-lighting");
+            }
+        });
+    }
+    {
+        let inner_c = inner.clone();
+        logs_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                inner_c.set_visible_child_name("fix-logs");
+            }
+        });
+    }
+    page.append(&inner);
     page
 }
 
