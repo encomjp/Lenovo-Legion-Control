@@ -513,6 +513,11 @@ fn build_ui(app: &adw::Application) {
         &[("Manage", "Save and restore presets")],
     );
     nav_box.append(&profiles_sec);
+    // Discoverability: leave the two most-visited groups open on cold launch.
+    cooling_rev.set_reveal_child(true);
+    cooling_chev.add_css_class("open");
+    battery_rev.set_reveal_child(true);
+    battery_chev.add_css_class("open");
     nav_box.append(&about_sec);
     scroll.set_child(Some(&nav_box));
     sidebar_box.append(&scroll);
@@ -3834,9 +3839,11 @@ fn fan_card(
     if cur > 0 {
         scale.set_value(cur as f64);
         scale.set_sensitive(true);
+        scale.set_draw_value(true);
     } else {
         scale.set_value(min_rpm);
         scale.set_sensitive(false);
+        scale.set_draw_value(false);
     }
 
     let speed_row = adw::ActionRow::builder()
@@ -3864,6 +3871,7 @@ fn fan_card(
         }
         if s.is_active() {
             scale_s.set_sensitive(false);
+            scale_s.set_draw_value(false);
             sw_title.set_title("Automatic");
             sw_title.set_subtitle("Firmware temperature curve");
             queue.set_fan(fan, 0);
@@ -3890,6 +3898,7 @@ fn fan_card(
                             suppressing.set(true);
                             sw_r.set_active(true);
                             scale_r.set_sensitive(false);
+                            scale_r.set_draw_value(false);
                             sw_title.set_title("Automatic");
                             sw_title.set_subtitle("Firmware temperature curve");
                             suppressing.set(false);
@@ -3897,6 +3906,7 @@ fn fan_card(
                         }
                         high_s.set(true);
                         scale_r.set_sensitive(true);
+                        scale_r.set_draw_value(true);
                         sw_title.set_title("Manual");
                         sw_title.set_subtitle("Fixed speed below");
                         queue.set_fan(fan, rpm);
@@ -3905,6 +3915,7 @@ fn fan_card(
                 return;
             }
             scale_s.set_sensitive(true);
+            scale_s.set_draw_value(true);
             sw_title.set_title("Manual");
             sw_title.set_subtitle("Fixed speed below");
             queue.set_fan(fan, rpm);
