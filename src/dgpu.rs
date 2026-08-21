@@ -96,3 +96,27 @@ pub fn read_power_default() -> Option<f64> {
 pub fn is_available() -> bool {
     smi_run(&["-L"]).is_some()
 }
+
+/// Pure helper: parse a single nvidia-smi CSV value. Trimmed whitespace,
+/// empty string → None, parse failure → None. Extracted for tests.
+#[allow(dead_code)]
+pub(crate) fn parse_smi_value(s: &str) -> Option<f64> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    t.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_smi_handles_whitespace_and_empty() {
+        assert_eq!(parse_smi_value(" 53.0 "), Some(53.0));
+        assert!(parse_smi_value("").is_none());
+        assert!(parse_smi_value("   ").is_none());
+        assert!(parse_smi_value("N/A").is_none());
+    }
+}

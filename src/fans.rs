@@ -50,10 +50,10 @@ pub fn ids() -> Vec<u8> {
     channels().into_iter().map(|f| f.id).collect()
 }
 
-/// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
-pub fn rpm_label(fan: u8) -> String {
-    let target = read_target(fan).unwrap_or(0);
-    let rpm = read_rpm(fan).unwrap_or(0);
+/// Pure helper — the formatting contract for `target == 0` means "auto" on
+/// this WMI driver. Extracted for tests; `rpm_label` is the sysfs-calling wrapper.
+#[allow(dead_code)]
+pub fn format_rpm_label(target: u32, rpm: u32) -> String {
     if target == 0 {
         if rpm == 0 {
             "Auto".into()
@@ -65,6 +65,14 @@ pub fn rpm_label(fan: u8) -> String {
     } else {
         format!("{rpm} rpm")
     }
+}
+
+/// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
+pub fn rpm_label(fan: u8) -> String {
+    format_rpm_label(
+        read_target(fan).unwrap_or(0),
+        read_rpm(fan).unwrap_or(0),
+    )
 }
 
 /// Set fan target RPM. 0 = auto mode.
@@ -102,5 +110,18 @@ pub fn set_auto() -> std::io::Result<()> {
     match last_err {
         Some(e) => Err(e),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_auto_covers_all_combos() {
+        assert_eq!(format_rpm_label(0, 0), "Auto");
+        assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 rpm");
+        assert_eq!(format_rpm_label(1500, 0), "~1500 rpm");
+        assert_eq!(format_rpm_label(1500, 1400), "1400 rpm");
     }
 }

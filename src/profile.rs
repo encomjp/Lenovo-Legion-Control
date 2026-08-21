@@ -244,3 +244,22 @@ pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
 pub fn ppt_available() -> bool {
     !all_ppt_limits().is_empty()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_fw_attr_matches_declared_ids() {
+        assert!(known_fw_attr("ppt_pl1_spl"));
+        assert!(known_fw_attr("gpu_nv_ac_offset"));
+        assert!(!known_fw_attr("unknown_attr"));
+        assert!(!known_fw_attr(""));
+    }
+
+    #[test]
+    fn set_ppt_rejects_unknown_attr_without_touching_sysfs() {
+        let err = set_ppt("bogus_attr", 100).unwrap_err();
+        assert!(err.contains("Unknown PPT attribute"), "err={err:?}");
+    }
+}

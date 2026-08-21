@@ -431,4 +431,56 @@ mod tests {
     fn json_escape_empty() {
         assert_eq!(json_escape(""), "");
     }
+
+    #[test]
+    fn parse_level_variants() {
+        assert_eq!(parse_level("off"), LevelFilter::Off);
+        assert_eq!(parse_level("ERROR"), LevelFilter::Error);
+        assert_eq!(parse_level("warn"), LevelFilter::Warn);
+        assert_eq!(parse_level("info"), LevelFilter::Info);
+        assert_eq!(parse_level("DEBUG"), LevelFilter::Debug);
+        assert_eq!(parse_level("trace"), LevelFilter::Trace);
+        assert_eq!(parse_level("json"), LevelFilter::Info);
+        assert_eq!(parse_level("unknown"), LevelFilter::Info);
+        // env_logger style prefix
+        assert_eq!(parse_level("debug,legion_core=info"), LevelFilter::Debug);
+        assert_eq!(parse_level("  info  "), LevelFilter::Info);
+    }
+
+    #[test]
+    fn ring_buffer_capacity_and_tail() {
+        let mut ring = RingBuffer {
+            buf: VecDeque::with_capacity(3),
+            capacity: 3,
+        };
+        for i in 0..5 {
+            ring.push(LogEntry {
+                ts: format!("t{i}"),
+                level: "INFO".into(),
+                target: "test".into(),
+                file: None,
+                line: None,
+                message: format!("m{i}"),
+            });
+        }
+        assert_eq!(ring.buf.len(), 3);
+        // Oldest two evicted.
+        assert_eq!(ring.buf[0].message, "m2");
+        assert_eq!(ring.tail(2).len(), 2);
+        assert_eq!(ring.tail(2)[0].message, "m3");
+        assert_eq!(ring.tail(10).len(), 3);
+        assert_eq!(ring.tail(0).len(), 0);
+    }
+
+    #[test]
+    fn cleanup_old_logs_ignores_non_log_files() {
+        let dir = std::env::temp_dir().join(format!("legion-log-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("keep.txt"), "x").unwrap();
+        std::fs::write(dir.join("keep.log"), "x").unwrap();
+        // Should not error and must not delete keep.txt.
+        let _ = cleanup_old_logs(&dir.join("dummy.log"), 7);
+        assert!(dir.join("keep.txt").exists(), "non-log file was deleted");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

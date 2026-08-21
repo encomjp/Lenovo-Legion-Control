@@ -307,3 +307,76 @@ pub fn sample_cpu_usage_pct() -> f64 {
 pub fn sample_gpu_usage_pct() -> f64 {
     crate::dgpu::read_util().unwrap_or(0.0).clamp(0.0, 100.0)
 }
+
+/// Pure helper: compute CPU usage from two snapshots. Mirrors the math
+/// in `sample_cpu_usage_pct` without touching /proc.
+#[allow(dead_code)]
+pub(crate) fn compute_cpu_usage(p_idle: u64, p_total: u64, c_idle: u64, c_total: u64) -> f64 {
+    let d_total = c_total.saturating_sub(p_total);
+    let d_idle = c_idle.saturating_sub(p_idle);
+    if d_total == 0 {
+        0.0
+    } else {
+        ((1.0 - d_idle as f64 / d_total as f64) * 100.0).clamp(0.0, 100.0)
+    }
+}
+
+/// Pure helper: compute watts from two RAPL energy samples (microjoules +
+/// instants). Mirrors `sample_cpu_power_w`.
+#[allow(dead_code)]
+pub(crate) fn compute_cpu_power(e0: u64, t0: std::time::Instant, e1: u64, t1: std::time::Instant) -> f64 {
+    let dt = t1.duration_since(t0).as_secs_f64();
+    if dt >= 0.2 && e1 >= e0 {
+        (e1 - e0) as f64 / dt / 1_000_000.0
+    } else {
+        0.0
+    }
+}
+
+/// Pure helper: pick best SSD temp from ranked sources (Composite > fallback > temp1).
+#[allow(dead_code)]
+pub(crate) fn select_ssd_temp(
+    composite: Option<f64>,
+    fallback: Option<f64>,
+    temp1: Option<f64>,
+) -> Option<f64> {
+    composite.or(fallback).or(temp1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_cpu_usage_zero_and_clamp() {
+        // No elapsed time → 0.
+        assert_eq!(compute_cpu_usage(100, 1000, 100, 1000), 0.0);
+        // All non-idle → 100.
+        assert_eq!(compute_cpu_usage(0, 0, 0, 100), 100.0);
+        // 80% idle → 20% busy (allow fp slop).
+        let v = compute_cpu_usage(0, 0, 80, 100);
+        assert!((v - 20.0).abs() < 1e-9, "v={v}");
+    }
+
+    #[test]
+    fn compute_cpu_power_needs_time_and_monotonic() {
+        let t0 = std::time::Instant::now();
+        // Too short → 0 regardless of energy delta.
+        let t1 = t0 + std::time::Duration::from_millis(100);
+        assert_eq!(compute_cpu_power(0, t0, 1_000_000, t1), 0.0);
+        // Enough time + monotonic → watts.
+        let t2 = t0 + std::time::Duration::from_millis(500);
+        let w = compute_cpu_power(0, t0, 500_000, t2);
+        assert!(w > 0.9 && w < 1.1, "w={w}");
+        // Energy went backwards (counter wrap) → 0.
+        assert_eq!(compute_cpu_power(1_000_000, t0, 0, t2), 0.0);
+    }
+
+    #[test]
+    fn select_ssd_temp_priority() {
+        assert_eq!(select_ssd_temp(Some(40.0), Some(41.0), Some(42.0)), Some(40.0));
+        assert_eq!(select_ssd_temp(None, Some(41.0), Some(42.0)), Some(41.0));
+        assert_eq!(select_ssd_temp(None, None, Some(42.0)), Some(42.0));
+        assert_eq!(select_ssd_temp(None, None, None), None);
+    }
+}

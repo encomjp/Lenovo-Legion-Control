@@ -648,9 +648,11 @@ mod tests {
     #[test]
     fn write_disk_is_atomic_and_readable() {
         with_isolated_config_dir(|base| {
-            let mut cfg = AppConfig::default();
-            cfg.brightness = 7;
-            cfg.charge_limit = 80;
+            let cfg = AppConfig {
+                brightness: 7,
+                charge_limit: 80,
+                ..Default::default()
+            };
             write_disk(&cfg);
             let loaded = load_from_disk();
             assert_eq!(loaded.brightness, 7);
@@ -691,5 +693,58 @@ mod tests {
             let loaded = load_from_disk();
             assert_eq!(loaded.version, AppConfig::default().version);
         });
+    }
+
+    #[test]
+    fn zone_effect_off_detection() {
+        let off_lower = ZoneEffect {
+            effect: "off".into(),
+            ..Default::default()
+        };
+        assert!(off_lower.is_off());
+        let off_upper = ZoneEffect {
+            effect: "OFF".into(),
+            ..Default::default()
+        };
+        assert!(off_upper.is_off());
+        let on = ZoneEffect {
+            effect: "static".into(),
+            ..Default::default()
+        };
+        assert!(!on.is_off());
+    }
+
+    #[test]
+    fn zone_effect_colors_respect_off_and_brightness() {
+        let mut z = ZoneEffect {
+            effect: "off".into(),
+            r: 255,
+            g: 0,
+            b: 0,
+            speed: 2,
+            brightness: 9,
+        };
+        assert_eq!(z.colors(), vec![(0, 0, 0)]);
+        z.effect = "rainbow-wave".into();
+        // Rainbow does not need a color → empty even with bright value.
+        assert!(z.colors().is_empty());
+        z.effect = "static".into();
+        z.r = 200;
+        z.g = 0;
+        z.b = 0;
+        z.brightness = 9;
+        assert_eq!(z.colors(), vec![(200, 0, 0)]);
+        // Dimmed via brightness scaler.
+        z.brightness = 0;
+        assert_eq!(z.colors(), vec![(0, 0, 0)]);
+    }
+
+    #[test]
+    fn zone_effect_rgb_effect_fallback_is_static() {
+        let z = ZoneEffect {
+            effect: "not-a-real-effect".into(),
+            ..Default::default()
+        };
+        assert_eq!(z.rgb_effect(), crate::keyboard::RgbEffect::Static);
     }
 }

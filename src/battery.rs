@@ -196,3 +196,67 @@ pub fn charge_limit_label(pct: u32) -> &'static str {
         _ => "Full charge (100%)",
     }
 }
+
+/// Pure helper: map any requested percentage to the nearest supported
+/// firmware limit (60 / 80 / 100). Exported for tests; the write path
+/// `set_charge_limit_pct` applies the same mapping before sysfs writes.
+#[allow(dead_code)]
+pub fn discretize_limit(pct: u32) -> u32 {
+    match pct {
+        0..=69 => 60,
+        70..=89 => 80,
+        _ => 100,
+    }
+}
+
+/// Pure helper: compute health from two watt-hour readings. Mirrors
+/// `health_pct()` without touching sysfs.
+#[allow(dead_code)]
+pub fn health_from_wh(full: f64, design: f64) -> Option<f64> {
+    if design <= 0.0 {
+        return None;
+    }
+    Some((full / design) * 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discretize_maps_to_supported_limits() {
+        assert_eq!(discretize_limit(0), 60);
+        assert_eq!(discretize_limit(59), 60);
+        assert_eq!(discretize_limit(69), 60);
+        assert_eq!(discretize_limit(70), 80);
+        assert_eq!(discretize_limit(89), 80);
+        assert_eq!(discretize_limit(90), 100);
+        assert_eq!(discretize_limit(100), 100);
+        assert_eq!(discretize_limit(999), 100);
+    }
+
+    #[test]
+    fn label_matches_discretized_value() {
+        for pct in [0, 60, 69, 70, 80, 89, 90, 100, 200] {
+            let d = discretize_limit(pct);
+            let label = charge_limit_label(d);
+            assert!(!label.is_empty(), "empty label for {d}");
+            // Supported labels only.
+            assert!(
+                label.contains("60") || label.contains("80") || label.contains("100"),
+                "unexpected label {label:?} for {d}"
+            );
+        }
+        assert_eq!(charge_limit_label(60), "Conservation (~60%)");
+        assert_eq!(charge_limit_label(80), "Preservation (~80%)");
+        assert_eq!(charge_limit_label(100), "Full charge (100%)");
+    }
+
+    #[test]
+    fn health_from_wh_edge_cases() {
+        assert_eq!(health_from_wh(50.0, 100.0).unwrap(), 50.0);
+        assert_eq!(health_from_wh(100.0, 100.0).unwrap(), 100.0);
+        assert!(health_from_wh(50.0, 0.0).is_none());
+        assert!(health_from_wh(50.0, -1.0).is_none());
+    }
+}

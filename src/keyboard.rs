@@ -1241,6 +1241,15 @@ pub fn has_white_backlight() -> bool {
     find_kbd_led().is_some()
 }
 
+/// Camera privacy kill-switch (ideapad).
+pub fn camera_power() -> Option<bool> {
+    let known = "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power";
+    if let Ok(val) = std::fs::read_to_string(known) {
+        return Some(val.trim() == "1");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1252,30 +1261,78 @@ mod tests {
 
     #[test]
     fn set_feature_rejects_oversized_reports() {
-        // The guard must fail closed: anything over REPORT_SIZE is an error,
-        // not a silent truncation (which would send garbage to the controller).
         let over = vec![0u8; REPORT_SIZE + 1];
-        // We cannot open real HID without hardware; test the bound directly.
         assert!(over.len() > REPORT_SIZE);
-        // Valid sizes (including exact cap) must not be considered oversized.
         assert!(!vec![0u8; REPORT_SIZE].len().gt(&REPORT_SIZE));
         assert!(!vec![0u8; 0].len().gt(&REPORT_SIZE));
     }
 
     #[test]
     fn find_spectrum_skips_unreadable_nodes() {
-        // The scan must not abort the whole discovery when one sysfs node is
-        // unreadable (device mid-unplug). We verify it returns Option rather
-        // than panicking and does not require a specific device to be present.
         let _ = find_spectrum_hidraw();
     }
-}
 
-/// Camera privacy kill-switch (ideapad).
-pub fn camera_power() -> Option<bool> {
-    let known = "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power";
-    if let Ok(val) = std::fs::read_to_string(known) {
-        return Some(val.trim() == "1");
+    #[test]
+    fn rgb_effect_from_name_aliases() {
+        assert_eq!(RgbEffect::from_name("static"), Some(RgbEffect::Static));
+        assert_eq!(RgbEffect::from_name("Spiral"), Some(RgbEffect::ScrewRainbow));
+        assert_eq!(RgbEffect::from_name("rainbow"), Some(RgbEffect::RainbowWave));
+        assert_eq!(RgbEffect::from_name("BREATH"), Some(RgbEffect::ColorPulse));
+        assert_eq!(RgbEffect::from_name("off"), None);
+        assert_eq!(RgbEffect::from_name("bogus"), None);
+        // Name round-trip for all advertised effects.
+        for name in RgbEffect::all_names() {
+            assert!(
+                RgbEffect::from_name(name).is_some(),
+                "all_names entry {name:?} should parse"
+            );
+        }
     }
-    None
+
+    #[test]
+    fn rgb_effect_needs_color() {
+        assert!(RgbEffect::Static.needs_color());
+        assert!(RgbEffect::Reactive.needs_color());
+        assert!(!RgbEffect::Smooth.needs_color());
+        assert!(!RgbEffect::ScrewRainbow.needs_color());
+    }
+
+    #[test]
+    fn rgb_zone_from_name_and_roundtrip() {
+        assert_eq!(RgbZone::from_name("all"), Some(RgbZone::All));
+        assert_eq!(RgbZone::from_name("KB"), Some(RgbZone::Keyboard));
+        assert_eq!(RgbZone::from_name("rear"), Some(RgbZone::Rear));
+        assert_eq!(RgbZone::from_name("bars"), Some(RgbZone::Chassis));
+        assert_eq!(RgbZone::from_name("bogus"), None);
+        for z in RgbZone::all() {
+            assert_eq!(RgbZone::from_name(z.name()), Some(*z));
+        }
+    }
+
+    #[test]
+    fn build_effect_encodes_lengths_and_header() {
+        let colors = vec![(10u8, 20, 30), (40, 50, 60)];
+        let keys = vec![0x001Eu16, 0x001Fu16];
+        let pkt = build_effect(1, RgbEffect::Static as u8, &colors, &keys, 2, 0, 0);
+        // Layout: [effect_no, 0x06,0x01, effect_type, 0x02,speed, 0x03,clockwise, 0x04,dir, 0x05,color_mode..]
+        assert_eq!(pkt[0], 1);
+        let n_colors = pkt[14] as usize;
+        assert_eq!(n_colors, 2);
+        // After n_colors + 3*n_colors bytes, the next byte is n_keys.
+        let keys_off = 15 + 3 * n_colors;
+        assert_eq!(pkt[keys_off], 2);
+    }
+
+    #[test]
+    fn build_effect_static_no_colors_uses_mode_00() {
+        let pkt = build_effect(1, RgbEffect::Static as u8, &[], &[], 2, 0, 0);
+        // Layout: [..., 0x05, color_mode, 0x06, 0x00, ...] — color_mode at pkt[11].
+        assert_eq!(pkt[11], 0x00);
+    }
+
+    #[test]
+    fn build_effect_random_colors_uses_mode_01() {
+        let pkt = build_effect(1, RgbEffect::Smooth as u8, &[], &[], 2, 0, 0);
+        assert_eq!(pkt[11], 0x01);
+    }
 }

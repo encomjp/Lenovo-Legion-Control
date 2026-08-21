@@ -590,6 +590,41 @@ fn mixer_pct(card: u32, control: &str) -> Option<u32> {
     None
 }
 
+/// Pure helper extracted for tests — the scoring in `find_internal_analog_sink`.
+#[allow(dead_code)]
+pub(crate) fn score_sink_name(name: &str) -> Option<i32> {
+    let lname = name.to_lowercase();
+    if lname.contains("hdmi") || lname.starts_with("bluez_") {
+        return None;
+    }
+    if lname.contains("usb-") || lname.contains("dock") {
+        return None;
+    }
+    if lname.contains("analog-stereo") && lname.contains("pci-") {
+        Some(100)
+    } else if lname.contains("analog") && !lname.contains("usb") {
+        Some(50)
+    } else {
+        None
+    }
+}
+
+/// Pure helper: pick best sink from a mocked `pactl list short sinks` output.
+#[allow(dead_code)]
+pub(crate) fn select_internal_sink(pactl_output: &str) -> Option<String> {
+    let mut cands: Vec<(i32, String)> = Vec::new();
+    for line in pactl_output.lines() {
+        let Some(name) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        if let Some(score) = score_sink_name(name) {
+            cands.push((score, name.to_string()));
+        }
+    }
+    cands.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+    cands.into_iter().map(|(_, n)| n).next()
+}
+
 fn amixer_get(card: u32, control: &str) -> Option<String> {
     run_cmd("amixer", &["-c", &card.to_string(), "sget", control]).ok()
 }
@@ -614,4 +649,50 @@ fn run_cmd(bin: &str, args: &[&str]) -> Result<String, String> {
         });
     }
     Ok(stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sink_scoring_prefers_pci_analog_stereo() {
+        assert_eq!(
+            score_sink_name("alsa_output.pci-0000_00_1f.3.analog-stereo"),
+            Some(100)
+        );
+        assert_eq!(
+            score_sink_name("alsa_output.pci-0000_04_00.1.analog-stereo"),
+            Some(100)
+        );
+        assert_eq!(score_sink_name("alsa_output.pci.analog"), Some(50));
+        assert!(score_sink_name("alsa_output.hdmi-stereo").is_none());
+        assert!(score_sink_name("bluez_output.XX_analog").is_none());
+        assert!(score_sink_name("alsa_output.usb-Dock.analog-stereo").is_none());
+    }
+
+    #[test]
+    fn sink_selection_skips_malformed_and_picks_best() {
+        let pactl = "\
+0\talsa_output.hdmi-stereo\tmodule-x\n\
+malformed-line-without-tabs\n\
+1\talsa_output.pci-0000_00_1f.3.analog-stereo\tmodule-y\n\
+2\talsa_output.pci-analog\tmodule-z\n";
+        assert_eq!(
+            select_internal_sink(pactl),
+            Some("alsa_output.pci-0000_00_1f.3.analog-stereo".into())
+        );
+    }
+
+    #[test]
+    fn sink_selection_returns_none_when_only_hdmi() {
+        let pactl = "0\talsa_output.hdmi-stereo\tmodule-x\n";
+        assert!(select_internal_sink(pactl).is_none());
+    }
+
+    #[test]
+    fn sink_selection_empty_is_none() {
+        assert!(select_internal_sink("").is_none());
+        assert!(select_internal_sink("\n\n").is_none());
+    }
 }

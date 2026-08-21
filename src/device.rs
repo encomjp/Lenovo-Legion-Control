@@ -501,4 +501,69 @@ mod tests {
             "expected peak GPU or missing nvidia"
         );
     }
+
+    #[test]
+    fn looks_like_machine_type_cases() {
+        assert!(looks_like_machine_type("83RU"));
+        assert!(looks_like_machine_type(" 82JQ "));
+        assert!(!looks_like_machine_type("15ACH6H"));
+        assert!(!looks_like_machine_type("Legion"));
+        assert!(!looks_like_machine_type("ABC"));
+        assert!(!looks_like_machine_type(""));
+    }
+
+    #[test]
+    fn extract_mt_from_sku_cases() {
+        assert_eq!(
+            extract_mt_from_sku("LENOVO_MT_83RU_BU_idea_FM_Legion Pro 7"),
+            Some("83RU".into())
+        );
+        assert_eq!(extract_mt_from_sku("LENOVO_MT_15ACH6_FOO"), None);
+        assert_eq!(extract_mt_from_sku(""), None);
+        assert_eq!(extract_mt_from_sku("FOO_MT_83RU"), None);
+    }
+
+    #[test]
+    fn marketing_from_sku_cases() {
+        assert_eq!(
+            marketing_from_sku("LENOVO_MT_83RU_BU_idea_FM_Legion Pro 7"),
+            Some("Legion Pro 7".into())
+        );
+        assert_eq!(marketing_from_sku("LENOVO_MT_83RU_BU_idea"), None);
+        assert_eq!(marketing_from_sku(""), None);
+    }
+
+    #[test]
+    fn bios_prefix_filters_and_uppercases() {
+        assert_eq!(bios_prefix("N3CN28WW"), "N3CN");
+        assert_eq!(bios_prefix("n3cn28ww"), "N3CN");
+        assert_eq!(bios_prefix("A-B.C!"), "ABC");
+        assert_eq!(bios_prefix("AB"), "AB");
+    }
+
+    #[test]
+    fn guess_series_variants() {
+        assert_eq!(guess_series("Legion Pro 7 16IAX7H"), "Legion 7 / Pro 7");
+        assert_eq!(guess_series("Legion Pro 5 16ACH6"), "Legion 5 / Pro 5");
+        assert_eq!(guess_series("Legion Slim 7"), "Legion Slim");
+        assert_eq!(guess_series("LOQ 15"), "LOQ");
+        assert_eq!(guess_series("IdeaPad Gaming 3"), "IdeaPad Gaming");
+        assert_eq!(guess_series("ThinkPad X1"), "Unknown");
+    }
+
+    #[test]
+    fn pretty_fan_label_cases() {
+        assert_eq!(pretty_fan_label("CPU Fan", 1), "CPU fan");
+        assert_eq!(pretty_fan_label("GPU-Fan", 2), "GPU fan");
+        assert_eq!(pretty_fan_label("System", 4), "Aux fan");
+        assert_eq!(pretty_fan_label("", 2), "GPU fan");
+        assert_eq!(pretty_fan_label("Chassis", 9), "Chassis fan");
+    }
+
+    #[test]
+    fn fan_title_known_ids() {
+        assert_eq!(fan_title(1), "CPU fan");
+        assert_eq!(fan_title(2), "GPU fan");
+        assert_eq!(fan_title(4), "Aux fan");
+    }
 }
