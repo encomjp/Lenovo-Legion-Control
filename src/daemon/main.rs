@@ -127,7 +127,7 @@ fn main() {
         if let Err(e) = signal_hook::flag::register(sig, flag) {
             // Without the handler the signal would kill us mid-write; refuse to run.
             log::error!("cannot register signal handler {sig}: {e}");
-            return;
+            std::process::exit(1);
         }
     }
     // SIGHUP reloads log config — use a separate flag so it doesn't shut down.
@@ -140,7 +140,7 @@ fn main() {
         Ok(p) => p,
         Err(e) => {
             log::error!("cannot determine socket path: {e}");
-            return;
+            std::process::exit(1);
         }
     };
 
@@ -154,7 +154,9 @@ fn main() {
                 "another legion-daemon appears to be running (lock held on {}) — exiting",
                 pidfile_path.display()
             );
-            return;
+            // Non-zero exit so systemd Restart=on-failure retries once the
+            // previous instance has released the singleton lock.
+            std::process::exit(1);
         }
     };
     if path.exists() {
@@ -173,7 +175,7 @@ fn main() {
         Ok(l) => l,
         Err(e) => {
             log::error!("Cannot bind {}: {}", path.display(), e);
-            return;
+            std::process::exit(1);
         }
     };
 
@@ -210,7 +212,7 @@ fn main() {
     if let Err(e) = listener.set_nonblocking(true) {
         // Without nonblocking accept the shutdown flag is never checked — fatal.
         log::error!("Cannot set nonblocking accept: {e}");
-        return;
+        std::process::exit(1);
     }
 
     log::info!("Listening on {}", path.display());
