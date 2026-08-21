@@ -387,7 +387,10 @@ fn build_ui(app: &adw::Application) {
     nav_box.append(&home_sep);
 
     let make_section =
-        |icon: &'static [u8], title: &str, entries: &[(&str, &str)]| -> (gtk::Box, gtk::ListBox) {
+        |icon: &'static [u8],
+         title: &str,
+         entries: &[(&str, &str)]|
+         -> (gtk::Box, gtk::ListBox, gtk::Revealer, gtk::Image) {
             let sec = gtk::Box::new(Orientation::Vertical, 0);
             sec.set_margin_top(2);
             let hdr = gtk::Box::new(Orientation::Horizontal, 8);
@@ -436,10 +439,10 @@ fn build_ui(app: &adw::Application) {
             });
             hdr.add_controller(gc);
             hdr.set_cursor_from_name(Some("pointer"));
-            (sec, lb_list)
+            (sec, lb_list, rev, chev)
         };
 
-    let (cpu_sec, cpu_list) = make_section(
+    let (cpu_sec, cpu_list, cpu_rev, cpu_chev) = make_section(
         include_bytes!("../../data/icons/cpu.svg"),
         "CPU",
         &[
@@ -448,12 +451,12 @@ fn build_ui(app: &adw::Application) {
             ("Power limits", "CPU and GPU limits"),
         ],
     );
-    let (cooling_sec, cooling_list) = make_section(
+    let (cooling_sec, cooling_list, cooling_rev, cooling_chev) = make_section(
         include_bytes!("../../data/icons/cooling.svg"),
         "Cooling",
         &[("Fans", "All fans + reset")],
     );
-    let (lighting_sec, lighting_list) = make_section(
+    let (lighting_sec, lighting_list, lighting_rev, lighting_chev) = make_section(
         include_bytes!("../../data/icons/lighting.svg"),
         "Lighting",
         &[
@@ -464,7 +467,7 @@ fn build_ui(app: &adw::Application) {
             ("More", "Brightness and power"),
         ],
     );
-    let (battery_sec, battery_list) = make_section(
+    let (battery_sec, battery_list, battery_rev, battery_chev) = make_section(
         include_bytes!("../../data/icons/battery.svg"),
         "Battery",
         &[
@@ -472,7 +475,7 @@ fn build_ui(app: &adw::Application) {
             ("Charge limit", "60, 80, or 100%"),
         ],
     );
-    let (fix_sec, fix_list) = make_section(
+    let (fix_sec, fix_list, fix_rev, fix_chev) = make_section(
         include_bytes!("../../data/icons/fix.svg"),
         "Fix",
         &[
@@ -481,7 +484,7 @@ fn build_ui(app: &adw::Application) {
             ("Service logs", "Service output"),
         ],
     );
-    let (about_sec, about_list) = make_section(
+    let (about_sec, about_list, about_rev, about_chev) = make_section(
         include_bytes!("../../data/icons/about.svg"),
         "About",
         &[
@@ -504,7 +507,7 @@ fn build_ui(app: &adw::Application) {
     bot_sep.set_margin_end(14);
     bot_sep.add_css_class("sidebar-sep");
     nav_box.append(&bot_sep);
-    let (profiles_sec, profiles_list) = make_section(
+    let (profiles_sec, profiles_list, profiles_rev, profiles_chev) = make_section(
         include_bytes!("../../data/icons/profiles.svg"),
         "Profiles",
         &[("Manage", "Save and restore presets")],
@@ -555,6 +558,8 @@ fn build_ui(app: &adw::Application) {
     // second top bar — never above the titlebar in a plain Box.
     let content_toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
+    let window_title = adw::WindowTitle::new("Home", "");
+    header.set_title_widget(Some(&window_title));
 
     let menu = gio::Menu::new();
     menu.append(Some("About Legion Control"), Some("win.about"));
@@ -659,11 +664,13 @@ fn build_ui(app: &adw::Application) {
         stack: &adw::ViewStack,
         page: &adw::NavigationPage,
         split: &adw::NavigationSplitView,
+        title_widget: &adw::WindowTitle,
         name: &str,
         title: &str,
     ) {
         stack.set_visible_child_name(name);
         page.set_title(title);
+        title_widget.set_title(title);
         if split.is_collapsed() {
             split.set_show_content(true);
         }
@@ -672,81 +679,175 @@ fn build_ui(app: &adw::Application) {
         let stack = stack.clone();
         let page = content_page.clone();
         let split = split.clone();
+        let title_widget = window_title.clone();
         Rc::new(move |name: &'static str, title: &'static str| {
-            nav_to(&stack, &page, &split, name, title)
+            nav_to(&stack, &page, &split, &title_widget, name, title)
         })
     };
-    home_btn.connect_clicked({
-        let show = show_page.clone();
-        move |_| show("overview", "Home")
-    });
+    // Helper to clear every sidebar ListBox except the one just selected, and to
+    // auto-expand the owning section so the selection is always visible.
+    let all_lists: Vec<gtk::ListBox> = vec![
+        cpu_list.clone(),
+        cooling_list.clone(),
+        lighting_list.clone(),
+        battery_list.clone(),
+        fix_list.clone(),
+        about_list.clone(),
+        profiles_list.clone(),
+    ];
+    let ensure_expanded = |rev: &gtk::Revealer, chev: &gtk::Image| {
+        if !rev.reveals_child() {
+            rev.set_reveal_child(true);
+            chev.add_css_class("open");
+        }
+    };
 
-    let bind_sub = |lb: &gtk::ListBox,
-                    pages: &'static [(&'static str, &'static str)],
-                    show_page: Rc<dyn Fn(&'static str, &'static str)>| {
-        let show_page = show_page.clone();
-        lb.connect_row_selected(move |_, row| {
-            let Some(r) = row else {
-                return;
-            };
-            if let Some((name, title)) = pages.get(r.index() as usize) {
-                show_page(name, title);
+    {
+        let all = all_lists.clone();
+        let rev = cpu_rev.clone();
+        let chev = cpu_chev.clone();
+        let show = show_page.clone();
+        cpu_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if let Some((name, title)) = [
+                ("cpu-features", "CPU Features"),
+                ("cpu-tuning", "CPU Tuning"),
+                ("cpu-power", "CPU Power Limits"),
+            ]
+            .get(r.index() as usize)
+            {
+                show(name, title);
             }
         });
-    };
-    bind_sub(
-        &cpu_list,
-        &[
-            ("cpu-features", "CPU Features"),
-            ("cpu-tuning", "CPU Tuning"),
-            ("cpu-power", "CPU Power Limits"),
-        ],
-        show_page.clone(),
-    );
-    bind_sub(
-        &cooling_list,
-        &[("cooling-fans", "Cooling Fans")],
-        show_page.clone(),
-    );
-    bind_sub(
-        &battery_list,
-        &[
-            ("battery-status", "Battery Status"),
-            ("battery-limit", "Charge Limit"),
-        ],
-        show_page.clone(),
-    );
-    bind_sub(
-        &fix_list,
-        &[
-            ("fix-audio", "Speaker Repair"),
-            ("fix-lighting", "Lighting Repair"),
-            ("fix-logs", "Service Logs"),
-        ],
-        show_page.clone(),
-    );
-    bind_sub(
-        &about_list,
-        &[
-            ("about-setup", "Setup"),
-            ("about-hardware", "Hardware"),
-            ("about-storage", "Storage"),
-            ("about-help", "Help"),
-        ],
-        show_page.clone(),
-    );
-    bind_sub(
-        &profiles_list,
-        &[("profiles", "Profiles")],
-        show_page.clone(),
-    );
+    }
     {
-        let tabs = lighting_tabs.clone();
+        let all = all_lists.clone();
+        let rev = cooling_rev.clone();
+        let chev = cooling_chev.clone();
         let show = show_page.clone();
-        lighting_list.connect_row_selected(move |_, row| {
-            let Some(r) = row else {
-                return;
-            };
+        cooling_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if r.index() == 0 {
+                show("cooling-fans", "Cooling Fans");
+            }
+        });
+    }
+    {
+        let all = all_lists.clone();
+        let rev = battery_rev.clone();
+        let chev = battery_chev.clone();
+        let show = show_page.clone();
+        battery_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if let Some((name, title)) = [
+                ("battery-status", "Battery Status"),
+                ("battery-limit", "Charge Limit"),
+            ]
+            .get(r.index() as usize)
+            {
+                show(name, title);
+            }
+        });
+    }
+    {
+        let all = all_lists.clone();
+        let rev = fix_rev.clone();
+        let chev = fix_chev.clone();
+        let show = show_page.clone();
+        fix_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if let Some((name, title)) = [
+                ("fix-audio", "Speaker Repair"),
+                ("fix-lighting", "Lighting Repair"),
+                ("fix-logs", "Service Logs"),
+            ]
+            .get(r.index() as usize)
+            {
+                show(name, title);
+            }
+        });
+    }
+    {
+        let all = all_lists.clone();
+        let rev = about_rev.clone();
+        let chev = about_chev.clone();
+        let show = show_page.clone();
+        about_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if let Some((name, title)) = [
+                ("about-setup", "Setup"),
+                ("about-hardware", "Hardware"),
+                ("about-storage", "Storage"),
+                ("about-help", "Help"),
+            ]
+            .get(r.index() as usize)
+            {
+                show(name, title);
+            }
+        });
+    }
+    {
+        let all = all_lists.clone();
+        let rev = profiles_rev.clone();
+        let chev = profiles_chev.clone();
+        let show = show_page.clone();
+        profiles_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
+            if r.index() == 0 {
+                show("profiles", "Profiles");
+            }
+        });
+    }
+    {
+        let all = all_lists.clone();
+        let tabs = lighting_tabs.clone();
+        let rev = lighting_rev.clone();
+        let chev = lighting_chev.clone();
+        let show = show_page.clone();
+        lighting_list.connect_row_selected(move |lb, row| {
+            let Some(r) = row else { return; };
+            for other in &all {
+                if !std::ptr::eq(other as *const _, lb as *const _) {
+                    other.unselect_all();
+                }
+            }
+            ensure_expanded(&rev, &chev);
             let pages = [
                 ("keyboard", "Keyboard Lighting"),
                 ("front", "Front Lighting"),
@@ -758,6 +859,17 @@ fn build_ui(app: &adw::Application) {
                 tabs.set_visible_child_name(name);
                 show("lighting", title);
             }
+        });
+    }
+    // Home clears every sidebar selection — it's a standalone button, not a ListBox.
+    {
+        let all = all_lists.clone();
+        let show = show_page.clone();
+        home_btn.connect_clicked(move |_| {
+            for lb in &all {
+                lb.unselect_all();
+            }
+            show("overview", "Home");
         });
     }
     let about_action = gio::SimpleAction::new("about", None);
@@ -781,6 +893,69 @@ fn build_ui(app: &adw::Application) {
 
     split.set_sidebar(Some(&sidebar_page));
     split.set_content(Some(&content_page));
+
+    // Dev/screenshots: LEGION_PAGE=<name> opens a specific page at startup
+    // (e.g. LEGION_PAGE=cpu-tuning legion-settings). Harmless if unset.
+    if let Ok(page) = std::env::var("LEGION_PAGE") {
+        if stack.child_by_name(&page).is_some() {
+            stack.set_visible_child_name(&page);
+            // Keep header in sync — the stack override bypasses nav_to().
+            let title = match page.as_str() {
+                "overview" => "Home",
+                "cpu-features" => "CPU Features",
+                "cpu-tuning" => "CPU Tuning",
+                "cpu-power" => "CPU Power Limits",
+                "cooling-fans" => "Cooling Fans",
+                "lighting" => "Lighting",
+                "battery-status" => "Battery Status",
+                "battery-limit" => "Charge Limit",
+                "fix-audio" => "Speaker Repair",
+                "fix-lighting" => "Lighting Repair",
+                "fix-logs" => "Service Logs",
+                "profiles" => "Profiles",
+                "about-setup" => "Setup",
+                "about-hardware" => "Hardware",
+                "about-storage" => "Storage",
+                "about-help" => "Help",
+                _ => "Home",
+            };
+            content_page.set_title(title);
+            window_title.set_title(title);
+            // Mirror the sidebar selection so screenshots show the correct highlight.
+            let select = |lb: &gtk::ListBox, rev: &gtk::Revealer, chev: &gtk::Image, idx: i32| {
+                if !rev.reveals_child() {
+                    rev.set_reveal_child(true);
+                    chev.add_css_class("open");
+                }
+                if let Some(row) = lb.row_at_index(idx) {
+                    lb.select_row(Some(&row));
+                }
+            };
+            match page.as_str() {
+                "cpu-features" => select(&cpu_list, &cpu_rev, &cpu_chev, 0),
+                "cpu-tuning" => select(&cpu_list, &cpu_rev, &cpu_chev, 1),
+                "cpu-power" => select(&cpu_list, &cpu_rev, &cpu_chev, 2),
+                "cooling-fans" => select(&cooling_list, &cooling_rev, &cooling_chev, 0),
+                "lighting" => select(&lighting_list, &lighting_rev, &lighting_chev, 0),
+                "battery-status" => select(&battery_list, &battery_rev, &battery_chev, 0),
+                "battery-limit" => select(&battery_list, &battery_rev, &battery_chev, 1),
+                "fix-audio" => select(&fix_list, &fix_rev, &fix_chev, 0),
+                "fix-lighting" => select(&fix_list, &fix_rev, &fix_chev, 1),
+                "fix-logs" => select(&fix_list, &fix_rev, &fix_chev, 2),
+                "profiles" => select(&profiles_list, &profiles_rev, &profiles_chev, 0),
+                "about-setup" => select(&about_list, &about_rev, &about_chev, 0),
+                "about-hardware" => select(&about_list, &about_rev, &about_chev, 1),
+                "about-storage" => select(&about_list, &about_rev, &about_chev, 2),
+                "about-help" => select(&about_list, &about_rev, &about_chev, 3),
+                "overview" => {
+                    for lb in &all_lists {
+                        lb.unselect_all();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 
     // Collapse sidebar on narrow widths (Adwaita breakpoint HIG — use sp for Large Text).
     let bp = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
@@ -2537,7 +2712,7 @@ fn set_fan_metric(value: &gtk::Label, detail: &gtk::Label, rpm: u32, target: u32
             detail.set_text("Firmware curve");
         } else {
             value.set_text(&format!("{rpm}"));
-            detail.set_text("Auto · rpm");
+            detail.set_text("Auto");
         }
     } else if rpm == 0 {
         value.set_text(&format!("~{target}"));
@@ -3973,6 +4148,25 @@ fn build_battery_pages(
     let cycles_l = detail_rows[4].clone();
     let cell_l = detail_rows[5].clone();
 
+    // Prime chips immediately — otherwise first frame shows "—" until the 3 s tick.
+    {
+        if let Some(pct) = legion_core::battery::capacity() {
+            cap_v.set_text(&format!("{pct}%"));
+            cap_d.set_text(&legion_core::battery::status().unwrap_or_default());
+            pct_row.set_subtitle(&format!("{pct}%"));
+            st_row.set_subtitle(&legion_core::battery::status().unwrap_or_else(|| "Unknown".into()));
+        }
+        if let Some(v) = legion_core::battery::voltage() {
+            volt_v.set_text(&format!("{v:.2} V"));
+        }
+        if let Some(p) = legion_core::battery::power_w() {
+            power_v.set_text(&format!("{p:.1} W"));
+        }
+        if let Some(h) = legion_core::battery::health_pct() {
+            health_v.set_text(&format!("{h:.0}%"));
+            health_d.set_text(if h < 80.0 { "worn" } else { "good" });
+        }
+    }
     // Keep chips + rows in sync every 3 s
     let cap_v_c = cap_v.clone();
     let cap_d_c = cap_d.clone();
