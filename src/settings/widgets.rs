@@ -280,14 +280,6 @@ pub fn labeled_row_tip(
     row
 }
 
-pub fn section_header_tip(title: &str) -> gtk::Label {
-    let l = gtk::Label::new(Some(title));
-    l.add_css_class("sidebar-section");
-    l.set_halign(Align::Start);
-    l.set_sensitive(false);
-    l
-}
-
 pub fn metric_chip_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.add_css_class("metric-chip");

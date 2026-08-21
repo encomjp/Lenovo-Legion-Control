@@ -57,6 +57,25 @@ impl RingBuffer {
 }
 
 /// Global logger state.
+/// Escape a string for embedding in a JSON string literal: handles quotes,
+/// backslashes, and control characters (the old code escaped only `\"`,
+/// producing malformed JSON for messages containing `\` or newlines).
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 struct Logger {
     json: AtomicBool,
     ring: Mutex<RingBuffer>,
@@ -117,14 +136,14 @@ impl log::Log for Logger {
                     entry.ts,
                     entry.level,
                     entry.target,
-                    entry.message.replace('"', "\\\""),
+                    json_escape(&entry.message),
                 ),
                 _ => format!(
                     r#"{{"ts":"{}","level":"{}","target":"{}","msg":"{}"}}"#,
                     entry.ts,
                     entry.level,
                     entry.target,
-                    entry.message.replace('"', "\\\""),
+                    json_escape(&entry.message),
                 ),
             };
             let _ = writeln!(stderr, "{json_line}");
@@ -155,14 +174,14 @@ impl log::Log for Logger {
                         entry.ts,
                         entry.level,
                         entry.target,
-                        entry.message.replace('"', "\\\""),
+                        json_escape(&entry.message),
                     ),
                     _ => format!(
                         r#"{{"ts":"{}","level":"{}","target":"{}","msg":"{}"}}"#,
                         entry.ts,
                         entry.level,
                         entry.target,
-                        entry.message.replace('"', "\\\""),
+                        json_escape(&entry.message),
                     ),
                 };
                 let _ = writeln!(state.file, "{json_line}");

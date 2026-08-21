@@ -345,9 +345,15 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             let v = cur.join("idVendor");
             let p = cur.join("idProduct");
             if v.exists() && p.exists() {
-                let vendor = fs::read_to_string(&v).ok()?.trim().to_lowercase();
-                let product = fs::read_to_string(&p).ok()?.trim().to_lowercase();
-                matched = vendor == VID && product == PID;
+                // An unreadable node (device mid-unplug) must not abort the
+                // whole scan — stop walking this branch, try the next hidraw.
+                match (fs::read_to_string(&v), fs::read_to_string(&p)) {
+                    (Ok(vendor), Ok(product)) => {
+                        matched =
+                            vendor.trim().to_lowercase() == VID && product.trim().to_lowercase() == PID;
+                    }
+                    _ => break,
+                }
                 break;
             }
             if !cur.pop() {

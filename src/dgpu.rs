@@ -2,9 +2,10 @@
 //!
 //! The NVIDIA GPU has no hwmon interface on Linux — we use nvidia-smi.
 //! A 3-second timeout prevents hanging the daemon if the driver is
-//! unresponsive.
+//! unresponsive. On timeout the child is SIGKILLed so the reaper thread
+//! always finishes (no leaked threads or zombies).
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -12,13 +13,26 @@ use std::time::Duration;
 const SMI_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Run nvidia-smi with a timeout. If the subprocess hasn't exited within
-/// `SMI_TIMEOUT`, `None` is returned.
+/// `SMI_TIMEOUT`, it is killed and `None` is returned.
 fn smi_run(args: &[&str]) -> Option<String> {
+    let child = match Command::new("/usr/bin/nvidia-smi")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("nvidia-smi spawn failed: {e}");
+            return None;
+        }
+    };
+    let pid = child.id();
     let (tx, rx) = mpsc::channel();
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    // Reaper thread: owns the child so wait() reaps it even after a timeout
+    // kill — the thread always terminates once the process dies.
     thread::spawn(move || {
-        let output = Command::new("/usr/bin/nvidia-smi").args(&args).output();
-        let _ = tx.send(output);
+        let _ = tx.send(child.wait_with_output());
     });
     match rx.recv_timeout(SMI_TIMEOUT) {
         Ok(Ok(output)) if output.status.success() => {
@@ -31,11 +45,19 @@ fn smi_run(args: &[&str]) -> Option<String> {
         }
         Ok(Ok(_)) => None,
         Ok(Err(e)) => {
-            log::debug!("nvidia-smi spawn failed: {e}");
+            log::debug!("nvidia-smi wait failed: {e}");
             None
         }
         Err(_) => {
-            log::warn!("nvidia-smi timed out after {}s", SMI_TIMEOUT.as_secs());
+            log::warn!(
+                "nvidia-smi timed out after {}s — killing pid {pid}",
+                SMI_TIMEOUT.as_secs()
+            );
+            // SAFETY: kill(pid, SIGKILL) is a plain syscall; the pid belongs
+            // to our own child. The reaper thread then reaps it and exits.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+            }
             None
         }
     }

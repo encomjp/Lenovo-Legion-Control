@@ -203,142 +203,6 @@ fn daemon_ok() -> bool {
     )
 }
 
-fn build_submenu(entries: &[(&str, &str)]) -> (gtk::Box, gtk::ListBox, gtk::Button) {
-    let menu = gtk::Box::new(Orientation::Vertical, 0);
-    menu.set_vexpand(true);
-
-    let back = gtk::Button::builder()
-        .halign(Align::Fill)
-        .margin_top(8)
-        .margin_start(10)
-        .margin_end(10)
-        .margin_bottom(6)
-        .build();
-    let back_content = gtk::Box::new(Orientation::Horizontal, 8);
-    back_content.append(&gtk::Image::from_icon_name("go-previous-symbolic"));
-    back_content.append(&gtk::Label::new(Some("Main menu")));
-    back.set_child(Some(&back_content));
-    back.add_css_class("flat");
-    menu.append(&back);
-
-    let list = gtk::ListBox::new();
-    list.set_selection_mode(gtk::SelectionMode::Single);
-    list.add_css_class("navigation-sidebar");
-    list.set_vexpand(true);
-    for (title, subtitle) in entries {
-        let row = adw::ActionRow::builder()
-            .title(*title)
-            .subtitle(*subtitle)
-            .build();
-        row.set_activatable(true);
-        list.append(&row);
-    }
-    menu.append(&list);
-    (menu, list, back)
-}
-
-fn build_sidebar_section(
-    icon: &'static [u8],
-    title: &str,
-    subtitle: &str,
-    children: &[(&str, &str, &'static [u8])],
-) -> (gtk::Box, gtk::ListBox, Vec<gtk::ListBox>) {
-    let section = gtk::Box::new(Orientation::Vertical, 0);
-    let header = gtk::Box::new(Orientation::Horizontal, 10);
-    header.set_margin_top(8);
-    header.set_margin_bottom(2);
-    header.set_margin_start(14);
-    header.set_margin_end(10);
-    let chevron = gtk::Image::from_icon_name("go-next-symbolic");
-    chevron.set_pixel_size(10);
-    chevron.add_css_class("sidebar-chevron");
-    let icon_w = color_icon(icon, 16);
-    icon_w.set_opacity(0.62);
-    let label = gtk::Label::new(Some(title));
-    label.set_halign(Align::Start);
-    label.add_css_class("sidebar-section");
-    label.set_margin_top(0);
-    label.set_margin_bottom(0);
-    header.append(&chevron);
-    header.append(&icon_w);
-    header.append(&label);
-    if !subtitle.is_empty() {
-        let sub = gtk::Label::new(Some(subtitle));
-        sub.set_halign(Align::Start);
-        sub.add_css_class("sidebar-section");
-        sub.set_opacity(0.55);
-        sub.set_margin_start(4);
-        header.append(&sub);
-    }
-    section.append(&header);
-
-    let child_list = gtk::ListBox::new();
-    child_list.set_selection_mode(gtk::SelectionMode::Single);
-    child_list.add_css_class("navigation-sidebar");
-    child_list.add_css_class("sidebar-child");
-    for (title, subtitle, icon) in children {
-        let row = adw::ActionRow::builder()
-            .title(*title)
-            .subtitle(*subtitle)
-            .build();
-        row.set_activatable(true);
-        if !icon.is_empty() {
-            row.add_prefix(&color_icon(icon, 14));
-        }
-        child_list.append(&row);
-    }
-    section.append(&child_list);
-
-    let revealer = gtk::Revealer::new();
-    revealer.set_transition_type(gtk::RevealerTransitionType::SlideDown);
-    revealer.set_transition_duration(160);
-    revealer.set_child(Some(&child_list));
-    revealer.set_reveal_child(false);
-    section.append(&revealer);
-
-    let chevron_c = chevron.clone();
-    let revealer_c = revealer.clone();
-    let click = gtk::GestureClick::new();
-    click.connect_released(move |_, _, _, _| {
-        let open = !revealer_c.reveals_child();
-        revealer_c.set_reveal_child(open);
-        if open {
-            chevron_c.add_css_class("open");
-        } else {
-            chevron_c.remove_css_class("open");
-        }
-    });
-    header.add_controller(click);
-    header.set_cursor_from_name(Some("pointer"));
-
-    (section, child_list.clone(), vec![child_list])
-}
-
-fn connect_page_submenu(
-    list: &gtk::ListBox,
-    stack: &adw::ViewStack,
-    content_page: &adw::NavigationPage,
-    split: &adw::NavigationSplitView,
-    pages: &'static [(&'static str, &'static str)],
-) {
-    let stack = stack.clone();
-    let content_page = content_page.clone();
-    let split = split.clone();
-    list.connect_row_selected(move |_, row| {
-        let Some(row) = row else {
-            return;
-        };
-        let Some((name, title)) = pages.get(row.index() as usize) else {
-            return;
-        };
-        stack.set_visible_child_name(name);
-        content_page.set_title(title);
-        if split.is_collapsed() {
-            split.set_show_content(true);
-        }
-    });
-}
-
 fn build_ui(app: &adw::Application) {
     if !app.windows().is_empty() {
         app.windows()[0].present();
@@ -1008,6 +872,7 @@ fn build_ui(app: &adw::Application) {
     );
 
     // Live daemon status in the sidebar (and banner).
+    // IPC runs on a worker thread — a slow daemon must not freeze the UI.
     let dot_p = dot.clone();
     let conn_l_p = conn_l.clone();
     let conn_s_p = conn_s.clone();
@@ -1015,10 +880,28 @@ fn build_ui(app: &adw::Application) {
     let banner_p = banner.clone();
     let gate_p = daemon_gate.clone();
     glib::timeout_add_local(Duration::from_secs(5), move || {
-        let ok = daemon_ok();
-        sync_daemon_ui(
-            ok, &dot_p, &conn_l_p, &conn_s_p, &foot_p, &banner_p, &gate_p,
-        );
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(daemon_ok());
+        });
+        let dot_q = dot_p.clone();
+        let conn_l_q = conn_l_p.clone();
+        let conn_s_q = conn_s_p.clone();
+        let foot_q = foot_p.clone();
+        let banner_q = banner_p.clone();
+        let gate_q = gate_p.clone();
+        glib::timeout_add_local(Duration::from_millis(250), move || {
+            match rx.try_recv() {
+                Ok(ok) => {
+                    sync_daemon_ui(
+                        ok, &dot_q, &conn_l_q, &conn_s_q, &foot_q, &banner_q, &gate_q,
+                    );
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            }
+        });
         glib::ControlFlow::Continue
     });
 
@@ -1540,87 +1423,140 @@ fn build_overview(
     let last_ok_poll = last_ok.clone();
     let last_firmware_mode = Rc::new(RefCell::new(current));
     let _ = legion_core::sensors::sample_cpu_usage_pct();
-    glib::timeout_add_local(Duration::from_secs(2), move || {
-        let cpu_pct = legion_core::sensors::sample_cpu_usage_pct();
-        let gpu_pct = legion_core::sensors::sample_gpu_usage_pct();
 
-        // Fn+Q changes happen outside this process.  Poll the daemon's
-        // hardware-authoritative profile and update the row without allowing
-        // the programmatic selection change to emit a SetProfile command.
-        if let Ok(DaemonResponse::Profile(firmware_mode)) = send_command(DaemonCommand::GetProfile)
-        {
-            let changed = *last_firmware_mode.borrow() != firmware_mode;
-            if changed {
-                *last_firmware_mode.borrow_mut() = firmware_mode.clone();
-                if let Some(index) = choices_poll.iter().position(|c| c == &firmware_mode) {
-                    let index = index as u32;
-                    profile_guard_poll.set(true);
-                    mode_drop_poll.set_selected(index);
-                    mode_drop_poll.set_subtitle(profile_blurb(&firmware_mode));
-                    tip(&mode_drop_poll, profile_tooltip(&firmware_mode));
-                    last_ok_poll.set(index);
-                    profile_guard_poll.set(false);
-                    legion_core::config::remember_platform_profile(&firmware_mode);
-                }
-            }
-        }
-
-        if let Ok(DaemonResponse::Sensors(s)) = send_command(DaemonCommand::GetSensors) {
-            let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_tctl };
-            cpu_v.set_text(&format!("{c:.0} °C"));
-            tint_temp(&cpu_chip_c, c);
+    // Data collected off the main thread each tick. IPC and nvidia-smi can
+    // block for seconds — they must never run inside the GTK main loop.
+    struct DashboardPoll {
+        cpu_pct: f64,
+        gpu_pct: f64,
+        firmware_mode: Option<String>,
+        sensors: Option<legion_core::sensors::SensorReadings>,
+        cpu_w: Option<f64>,
+        local: Option<legion_core::sensors::SensorReadings>,
+        local_battery: Option<(u32, String)>,
+    }
+    let (dash_tx, dash_rx) = mpsc::channel::<DashboardPoll>();
+    std::thread::Builder::new()
+        .name("dashboard-poll".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(2));
+            let cpu_pct = legion_core::sensors::sample_cpu_usage_pct();
+            let gpu_pct = legion_core::sensors::sample_gpu_usage_pct();
+            let firmware_mode = match send_command(DaemonCommand::GetProfile) {
+                Ok(DaemonResponse::Profile(mode)) => Some(mode),
+                _ => None,
+            };
+            let sensors = match send_command(DaemonCommand::GetSensors) {
+                Ok(DaemonResponse::Sensors(s)) => Some(s),
+                _ => None,
+            };
             let cpu_w = match send_command(DaemonCommand::GetCpuPower) {
                 Ok(DaemonResponse::CpuPower(w)) if w > 0.5 => Some(w),
                 _ => None,
             };
-            cpu_d.set_text(&match cpu_w {
-                Some(w) => format!("{cpu_pct:.0}% · {w:.0} W"),
-                None => format!("{cpu_pct:.0}%"),
-            });
-
-            let g = if s.dgpu_temp < 0.0 {
-                s.ec_gpu
+            let (local, local_battery) = if sensors.is_none() {
+                (
+                    Some(legion_core::sensors::read_all()),
+                    legion_core::battery::capacity()
+                        .map(|pct| (pct, legion_core::battery::status().unwrap_or_default())),
+                )
             } else {
-                s.dgpu_temp.max(s.ec_gpu)
+                (None, None)
             };
-            gpu_v.set_text(&format!("{g:.0} °C"));
-            tint_temp(&gpu_chip_c, g);
-            if s.dgpu_power >= 0.0 {
-                gpu_d.set_text(&format!("{gpu_pct:.0}% · {:.0} W", s.dgpu_power));
-            } else {
-                gpu_d.set_text(&format!("{gpu_pct:.0}%"));
+            if dash_tx
+                .send(DashboardPoll {
+                    cpu_pct,
+                    gpu_pct,
+                    firmware_mode,
+                    sensors,
+                    cpu_w,
+                    local,
+                    local_battery,
+                })
+                .is_err()
+            {
+                break; // UI closed
+            }
+        })
+        .ok();
+
+    // Drain poll results on the main thread and update the widgets.
+    glib::timeout_add_local(Duration::from_millis(200), move || {
+        while let Ok(poll) = dash_rx.try_recv() {
+            // Fn+Q changes happen outside this process.  Poll the daemon's
+            // hardware-authoritative profile and update the row without allowing
+            // the programmatic selection change to emit a SetProfile command.
+            if let Some(firmware_mode) = poll.firmware_mode {
+                let changed = *last_firmware_mode.borrow() != firmware_mode;
+                if changed {
+                    *last_firmware_mode.borrow_mut() = firmware_mode.clone();
+                    if let Some(index) = choices_poll.iter().position(|c| c == &firmware_mode) {
+                        let index = index as u32;
+                        profile_guard_poll.set(true);
+                        mode_drop_poll.set_selected(index);
+                        mode_drop_poll.set_subtitle(profile_blurb(&firmware_mode));
+                        tip(&mode_drop_poll, profile_tooltip(&firmware_mode));
+                        last_ok_poll.set(index);
+                        profile_guard_poll.set(false);
+                        legion_core::config::remember_platform_profile(&firmware_mode);
+                    }
+                }
             }
 
-            set_fan_metrics_from_sensors(&fan_metric_labels, &s);
-            bat_v.set_text(&format!("{}%", s.battery_pct));
-            bat_d.set_text(&friendly_profile(&s.profile));
-        } else {
-            if let Some(pct) = legion_core::battery::capacity() {
-                bat_v.set_text(&format!("{pct}%"));
-                bat_d.set_text(&legion_core::battery::status().unwrap_or_default());
-            }
-            let local = legion_core::sensors::read_all();
-            let c = if local.ec_cpu > 0.0 {
-                local.ec_cpu
-            } else {
-                local.cpu_tctl
-            };
-            if c > 0.0 {
+            if let Some(s) = poll.sensors {
+                let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_tctl };
                 cpu_v.set_text(&format!("{c:.0} °C"));
                 tint_temp(&cpu_chip_c, c);
-                cpu_d.set_text(&format!("{cpu_pct:.0}%"));
-            }
-            let g = if local.dgpu_temp < 0.0 {
-                local.ec_gpu
-            } else {
-                local.dgpu_temp.max(local.ec_gpu)
-            };
-            if g > 0.0 {
+                cpu_d.set_text(&match poll.cpu_w {
+                    Some(w) => format!("{:.0}% · {w:.0} W", poll.cpu_pct),
+                    None => format!("{:.0}%", poll.cpu_pct),
+                });
+
+                let g = if s.dgpu_temp < 0.0 {
+                    s.ec_gpu
+                } else {
+                    s.dgpu_temp.max(s.ec_gpu)
+                };
                 gpu_v.set_text(&format!("{g:.0} °C"));
                 tint_temp(&gpu_chip_c, g);
-                gpu_d.set_text(&format!("{gpu_pct:.0}%"));
+                if s.dgpu_power >= 0.0 {
+                    gpu_d.set_text(&format!("{:.0}% · {:.0} W", poll.gpu_pct, s.dgpu_power));
+                } else {
+                    gpu_d.set_text(&format!("{:.0}%", poll.gpu_pct));
+                }
+
+                set_fan_metrics_from_sensors(&fan_metric_labels, &s);
+                bat_v.set_text(&format!("{}%", s.battery_pct));
+                bat_d.set_text(&friendly_profile(&s.profile));
+            } else {
+                if let Some((pct, status)) = &poll.local_battery {
+                    bat_v.set_text(&format!("{pct}%"));
+                    bat_d.set_text(status);
+                }
+                if let Some(local) = &poll.local {
+                    let c = if local.ec_cpu > 0.0 {
+                        local.ec_cpu
+                    } else {
+                        local.cpu_tctl
+                    };
+                    if c > 0.0 {
+                        cpu_v.set_text(&format!("{c:.0} °C"));
+                        tint_temp(&cpu_chip_c, c);
+                        cpu_d.set_text(&format!("{:.0}%", poll.cpu_pct));
+                    }
+                    let g = if local.dgpu_temp < 0.0 {
+                        local.ec_gpu
+                    } else {
+                        local.dgpu_temp.max(local.ec_gpu)
+                    };
+                    if g > 0.0 {
+                        gpu_v.set_text(&format!("{g:.0} °C"));
+                        tint_temp(&gpu_chip_c, g);
+                        gpu_d.set_text(&format!("{:.0}%", poll.gpu_pct));
+                    }
+                    set_fan_metrics_from_sensors(&fan_metric_labels, local);
+                }
             }
-            set_fan_metrics_from_sensors(&fan_metric_labels, &local);
         }
         glib::ControlFlow::Continue
     });
@@ -3137,68 +3073,6 @@ fn apply_boost(
 
 // ─── Cooling ────────────────────────────────────────────────────────────────
 
-fn build_fan_channel_page(
-    fan_id: u8,
-    toast_overlay: &adw::ToastOverlay,
-    apply_queue: &ApplyQueue,
-    gate: &DaemonGate,
-) -> gtk::Box {
-    let channels = legion_core::fans::channels();
-    let backend = legion_core::device::detect().capabilities.fan_backend;
-    let page = page_lede(&format!("Automatic or fixed RPM · {backend}"));
-
-    let gated = gtk::Box::new(Orientation::Vertical, 18);
-    if let Some(ch) = channels.iter().find(|channel| channel.id == fan_id) {
-        gated.append(&fan_card(
-            ch.id,
-            &ch.title,
-            ch.min_rpm as f64,
-            ch.max_rpm as f64,
-            toast_overlay,
-            apply_queue,
-        ));
-    } else {
-        let missing = pref_group(
-            "Fan not detected",
-            Some("This channel is not exposed by the current fan backend"),
-        );
-        gated.append(&missing);
-    }
-    gate.track(&gated);
-    page.append(&gated);
-    page
-}
-
-fn build_fan_reset_page(apply_queue: &ApplyQueue, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Return every fan to firmware control");
-    let channels = legion_core::fans::channels();
-    let gated = gtk::Box::new(Orientation::Vertical, 18);
-    let reset = pref_group("Automatic mode", Some("Clear all fixed RPM targets"));
-    let btn = primary_button_tip(
-        "All fans automatic",
-        Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
-    );
-    let queue = apply_queue.clone();
-    let fan_ids: Vec<u8> = channels.iter().map(|c| c.id).collect();
-    btn.connect_clicked(move |_| {
-        for fan in &fan_ids {
-            queue.set_fan(*fan, 0);
-        }
-    });
-    let row = adw::ActionRow::builder()
-        .title("Reset all")
-        .subtitle("Clears any manual RPM targets")
-        .activatable(false)
-        .build();
-    tip(&row, "Recommended after testing loud manual speeds");
-    row.add_suffix(&btn);
-    reset.add(&row);
-    gated.append(&reset);
-    gate.track(&gated);
-    page.append(&gated);
-    page
-}
-
 fn build_cooling_overview_page(
     toast_overlay: &adw::ToastOverlay,
     apply_queue: &ApplyQueue,
@@ -3404,14 +3278,14 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
 
     // Immediate daemon write (no hysteresis UI, no inline ack).
     let do_apply = {
-        let scale_c = scale.clone();
+        let _scale_c = scale.clone();
         let enabled_c = enabled.clone();
         let toast_c = toast.clone();
         let suppress_c = suppress.clone();
         let last_max_c = last_max.clone();
         let acked_c = acked.clone();
-        let temp_row_c = temp_row.clone();
-        let value_c = value.clone();
+        let _temp_row_c = temp_row.clone();
+        let _value_c = value.clone();
         Rc::new(move |max_temp: u8, enabled_val: bool, acknowledge: bool| {
             let enabled_cc = enabled_c.clone();
             let toast_cc = toast_c.clone();
@@ -3467,7 +3341,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             debounce_c.set(ticket);
             let scale_cc = scale_c.clone();
             let enabled_cc = enabled_c.clone();
-            let toast_cc = toast_c.clone();
+            let _toast_cc = toast_c.clone();
             let suppress_cc = suppress_c.clone();
             let last_max_cc = last_max_c.clone();
             let acked_cc = acked_c.clone();
@@ -3555,8 +3429,8 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     last_max_c.set(st.config.max_temp);
                     acked_c.set(st.config.max_temp >= 96);
                     apply_mute_c(st.config.enabled);
-                    let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
-                    let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
+                    let tctl_c = st.tctl_mc.map(|v| v as f64 / 1000.0);
+                    let tccd2_c = st.tccd2_mc.map(|v| v as f64 / 1000.0);
                     if let Some(c) = tctl_c {
                         tctl_v_c.set_text(&format!("{c:.1} °C"));
                         tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });
@@ -3688,8 +3562,8 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             DaemonCommand::GetThermalStatus,
             move |result| match result {
                 Ok(DaemonResponse::ThermalStatus(st)) => {
-                    let tctl_c = st.tctl_mC.map(|v| v as f64 / 1000.0);
-                    let tccd2_c = st.tccd2_mC.map(|v| v as f64 / 1000.0);
+                    let tctl_c = st.tctl_mc.map(|v| v as f64 / 1000.0);
+                    let tccd2_c = st.tccd2_mc.map(|v| v as f64 / 1000.0);
                     if let Some(c) = tctl_c {
                         tctl_v_c.set_text(&format!("{c:.1} °C"));
                         tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });

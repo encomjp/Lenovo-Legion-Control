@@ -438,10 +438,7 @@ info "Installing PolicyKit setup helper to ${SETUP_PREFIX}/libexec …"
 sudo_run install -Dm755 "$BIN_SETUP" "${SETUP_PREFIX}/libexec/legion-control-setup"
 sudo_run install -Dm644 "$ROOT/data/polkit/com.encomjp.legion-control.policy" \
   /usr/share/polkit-1/actions/com.encomjp.legion-control.policy
-sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
-sudo_run cp -a "$ROOT/third_party/ryzen_smu/." \
-  "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
-ok "PolicyKit helper and bundled ryzen_smu source"
+ok "PolicyKit helper installed"
 
 # Keep ~/.local/bin copy for convenience when using --user or as fallback
 if [[ "$PREFIX" != "$USER_PREFIX" ]]; then
@@ -525,8 +522,20 @@ if [[ "$DO_DAEMON" -eq 1 ]]; then
   info "Installing root daemon (fans / platform profile / charge limit)…"
   systemctl --user disable --now legion-control 2>/dev/null || true
   pkill -x legion-daemon 2>/dev/null || true
+  # The daemon's IPC socket is 0660 root:legion — create the group and add
+  # the invoking user so CLI/GUI/widget can talk to the daemon.
+  sudo_run groupadd -r legion 2>/dev/null || true
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    if ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw legion; then
+      sudo_run usermod -aG legion "$SUDO_USER"
+      warn "Added $SUDO_USER to group 'legion' — log out and back in for CLI/GUI access to take effect"
+    fi
+  fi
   sudo_run install -Dm644 "$ROOT/data/systemd/legion-control.system.service" \
     /etc/systemd/system/legion-control.service
+  # Declarative group creation for future systems (groupadd above covers now).
+  sudo_run install -Dm644 "$ROOT/data/sysusers.d/legion-control.conf" \
+    /usr/lib/sysusers.d/legion-control.conf 2>/dev/null || true
   # Ensure ExecStart=/usr/local/bin/legion-daemon always exists, including
   # --prefix and --user installations.
   if [[ ! -x /usr/local/bin/legion-daemon ]]; then
@@ -570,6 +579,9 @@ if [[ "$DO_RYZEN_SMU" -eq 1 ]]; then
   if [[ ! -f "$SMU_SRC/Makefile" || ! -f "$SMU_SRC/dkms.conf" ]]; then
     die "Bundled ryzen_smu source is missing under third_party/ryzen_smu/"
   fi
+  sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
+  sudo_run cp -a "$ROOT/third_party/ryzen_smu/." \
+    "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
   sudo_run "${SETUP_PREFIX}/libexec/legion-control-setup" install-ryzen-smu
   if [[ -d /sys/kernel/ryzen_smu_drv ]]; then
     ok "ryzen_smu loaded — no tuning value was written"

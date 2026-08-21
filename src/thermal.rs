@@ -29,8 +29,8 @@ impl Default for ThermalConfig {
 pub struct ThermalStatus {
     pub config: ThermalConfig,
     pub cur_max_freq: u32,
-    pub tctl_mC: Option<i32>,
-    pub tccd2_mC: Option<i32>,
+    pub tctl_mc: Option<i32>,
+    pub tccd2_mc: Option<i32>,
     pub active: bool,
     pub restore_temp: u8,
 }
@@ -45,15 +45,15 @@ pub fn validate(max_temp: u8, acknowledge: bool) -> Result<(), String> {
     Ok(())
 }
 
-pub fn compute_target(cur_max: u32, temp_mC: i32, cfg: &ThermalConfig) -> Option<u32> {
+pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option<u32> {
     if !cfg.enabled {
         return None;
     }
-    let max_mC = cfg.max_temp as i32 * 1000;
-    let restore_mC = (cfg.max_temp as i32 - HYSTERESIS) * 1000;
-    if temp_mC >= max_mC && cur_max > MIN {
+    let max_mc = cfg.max_temp as i32 * 1000;
+    let restore_mc = (cfg.max_temp as i32 - HYSTERESIS) * 1000;
+    if temp_mc >= max_mc && cur_max > MIN {
         Some(cur_max.saturating_sub(STEP).max(MIN))
-    } else if temp_mC <= restore_mC && cur_max < MAX_FULL {
+    } else if temp_mc <= restore_mc && cur_max < MAX_FULL {
         Some(cur_max.saturating_add(STEP).min(MAX_FULL))
     } else {
         None

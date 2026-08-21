@@ -4,6 +4,9 @@ reload_udev() {
 }
 
 post_install() {
+  # IPC socket is 0660 root:legion — ensure the group exists (sysusers.d
+  # normally handles this; this is a fallback for systems without the hook).
+  getent group legion >/dev/null 2>&1 || groupadd -r legion >/dev/null 2>&1 || true
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
     systemctl enable --now legion-control.service >/dev/null 2>&1 || true

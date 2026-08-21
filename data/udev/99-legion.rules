@@ -1,4 +1,3 @@
 # Lenovo Legion — allow userspace access to ec_sys and keyboard HID
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c193", MODE="0666", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c197", MODE="0666", TAG+="uaccess"
-KERNEL=="ec_io", SUBSYSTEM=="debugfs", MODE="0444"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c193", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c197", MODE="0660", TAG+="uaccess"

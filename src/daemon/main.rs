@@ -4,8 +4,10 @@
 //! Reads sensors, controls fans, manages keyboard backlight.
 
 use legion_core::comms::{
-    bind_socket_path, cmd_is_write, cmd_label, DaemonCommand, DaemonResponse,
+    bincode_opts, bind_socket_path, cmd_is_write, cmd_kind, cmd_label,
+    DaemonCommand, DaemonResponse, MAX_FRAME_BYTES,
 };
+use bincode::Options as _;
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
     battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
@@ -15,9 +17,13 @@ use legion_core::{
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
+
+/// Maximum concurrently-handled client connections. Prevents thread-bombing
+/// the daemon via connection spam.
+const MAX_CLIENTS: usize = 32;
 
 /// Shared thermal config updated on SetThermal and read by the governor.
 static THERMAL_CONFIG: OnceLock<Arc<RwLock<ThermalConfig>>> = OnceLock::new();
@@ -35,6 +41,76 @@ struct SensorSnapshot {
     profile: String,
 }
 
+/// Mutable state shared between the accept loop and client-handler threads.
+#[derive(Default)]
+struct ClientState {
+    last_sensors: Option<Instant>,
+    snapshot: SensorSnapshot,
+    timings: HashMap<&'static str, (u64, u64)>, // kind → (count, total_ms)
+}
+
+/// Peer credentials for a connected Unix stream (SO_PEERCRED).
+fn peer_uid(stream: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: getsockopt with SO_PEERCRED fills a fixed-size ucred struct;
+    // fd is valid (owned by stream) and len matches the struct size.
+    unsafe {
+        let mut cred = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        if libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        ) == 0
+        {
+            Some(cred.uid)
+        } else {
+            None
+        }
+    }
+}
+
+/// GID of the `legion` system group, if it exists. Socket access is gated by
+/// group membership (0660 root:legion); root always passes kernel checks.
+fn legion_group_gid() -> Option<u32> {
+    let name = std::ffi::CString::new("legion").ok()?;
+    // SAFETY: getgrnam returns a pointer into static storage; we only read
+    // gr_gid before any other libc call.
+    unsafe {
+        let gr = libc::getgrnam(name.as_ptr());
+        if gr.is_null() {
+            None
+        } else {
+            Some((*gr).gr_gid)
+        }
+    }
+}
+
+/// Try to exclusively lock `path` (flock). Returns the file (keeps the lock)
+/// or None when another process holds it.
+fn acquire_singleton_lock(path: &std::path::Path) -> Option<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))
+        .ok()?;
+    // SAFETY: flock on a valid fd — plain POSIX call, no memory concerns.
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        return None;
+    }
+    Some(file)
+}
+
 fn main() {
     logging::init("legion-daemon");
     // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
@@ -44,13 +120,43 @@ fn main() {
 
     // signal_hook::flag sets the AtomicBool to *true* when the signal arrives.
     let shutdown = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGINT, shutdown.clone()).ok();
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, shutdown.clone()).ok();
+    for (sig, flag) in [
+        (signal_hook::consts::SIGINT, shutdown.clone()),
+        (signal_hook::consts::SIGTERM, shutdown.clone()),
+    ] {
+        if let Err(e) = signal_hook::flag::register(sig, flag) {
+            // Without the handler the signal would kill us mid-write; refuse to run.
+            log::error!("cannot register signal handler {sig}: {e}");
+            return;
+        }
+    }
     // SIGHUP reloads log config — use a separate flag so it doesn't shut down.
     let reload = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGHUP, reload.clone()).ok();
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGHUP, reload.clone()) {
+        log::warn!("SIGHUP reload unavailable: {e}");
+    }
 
-    let path = bind_socket_path();
+    let path = match bind_socket_path() {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("cannot determine socket path: {e}");
+            return;
+        }
+    };
+
+    // Single-instance guard: flock a pidfile next to the socket. Never
+    // blindly delete a live socket — two daemons would fight over CPU freq.
+    let pidfile_path = path.with_extension("pid");
+    let _singleton = match acquire_singleton_lock(&pidfile_path) {
+        Some(f) => f,
+        None => {
+            log::error!(
+                "another legion-daemon appears to be running (lock held on {}) — exiting",
+                pidfile_path.display()
+            );
+            return;
+        }
+    };
     if path.exists() {
         log::debug!("removing stale socket {}", path.display());
         std::fs::remove_file(&path).ok();
@@ -63,35 +169,48 @@ fn main() {
         );
     }
 
-    let old_umask = unsafe {
-        // SAFETY: umask is a pure POSIX syscall — no pointers, no memory safety concerns.
-        libc::umask(0o011)
-    };
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
-            // SAFETY: restoring previous umask — same rationale as above.
-            unsafe {
-                libc::umask(old_umask);
-            }
             log::error!("Cannot bind {}: {}", path.display(), e);
             return;
         }
     };
-    // SAFETY: restoring previous umask — same rationale as above.
-    unsafe {
-        libc::umask(old_umask);
-    }
+
+    // Socket permissions: root daemon → 0660 owned by group `legion` so only
+    // root and legion-group members can issue privileged commands. Never
+    // world-writable. Non-root daemon → umask default in XDG_RUNTIME_DIR.
     #[cfg(unix)]
-    {
+    if euid == 0 {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)) {
+        if let Some(gid) = legion_group_gid() {
+            // SAFETY: chown with a valid gid and NUL-terminated path — plain syscall.
+            let cpath = match std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
+                Ok(p) => p,
+                Err(_) => std::ffi::CString::new("/run/legion-control.socket").unwrap(),
+            };
+            unsafe {
+                libc::chown(cpath.as_ptr(), u32::MAX, gid);
+            }
+        }
+        let mode = if legion_group_gid().is_some() {
+            0o660
+        } else {
+            log::warn!(
+                "group 'legion' does not exist — restricting socket to root only. \
+                 Create it with: sudo groupadd -r legion && sudo usermod -aG legion $USER"
+            );
+            0o600
+        };
+        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)) {
             log::warn!("failed to chmod socket {}: {e}", path.display());
         }
     }
 
     if let Err(e) = listener.set_nonblocking(true) {
-        log::warn!("Cannot set nonblocking accept: {e}");
+        // Without nonblocking accept the shutdown flag is never checked — fatal.
+        log::error!("Cannot set nonblocking accept: {e}");
+        return;
     }
 
     log::info!("Listening on {}", path.display());
@@ -133,7 +252,17 @@ fn main() {
     undervolt::start_persistence_worker();
 
     // ── thermal governor shared state ──
-    let thermal_cfg = Arc::new(RwLock::new(config::get().thermal.clone()));
+    // Validate the on-disk config before the governor uses it: a hand-edited
+    // or corrupt settings.json must not drive raw frequency writes.
+    let mut seeded_thermal = config::get().thermal.clone();
+    if let Err(e) = thermal::validate(seeded_thermal.max_temp, true) {
+        log::warn!(
+            "invalid thermal config from disk ({}: {e}) — using defaults",
+            seeded_thermal.max_temp
+        );
+        seeded_thermal = ThermalConfig::default();
+    }
+    let thermal_cfg = Arc::new(RwLock::new(seeded_thermal));
     THERMAL_CONFIG.set(thermal_cfg.clone()).ok();
     let thermal_notify: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
     THERMAL_NOTIFY.set(thermal_notify.clone()).ok();
@@ -162,9 +291,8 @@ fn main() {
         log::info!("thermal-governor thread started");
     }
 
-    let mut last_sensors = Instant::now() - Duration::from_secs(60);
-    let mut sensor_snapshot = SensorSnapshot::default();
-    let mut cmd_timings: HashMap<String, (u64, u64)> = HashMap::new(); // (count, total_ms)
+    let client_state = Arc::new(Mutex::new(ClientState::default()));
+    let active_clients = Arc::new(AtomicUsize::new(0));
 
     while !shutdown.load(Ordering::Relaxed) {
         // Check reload flag (set by SIGHUP) without blocking accept.
@@ -174,12 +302,26 @@ fn main() {
         }
         match listener.accept() {
             Ok((stream, _)) => {
-                handle_client(
-                    stream,
-                    &mut last_sensors,
-                    &mut sensor_snapshot,
-                    &mut cmd_timings,
-                );
+                // One thread per connection with a read timeout: a stalled
+                // client must never wedge the accept loop or clean shutdown.
+                if active_clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
+                    log::warn!("connection limit reached — dropping client");
+                    continue;
+                }
+                let state = client_state.clone();
+                let active = active_clients.clone();
+                active.fetch_add(1, Ordering::Relaxed);
+                let active_inner = active_clients.clone();
+                if let Err(e) = std::thread::Builder::new()
+                    .name("client-handler".into())
+                    .spawn(move || {
+                        handle_client(stream, &state);
+                        active_inner.fetch_sub(1, Ordering::Relaxed);
+                    })
+                {
+                    log::error!("failed to spawn client handler: {e}");
+                    active.fetch_sub(1, Ordering::Relaxed);
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(200));
@@ -189,24 +331,51 @@ fn main() {
         }
     }
 
+    // Give the governor a moment to notice the shutdown flag before we
+    // restore hardware state (it ticks every ~100 ms).
+    std::thread::sleep(Duration::from_millis(300));
+    restore_hardware_on_shutdown();
+
     undervolt::clear_persistence_armed_on_clean_shutdown();
     std::fs::remove_file(&path).ok();
     log::info!("Daemon stopped");
 }
 
-fn handle_client(
-    mut stream: UnixStream,
-    last_sensors: &mut Instant,
-    snapshot: &mut SensorSnapshot,
-    timings: &mut HashMap<String, (u64, u64)>,
-) {
+/// Best-effort hardware cleanup on daemon exit: unthrottle CPUs and return
+/// fans to auto so `systemctl stop` never leaves the machine capped.
+fn restore_hardware_on_shutdown() {
+    match thermal::write_all_cpus(thermal::MAX_FULL) {
+        Ok(()) => log::info!("shutdown: restored scaling_max_freq to full speed"),
+        Err(e) => log::warn!("shutdown: could not restore scaling_max_freq: {e}"),
+    }
+    if let Err(e) = fans::set_auto() {
+        log::debug!("shutdown: fans back to auto failed: {e}");
+    }
+}
+
+fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
+    const CLIENT_READ_TIMEOUT: Duration = Duration::from_secs(5);
+    if let Err(e) = stream.set_read_timeout(Some(CLIENT_READ_TIMEOUT)) {
+        log::debug!("client set_read_timeout failed: {e}");
+        return;
+    }
+
+    // Audit who connected. Kernel socket permissions (0660 root:legion)
+    // already gate access; this makes abuse visible in the journal.
+    if let Some(uid) = peer_uid(&stream) {
+        log::debug!("client connected (uid={uid})");
+    }
+
     let mut buf = Vec::new();
-    if let Err(e) = stream.read_to_end(&mut buf) {
+    if let Err(e) = std::io::Read::by_ref(&mut stream)
+        .take(MAX_FRAME_BYTES)
+        .read_to_end(&mut buf)
+    {
         log::debug!("client read failed: {e}");
         return;
     }
 
-    let cmd: DaemonCommand = match bincode::deserialize(&buf) {
+    let cmd: DaemonCommand = match bincode_opts().deserialize(&buf) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("client sent unparsable command ({e})");
@@ -215,18 +384,37 @@ fn handle_client(
         }
     };
 
-    let label = cmd_label(&cmd);
+    let kind = cmd_kind(&cmd);
     let is_write = cmd_is_write(&cmd);
     let t0 = Instant::now();
-    let response = process_command(cmd, last_sensors, snapshot);
+    let response = {
+        let mut st = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        // Destructure through the guard: two &mut field borrows via deref_mut
+        // would otherwise count as overlapping borrows of the guard itself.
+        let ClientState {
+            last_sensors,
+            snapshot,
+            ..
+        } = &mut *st;
+        process_command(cmd, last_sensors, snapshot)
+    };
     let elapsed = t0.elapsed().as_millis() as u64;
-    let (count, total) = timings.entry(label.clone()).or_insert((0, 0));
-    *count += 1;
-    *total += elapsed;
 
-    if elapsed > 100 && is_write {
-        let avg = (*total).checked_div(*count).unwrap_or(0);
-        log::warn!("cmd {label} slow: {elapsed} ms (avg {avg} ms over {count} calls)");
+    {
+        let mut st = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let (count, total) = st.timings.entry(kind).or_insert((0, 0));
+        *count += 1;
+        *total += elapsed;
+        if elapsed > 100 && is_write {
+            let avg = (*total).checked_div(*count).unwrap_or(0);
+            log::warn!("cmd {kind} slow: {elapsed} ms (avg {avg} ms over {count} calls)");
+        }
     }
 
     if let Err(e) = send_response(&mut stream, response) {
@@ -235,7 +423,8 @@ fn handle_client(
 }
 
 fn send_response(stream: &mut UnixStream, resp: DaemonResponse) -> std::io::Result<()> {
-    let data = bincode::serialize(&resp)
+    let data = bincode_opts()
+        .serialize(&resp)
         .map_err(|e| std::io::Error::other(format!("Serialize: {}", e)))?;
     stream.write_all(&data)
 }
@@ -249,8 +438,8 @@ fn build_thermal_status() -> thermal::ThermalStatus {
     thermal::ThermalStatus {
         config: cfg,
         cur_max_freq: cur_max,
-        tctl_mC: tctl,
-        tccd2_mC: tccd2,
+        tctl_mc: tctl,
+        tccd2_mc: tccd2,
         active,
         restore_temp,
     }
@@ -265,8 +454,12 @@ fn thermal_governor(
     while !shutdown.load(Ordering::Relaxed) {
         let (tctl, tccd2) = thermal::read_thermal_temps();
         let cur_max_opt = thermal::read_cur_max();
+        // Poison recovery: a panicked writer must not kill the governor and
+        // freeze CPUs at their last throttled frequency.
         let (enabled, _max_temp) = {
-            let g = cfg.read().unwrap();
+            let g = cfg
+                .read()
+                .unwrap_or_else(|p| p.into_inner());
             (g.enabled, g.max_temp)
         };
 
@@ -282,8 +475,15 @@ fn thermal_governor(
         if !enabled {
             // Idle when disabled: wait up to 10s or until SetThermal notifies.
             let (lock, cvar) = &*notify;
-            let guard = lock.lock().unwrap();
-            let (mut guard, _timeout) = cvar.wait_timeout(guard, Duration::from_secs(10)).unwrap();
+            let guard = match lock.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let (mut guard, _timeout) =
+                match cvar.wait_timeout(guard, Duration::from_secs(10)) {
+                    Ok(r) => r,
+                    Err(p) => p.into_inner(),
+                };
             // reset flag
             *guard = false;
             drop(guard);
@@ -308,7 +508,7 @@ fn thermal_governor(
             continue;
         }
 
-        let temp_mC = match (tctl, tccd2) {
+        let temp_mc = match (tctl, tccd2) {
             (Some(a), Some(b)) => a.max(b),
             (Some(a), None) => a,
             (None, Some(b)) => b,
@@ -327,13 +527,13 @@ fn thermal_governor(
             }
         };
 
-        let cfg_snapshot = cfg.read().unwrap().clone();
-        if let Some(target) = thermal::compute_target(cur, temp_mC, &cfg_snapshot) {
+        let cfg_snapshot = cfg.read().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(target) = thermal::compute_target(cur, temp_mc, &cfg_snapshot) {
             match thermal::write_all_cpus(target) {
                 Ok(()) => {
                     log::info!(
                         "thermal governor: {}°C (max {}°C, restore {}°C) cur {} → {} kHz",
-                        temp_mC as f64 / 1000.0,
+                        temp_mc as f64 / 1000.0,
                         cfg_snapshot.max_temp,
                         cfg_snapshot
                             .max_temp
@@ -349,7 +549,7 @@ fn thermal_governor(
         } else {
             log::trace!(
                 "thermal governor: hold temp {:.1}°C cur {} kHz (max {}°C)",
-                temp_mC as f64 / 1000.0,
+                temp_mc as f64 / 1000.0,
                 cur,
                 cfg_snapshot.max_temp
             );
@@ -372,7 +572,7 @@ fn thermal_governor(
 
 fn process_command(
     cmd: DaemonCommand,
-    last_sensors: &mut Instant,
+    last_sensors: &mut Option<Instant>,
     snapshot: &mut SensorSnapshot,
 ) -> DaemonResponse {
     let label = cmd_label(&cmd);
@@ -388,15 +588,18 @@ fn process_command(
         DaemonCommand::GetSensors => {
             let s = sensors::read_all();
             let now = Instant::now();
-            let next = *last_sensors + Duration::from_secs(10);
+            let due = match *last_sensors {
+                Some(t) => now >= t + Duration::from_secs(10),
+                None => true,
+            };
             let changed = snapshot.cpu_tctl != s.cpu_tctl
                 || snapshot.dgpu_temp != s.dgpu_temp
                 || snapshot.fan1_rpm != s.fan1_rpm
                 || snapshot.fan2_rpm != s.fan2_rpm
                 || snapshot.fan4_rpm != s.fan4_rpm
                 || snapshot.profile != s.profile;
-            if now >= next || changed {
-                *last_sensors = now;
+            if due || changed {
+                *last_sensors = Some(now);
                 *snapshot = SensorSnapshot {
                     cpu_tctl: s.cpu_tctl,
                     dgpu_temp: s.dgpu_temp,
@@ -653,6 +856,14 @@ fn process_command(
             if let Some(shared) = THERMAL_CONFIG.get() {
                 if let Ok(mut g) = shared.write() {
                     *g = ThermalConfig { enabled, max_temp };
+                }
+            }
+            // Disabling a mid-throttle governor must not leave CPUs capped:
+            // restore full speed immediately.
+            if was_enabled && !enabled {
+                match thermal::write_all_cpus(thermal::MAX_FULL) {
+                    Ok(()) => log::info!("thermal governor disabled — restored full speed"),
+                    Err(e) => log::warn!("thermal governor disable: restore failed: {e}"),
                 }
             }
             if let Some(notify) = THERMAL_NOTIFY.get() {

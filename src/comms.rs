@@ -4,8 +4,39 @@
 //! keep working for profile/fans/sensors. New Spectrum/charge commands are
 //! appended at the end.
 
+use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Hard cap on IPC frame size (request or response). Prevents both
+/// unbounded reads and bincode length-prefix allocation attacks.
+pub const MAX_FRAME_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Bincode options used for ALL IPC frames. The byte limit makes
+/// deserialization safe against hostile length prefixes: allocations are
+/// clamped to the remaining limit instead of trusting the prefix.
+pub fn bincode_opts() -> impl Options {
+    bincode::options().with_limit(MAX_FRAME_BYTES)
+}
+
+/// Sanitize a client-supplied string for single-line logs: escape control
+/// characters (prevents log forging via embedded newlines) and truncate.
+pub fn sanitize_log(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().min(64));
+    for c in s.chars().take(64) {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push('\t'),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    if s.chars().count() > 64 {
+        out.push('…');
+    }
+    out
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DaemonCommand {
@@ -140,34 +171,41 @@ pub enum DaemonResponse {
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
 pub const SYSTEM_SOCKET: &str = "/run/legion-control.socket";
 
-fn user_socket() -> PathBuf {
-    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        PathBuf::from(dir).join("legion-control.socket")
-    } else {
-        PathBuf::from("/tmp/legion-control.socket")
-    }
+/// Per-user socket used by a non-root daemon. Only available when
+/// XDG_RUNTIME_DIR is set — a predictable `/tmp` path would let any local
+/// process pre-create the socket and impersonate the daemon.
+fn user_socket() -> Option<PathBuf> {
+    std::env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .map(|dir| PathBuf::from(dir).join("legion-control.socket"))
 }
 
 /// Path the daemon should bind.
 /// Root → `/run/legion-control.socket` so profile/fan/battery writes work.
-pub fn bind_socket_path() -> PathBuf {
+pub fn bind_socket_path() -> Result<PathBuf, String> {
     // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
     if unsafe { libc::geteuid() } == 0 {
-        PathBuf::from(SYSTEM_SOCKET)
+        Ok(PathBuf::from(SYSTEM_SOCKET))
     } else {
-        user_socket()
+        user_socket().ok_or_else(|| {
+            "XDG_RUNTIME_DIR is not set — cannot pick a safe per-user socket path".to_string()
+        })
     }
 }
 
 /// Candidate sockets for clients (system first, then per-user).
 pub fn socket_candidates() -> Vec<PathBuf> {
-    vec![PathBuf::from(SYSTEM_SOCKET), user_socket()]
+    let mut candidates = vec![PathBuf::from(SYSTEM_SOCKET)];
+    candidates.extend(user_socket());
+    candidates
 }
 
 /// Connect to the daemon, send a command, receive the response.
 pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+
+    const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
     let label = cmd_label(&cmd);
     log::debug!("ipc → {label}");
@@ -182,8 +220,17 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
                 continue;
             }
         };
+        // Bound the wait so a wedged daemon cannot hang clients forever.
+        stream
+            .set_write_timeout(Some(IPC_TIMEOUT))
+            .map_err(|e| format!("Set write timeout: {e}"))?;
+        stream
+            .set_read_timeout(Some(IPC_TIMEOUT))
+            .map_err(|e| format!("Set read timeout: {e}"))?;
 
-        let data = bincode::serialize(&cmd).map_err(|e| format!("Serialize error: {e}"))?;
+        let data = bincode_opts()
+            .serialize(&cmd)
+            .map_err(|e| format!("Serialize error: {e}"))?;
         stream
             .write_all(&data)
             .map_err(|e| format!("Write error: {e}"))?;
@@ -191,11 +238,13 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
 
         let mut buf = Vec::new();
         stream
+            .take(MAX_FRAME_BYTES)
             .read_to_end(&mut buf)
             .map_err(|e| format!("Read error: {e}"))?;
 
-        let resp: DaemonResponse =
-            bincode::deserialize(&buf).map_err(|e| format!("Deserialize error: {e}"))?;
+        let resp: DaemonResponse = bincode_opts()
+            .deserialize(&buf)
+            .map_err(|e| format!("Deserialize error: {e}"))?;
         match &resp {
             DaemonResponse::Error(e) => log::warn!("ipc ← {label} error: {e}"),
             DaemonResponse::Ok => log::debug!("ipc ← {label} ok"),
@@ -210,11 +259,13 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
 }
 
 /// Short label for logs (avoids dumping large sensor payloads).
+/// Client-supplied strings are sanitized (control chars escaped, truncated)
+/// so a hostile client cannot forge log lines.
 pub fn cmd_label(cmd: &DaemonCommand) -> String {
     match cmd {
         DaemonCommand::GetSensors => "GetSensors".into(),
         DaemonCommand::GetProfile => "GetProfile".into(),
-        DaemonCommand::SetProfile(name) => format!("SetProfile({name})"),
+        DaemonCommand::SetProfile(name) => format!("SetProfile({})", sanitize_log(name)),
         DaemonCommand::GetFanRpm(f) => format!("GetFanRpm({f})"),
         DaemonCommand::SetFanTarget(f, rpm) => format!("SetFanTarget({f},{rpm})"),
         DaemonCommand::GetKbdBrightness => "GetKbdBrightness".into(),
@@ -230,14 +281,21 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
             g,
             b,
             speed,
-        } => format!("SetRgbEffect({effect},#{r:02x}{g:02x}{b:02x},spd={speed})"),
+        } => format!(
+            "SetRgbEffect({},#{r:02x}{g:02x}{b:02x},spd={speed})",
+            sanitize_log(effect)
+        ),
         DaemonCommand::SetRgbBrightness(l) => format!("SetRgbBrightness({l})"),
         DaemonCommand::GetRgbBrightness => "GetRgbBrightness".into(),
         DaemonCommand::SetLogo(on) => format!("SetLogo({on})"),
         DaemonCommand::SetChargeLimit(p) => format!("SetChargeLimit({p}%)"),
         DaemonCommand::GetChargeLimit => "GetChargeLimit".into(),
         DaemonCommand::GetCpuPower => "GetCpuPower".into(),
-        DaemonCommand::SetFwAttr { name, value } => format!("SetFwAttr({name}={value})"),
+        DaemonCommand::SetFwAttr { name, value } => format!(
+            "SetFwAttr({}={})",
+            sanitize_log(name),
+            sanitize_log(value)
+        ),
         DaemonCommand::GetSmt => "GetSmt".into(),
         DaemonCommand::SetSmt(on) => format!("SetSmt({on})"),
         DaemonCommand::GetBoost => "GetBoost".into(),
@@ -245,7 +303,7 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::DiagnoseRgb => "DiagnoseRgb".into(),
         DaemonCommand::FixRgbPanic => "FixRgbPanic".into(),
         DaemonCommand::GetRecentLogs(n) => format!("GetRecentLogs({n})"),
-        DaemonCommand::SetLogLevel(l) => format!("SetLogLevel({l})"),
+        DaemonCommand::SetLogLevel(l) => format!("SetLogLevel({})", sanitize_log(l)),
         DaemonCommand::GetCurveOptimizer => "GetCurveOptimizer".into(),
         DaemonCommand::SetCurveOptimizer { offset, .. } => {
             format!("SetCurveOptimizer({offset})")
@@ -263,6 +321,50 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
             enabled, max_temp, ..
         } => format!("SetThermal({enabled},{max_temp})"),
         DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
+    }
+}
+
+/// Fixed command-kind label (no client data) — safe as a bounded map key
+/// for per-command timing statistics.
+pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
+    match cmd {
+        DaemonCommand::GetSensors => "GetSensors",
+        DaemonCommand::GetProfile => "GetProfile",
+        DaemonCommand::SetProfile(_) => "SetProfile",
+        DaemonCommand::GetFanRpm(_) => "GetFanRpm",
+        DaemonCommand::SetFanTarget(_, _) => "SetFanTarget",
+        DaemonCommand::GetKbdBrightness => "GetKbdBrightness",
+        DaemonCommand::SetKbdBrightness(_) => "SetKbdBrightness",
+        DaemonCommand::SetRgbStatic(_, _, _) => "SetRgbStatic",
+        DaemonCommand::GetBattery => "GetBattery",
+        DaemonCommand::SetConservation(_) => "SetConservation",
+        DaemonCommand::GetDeviceInfo => "GetDeviceInfo",
+        DaemonCommand::GetCameraPower => "GetCameraPower",
+        DaemonCommand::SetRgbEffect { .. } => "SetRgbEffect",
+        DaemonCommand::SetRgbBrightness(_) => "SetRgbBrightness",
+        DaemonCommand::GetRgbBrightness => "GetRgbBrightness",
+        DaemonCommand::SetLogo(_) => "SetLogo",
+        DaemonCommand::SetChargeLimit(_) => "SetChargeLimit",
+        DaemonCommand::GetChargeLimit => "GetChargeLimit",
+        DaemonCommand::GetCpuPower => "GetCpuPower",
+        DaemonCommand::SetFwAttr { .. } => "SetFwAttr",
+        DaemonCommand::GetSmt => "GetSmt",
+        DaemonCommand::SetSmt(_) => "SetSmt",
+        DaemonCommand::GetBoost => "GetBoost",
+        DaemonCommand::SetBoost(_) => "SetBoost",
+        DaemonCommand::DiagnoseRgb => "DiagnoseRgb",
+        DaemonCommand::FixRgbPanic => "FixRgbPanic",
+        DaemonCommand::GetRecentLogs(_) => "GetRecentLogs",
+        DaemonCommand::SetLogLevel(_) => "SetLogLevel",
+        DaemonCommand::GetCurveOptimizer => "GetCurveOptimizer",
+        DaemonCommand::SetCurveOptimizer { .. } => "SetCurveOptimizer",
+        DaemonCommand::ResetCurveOptimizer => "ResetCurveOptimizer",
+        DaemonCommand::ResetCurveOptimizerAcknowledged { .. } => "ResetCurveOptimizerAcknowledged",
+        DaemonCommand::GetCurveOptimizerPersistence => "GetCurveOptimizerPersistence",
+        DaemonCommand::SetCurveOptimizerPersistence { .. } => "SetCurveOptimizerPersistence",
+        DaemonCommand::GetThermal => "GetThermal",
+        DaemonCommand::SetThermal { .. } => "SetThermal",
+        DaemonCommand::GetThermalStatus => "GetThermalStatus",
     }
 }
 
@@ -331,11 +433,21 @@ mod tests {
             max_temp: 90,
             acknowledge: false,
         };
-        let bytes = bincode::serialize(&cmd).unwrap();
-        let back: DaemonCommand = bincode::deserialize(&bytes).unwrap();
+        let bytes = bincode_opts().serialize(&cmd).unwrap();
+        let back: DaemonCommand = bincode_opts().deserialize(&bytes).unwrap();
         assert!(matches!(
             back,
             DaemonCommand::SetThermal { max_temp: 90, .. }
         ));
+    }
+
+    #[test]
+    fn sanitize_log_escapes_newlines_and_truncates() {
+        assert_eq!(sanitize_log("balanced"), "balanced");
+        assert_eq!(sanitize_log("foo\nbar"), "foo\\nbar");
+        assert_eq!(sanitize_log("a\u{0001}b"), "a\\u0001b");
+        let long = "x".repeat(100);
+        let out = sanitize_log(&long);
+        assert!(out.chars().count() == 65 && out.ends_with('…'));
     }
 }

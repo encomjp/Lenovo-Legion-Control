@@ -38,6 +38,8 @@ package() {
   cp -a third_party/ryzen_smu/. "${pkgdir}/usr/lib/legion-control/ryzen_smu/"
   install -Dm644 packaging/common/legion-control.service \
     "${pkgdir}/usr/lib/systemd/system/legion-control.service"
+  install -Dm644 data/sysusers.d/legion-control.conf \
+    "${pkgdir}/usr/lib/sysusers.d/legion-control.conf"
   install -Dm644 data/udev/99-legion.rules \
     "${pkgdir}/usr/lib/udev/rules.d/99-legion.rules"
   install -Dm644 data/gui/com.encomjp.legion-settings.desktop \

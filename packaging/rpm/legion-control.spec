@@ -39,6 +39,8 @@ mkdir -p %{buildroot}%{_prefix}/lib/legion-control/ryzen_smu
 cp -a third_party/ryzen_smu/. %{buildroot}%{_prefix}/lib/legion-control/ryzen_smu/
 install -Dm644 packaging/common/legion-control.service \
     %{buildroot}%{_unitdir}/legion-control.service
+install -Dm644 data/sysusers.d/legion-control.conf \
+    %{buildroot}%{_sysusersdir}/legion-control.conf
 install -Dm644 data/udev/99-legion.rules \
     %{buildroot}/usr/lib/udev/rules.d/99-legion.rules
 install -Dm644 data/gui/com.encomjp.legion-settings.desktop \

@@ -838,11 +838,11 @@ fn print_thermal_status(s: &legion_core::thermal::ThermalStatus) {
     let on_off = if s.config.enabled { "on" } else { "off" };
     let state = if s.active { "throttling" } else { "idle" };
     let tctl = s
-        .tctl_mC
+        .tctl_mc
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
     let tccd2 = s
-        .tccd2_mC
+        .tccd2_mc
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
     println!(

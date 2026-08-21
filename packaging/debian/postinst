@@ -2,6 +2,7 @@
 set -e
 
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    getent group legion >/dev/null 2>&1 || groupadd -r legion >/dev/null 2>&1 || true
     systemctl daemon-reload || true
     systemctl enable legion-control.service >/dev/null 2>&1 || true
     systemctl try-restart legion-control.service >/dev/null 2>&1 \

@@ -257,9 +257,52 @@ fn config_path() -> PathBuf {
     base.join("legion-control").join("settings.json")
 }
 
+fn lock_path() -> PathBuf {
+    config_path().with_file_name(".settings.lock")
+}
+
+/// Run `f` while holding an exclusive advisory lock on a lockfile next to
+/// settings.json. Serializes read-modify-write cycles between processes
+/// (daemon, GUI, CLI) so concurrent updates cannot clobber each other.
+fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
+    let path = lock_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+    {
+        Ok(file) => {
+            use std::os::fd::AsRawFd;
+            // SAFETY: flock on a valid fd — plain POSIX call, no memory concerns.
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if rc != 0 {
+                log::warn!(
+                    "config lock failed ({}): {}",
+                    path.display(),
+                    std::io::Error::last_os_error()
+                );
+            }
+            let out = f();
+            // SAFETY: unlocking the fd we locked above.
+            unsafe {
+                libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+            }
+            out
+        }
+        Err(e) => {
+            log::warn!("config lock open failed ({}): {e}", path.display());
+            f()
+        }
+    }
+}
+
 fn store() -> &'static Mutex<AppConfig> {
     static STORE: OnceLock<Mutex<AppConfig>> = OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(load_from_disk()))
+    STORE.get_or_init(|| Mutex::new(with_config_lock(load_from_disk)))
 }
 
 fn load_from_disk() -> AppConfig {
@@ -268,10 +311,26 @@ fn load_from_disk() -> AppConfig {
         Ok(s) => match serde_json::from_str::<AppConfig>(&s) {
             Ok(parsed) => parsed,
             Err(e) => {
-                log::warn!(
-                    "config parse error ({}), using defaults: {e}",
-                    path.display()
-                );
+                // A truncated/corrupt file must not silently wipe profiles and
+                // per-key data: preserve it for manual recovery, then reset.
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "settings.json".into());
+                let backup = path.with_file_name(format!(
+                    "{name}.corrupt-{}",
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                ));
+                match fs::rename(&path, &backup) {
+                    Ok(()) => log::error!(
+                        "config parse error — moved corrupt file to {}, using defaults: {e}",
+                        backup.display()
+                    ),
+                    Err(re) => log::error!(
+                        "config parse error ({}): {e} — using defaults (could not preserve file: {re})",
+                        path.display()
+                    ),
+                }
                 AppConfig::default()
             }
         },
@@ -288,15 +347,37 @@ fn write_disk(cfg: &AppConfig) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    match serde_json::to_string_pretty(cfg) {
-        Ok(s) => {
-            if let Err(e) = fs::write(&path, s) {
-                log::warn!("config write failed ({}): {e}", path.display());
-            } else {
-                log::debug!("config saved → {}", path.display());
-            }
+    let s = match serde_json::to_string_pretty(cfg) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("config serialize failed: {e}");
+            return;
         }
-        Err(e) => log::warn!("config serialize failed: {e}"),
+    };
+    // Atomic write: temp file in the same directory + rename. A crash or
+    // power loss mid-write can never leave a truncated settings.json behind.
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "settings.json".into());
+    let tmp = path.with_file_name(format!("{name}.tmp-{}", std::process::id()));
+    use std::io::Write;
+    let write_result = fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(s.as_bytes())?;
+        f.sync_all()
+    });
+    match write_result {
+        Ok(()) => match fs::rename(&tmp, &path) {
+            Ok(()) => log::debug!("config saved → {}", path.display()),
+            Err(e) => {
+                log::warn!("config rename failed ({}): {e}", path.display());
+                let _ = fs::remove_file(&tmp);
+            }
+        },
+        Err(e) => {
+            log::warn!("config write failed ({}): {e}", tmp.display());
+            let _ = fs::remove_file(&tmp);
+        }
     }
 }
 
@@ -305,11 +386,19 @@ pub fn get() -> AppConfig {
 }
 
 pub fn update(f: impl FnOnce(&mut AppConfig)) {
-    if let Ok(mut g) = store().lock() {
+    let mut g = match store().lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    with_config_lock(|| {
+        // Re-read the on-disk state first: another process (daemon/GUI) may
+        // have written since our cache was last updated. We are already
+        // holding the config lock, so this read is serialized too.
+        *g = load_from_disk();
         f(&mut g);
         g.version = VERSION;
         write_disk(&g);
-    }
+    });
 }
 
 pub fn config_dir_display() -> String {

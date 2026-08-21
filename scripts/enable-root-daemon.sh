@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")/.."
 cargo build --release
-sudo install -Dm755 target/release/legion-daemon /usr/bin/legion-daemon
+sudo install -Dm755 target/release/legion-daemon /usr/local/bin/legion-daemon
 sudo install -Dm755 target/release/legion-cli /usr/bin/legion-cli
 sudo install -Dm755 target/release/legion-settings /usr/bin/legion-settings
 sudo install -Dm644 data/systemd/legion-control.system.service /etc/systemd/system/legion-control.service

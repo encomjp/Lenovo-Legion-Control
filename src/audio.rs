@@ -495,7 +495,10 @@ fn find_internal_analog_sink() -> Option<String> {
     let out = run_cmd("pactl", &["list", "short", "sinks"]).ok()?;
     let mut candidates: Vec<(i32, String)> = Vec::new();
     for line in out.lines() {
-        let name = line.split_whitespace().nth(1)?;
+        // A malformed line must not abort sink discovery — skip it.
+        let Some(name) = line.split_whitespace().nth(1) else {
+            continue;
+        };
         let lname = name.to_lowercase();
         if lname.contains("hdmi") || lname.starts_with("bluez_") {
             continue;
