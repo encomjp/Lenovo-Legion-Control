@@ -421,7 +421,9 @@ fn build_ui(app: &adw::Application) {
             }
             let rev = gtk::Revealer::new();
             rev.set_transition_type(gtk::RevealerTransitionType::SlideDown);
-            rev.set_transition_duration(120);
+            // NN/g: large panel reveals need 200–300 ms to be
+            // perceivable without dragging; 220 ms with ease-out.
+            rev.set_transition_duration(220);
             rev.set_child(Some(&lb_list));
             rev.set_reveal_child(false);
             sec.append(&rev);
@@ -513,7 +515,10 @@ fn build_ui(app: &adw::Application) {
         &[("Manage", "Save and restore presets")],
     );
     nav_box.append(&profiles_sec);
-    // Discoverability: leave the two most-visited groups open on cold launch.
+    // Discoverability (NN/g Heuristic 6: recognition over recall): leave the
+    // most-visited groups open on cold launch so the primary destinations
+    // are visible without hunting for chevrons. CPU stays closed — its rows
+    // are power-user territory; Lighting is opened on first selection.
     cooling_rev.set_reveal_child(true);
     cooling_chev.add_css_class("open");
     battery_rev.set_reveal_child(true);
@@ -970,6 +975,45 @@ fn build_ui(app: &adw::Application) {
     ));
     bp.add_setter(&split, "collapsed", Some(&true.to_value()));
     window.add_breakpoint(bp);
+
+    // Robust header sync: whenever the stack's visible child changes by ANY
+    // path (nav_to, LEGION_PAGE, welcome dialog, future code), update the
+    // header + NavigationPage titles from a single name→title map. This
+    // makes the "stuck on Home" desync class structurally impossible.
+    {
+        let page = content_page.clone();
+        let title_widget = window_title.clone();
+        stack.connect_visible_child_notify(move |stk| {
+            let Some(child) = stk.visible_child() else {
+                return;
+            };
+            let name = match stk.page(&child).name() {
+                Some(n) => n,
+                None => return,
+            };
+            let title = match name.as_str() {
+                "overview" => "Home",
+                "cpu-features" => "CPU Features",
+                "cpu-tuning" => "CPU Tuning",
+                "cpu-power" => "CPU Power Limits",
+                "cooling-fans" => "Cooling Fans",
+                "lighting" => "Lighting",
+                "battery-status" => "Battery Status",
+                "battery-limit" => "Charge Limit",
+                "fix-audio" => "Speaker Repair",
+                "fix-lighting" => "Lighting Repair",
+                "fix-logs" => "Service Logs",
+                "profiles" => "Profiles",
+                "about-setup" => "Setup",
+                "about-hardware" => "Hardware",
+                "about-storage" => "Storage",
+                "about-help" => "Help",
+                _ => return,
+            };
+            page.set_title(title);
+            title_widget.set_title(title);
+        });
+    }
 
     toast_overlay.set_child(Some(&split));
     window.set_content(Some(&toast_overlay));
@@ -2803,20 +2847,15 @@ fn build_profiles_page(
     del.add_css_class("flat");
     del.add_css_class("pill-btn");
     tip(&del, "Remove the selected named profile from disk");
+    // Buttons live in their own full-width row: a 3-button suffix inside an
+    // ActionRow overflows below ~900 px window width (NN/g: responsive).
     btns.append(&save);
     btns.append(&load);
     btns.append(&del);
-    let btn_row = adw::ActionRow::builder()
-        .title("Actions")
-        .subtitle("Save · Load · Delete the selected preset")
-        .activatable(false)
-        .build();
-    tip(
-        &btn_row,
-        "Save stores the current setup · Load applies a preset · Delete removes it",
-    );
-    btn_row.add_suffix(&btns);
-    group.add(&btn_row);
+    btns.set_margin_top(4);
+    btns.set_margin_bottom(4);
+    btns.set_halign(Align::End);
+    group.add(&btns);
 
     let restore_sw = adw::SwitchRow::builder()
         .title("Restore last session on launch")
@@ -3978,7 +4017,11 @@ fn build_battery_pages(
     gate: &DaemonGate,
 ) -> (gtk::Box, gtk::Box) {
     let status_page = page_lede("");
-    let limit_page = page_lede("");
+    // Heuristics 2+6+10: plain language inline — explain the 60/80/100
+    // choice so users don't have to hover or recall forum advice.
+    let limit_page = page_lede(
+        "On AC most of the day? Lower limits reduce wear — 60% desk, 80% daily, 100% travel.",
+    );
 
     // Chips on top — like Overview / Thermal: Capacity · Voltage · Power · Health
     let chips = gtk::FlowBox::builder()
