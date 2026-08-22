@@ -441,12 +441,7 @@ fn build_ui(app: &adw::Application) {
     brand_name.add_css_class("brand-name");
     brand_name.set_halign(Align::Start);
     tip(&brand_name, "Unofficial Legion laptop control");
-    let brand_sub = gtk::Label::new(Some("Fans · Lights · Power"));
-    brand_sub.add_css_class("brand-sub");
-    brand_sub.set_halign(Align::Start);
-    tip(&brand_sub, "Cooling, lighting, and power");
     brand_text.append(&brand_name);
-    brand_text.append(&brand_sub);
     brand.append(&brand_text);
     // Allow dragging the window from the brand strip (sidebar).
     let brand_handle = gtk::WindowHandle::new();
@@ -1343,10 +1338,7 @@ fn build_overview(
     }
     page.append(&metrics);
 
-    let power = pref_group(
-        "Power mode",
-        Some("Quiet / Balanced / Performance / Max / Custom. Custom unlocks the power-limit sliders below."),
-    );
+    let power = pref_group("Power mode", None);
     tip(
         &power,
         "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
@@ -1359,7 +1351,7 @@ fn build_overview(
     let current = legion_core::profile::current();
     let active = choices.iter().position(|c| *c == current).unwrap_or(0) as u32;
 
-    let drop = string_combo_row("Mode", profile_blurb(&current), &label_refs, active);
+    let drop = string_combo_row("Mode", "", &label_refs, active);
     tip(&drop, profile_tooltip(&current));
     power.add(&drop);
     *mode_drop_slot.borrow_mut() = Some(drop.clone());
@@ -1369,7 +1361,6 @@ fn build_overview(
     let ppt_box_slot = ppt_group_slot.clone();
     let ppt_scales_slot_c = ppt_scales_slot.clone();
     let ppt_suppress_slot_c = ppt_suppress_slot.clone();
-    let drop_blurb = drop.clone();
     let profile_guard = Rc::new(Cell::new(false));
     let last_ok = Rc::new(Cell::new(active));
     let profile_guard_n = profile_guard.clone();
@@ -1383,7 +1374,6 @@ fn build_overview(
             return;
         }
         let name = choices_c[idx].clone();
-        drop_blurb.set_subtitle(profile_blurb(&name));
         tip(d, profile_tooltip(&name));
 
         let apply = {
@@ -1425,7 +1415,6 @@ fn build_overview(
         if name == "max-power" && last_ok_n.get() != idx as u32 {
             let drop_r = d.clone();
             let choices_c = choices_c.clone();
-            let drop_blurb = drop_blurb.clone();
             let profile_guard = profile_guard_n.clone();
             let last_ok = last_ok_n.clone();
             let prev = last_ok.get();
@@ -1437,7 +1426,6 @@ fn build_overview(
                         .get(prev as usize)
                         .cloned()
                         .unwrap_or_else(|| "balanced".into());
-                    drop_blurb.set_subtitle(profile_blurb(&prev_name));
                     tip(&drop_r, profile_tooltip(&prev_name));
                     profile_guard.set(false);
                     return;
@@ -1456,7 +1444,6 @@ fn build_overview(
         if name == "custom" && last_ok_n.get() != idx as u32 {
             let drop_r = d.clone();
             let choices_c = choices_c.clone();
-            let drop_blurb = drop_blurb.clone();
             let profile_guard = profile_guard_n.clone();
             let last_ok = last_ok_n.clone();
             let prev = last_ok.get();
@@ -1468,7 +1455,6 @@ fn build_overview(
                         .get(prev as usize)
                         .cloned()
                         .unwrap_or_else(|| "balanced".into());
-                    drop_blurb.set_subtitle(profile_blurb(&prev_name));
                     tip(&drop_r, profile_tooltip(&prev_name));
                     profile_guard.set(false);
                     return;
@@ -1852,7 +1838,7 @@ fn set_curve_optimizer_persistence_async(
 }
 
 fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("Curve Optimizer", Some(""));
+    let group = pref_group("Curve Optimizer", None);
     tip(
         &group,
         "All-core CPU offset via ryzen_smu. Unstable values can crash the system.",
@@ -2262,7 +2248,7 @@ fn build_stability_group(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
         }
     }
     // Fallback recompose — should never hit.
-    let g = pref_group("Stability test", Some("5 minutes · all CPU threads"));
+    let g = pref_group("Stability test", None);
     let row = adw::ActionRow::builder()
         .title("Stability test")
         .subtitle("5 minutes")
@@ -2669,12 +2655,9 @@ fn build_profiles_page(
     mode_drop_slot: &Rc<RefCell<Option<adw::ComboRow>>>,
     profile_choices_slot: &Rc<RefCell<Vec<String>>>,
 ) -> gtk::Box {
-    let page = page_lede("Save and restore settings");
+    let page = page_lede("");
 
-    let group = pref_group(
-        "Named presets",
-        Some("Save and restore a group of settings"),
-    );
+    let group = pref_group("Named presets", None);
 
     let names = legion_core::config::list_profile_names();
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
@@ -3188,10 +3171,7 @@ fn build_cooling_overview_page(
     let page = page_lede(
         "All fans at a glance — use CPU/GPU/Aux pages for per-fan tuning, or reset when done.",
     );
-    let overview = pref_group(
-        "Fans overview",
-        Some("Readout from daemon · changes apply without leaving this tab"),
-    );
+    let overview = pref_group("Fans overview", None);
     tip(
         &overview,
         "Same fan_card controls as the per-fan pages, stacked for overview",
@@ -3214,7 +3194,7 @@ fn build_cooling_overview_page(
             Some("Fan channels missing — check legion-control service"),
         ));
     }
-    let reset = pref_group("Automatic mode", Some("Clear all fixed RPM targets"));
+    let reset = pref_group("Automatic mode", None);
     let btn = primary_button_tip(
         "All fans automatic",
         Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
@@ -3283,17 +3263,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     value.set_xalign(1.0);
     tip(&scale, "Maximum temperature — restore point is 7 °C below");
     tip(&value, "Current threshold");
-    let temp_row = adw::ActionRow::builder()
-        .title("Maximum temperature")
-        .subtitle("Throttle at this temp · restores at 83 °C")
-        .activatable(false)
-        .build();
-    tip(
-        &temp_row,
-        "70–98 °C slider — 96–98 °C needs explicit confirmation (above TjMax)",
-    );
-    temp_row.add_suffix(&scale);
-    temp_row.add_suffix(&value);
     // TjMax tick labels under the trough
     let scale_marks = gtk::Box::new(Orientation::Horizontal, 0);
     scale_marks.add_css_class("scale-marks");
@@ -3311,13 +3280,35 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     scale_marks.append(&mark_70);
     scale_marks.append(&mark_95);
     scale_marks.append(&mark_98);
-    group.add(&temp_row);
-    group.add(&scale_marks);
+
+    // Stacked column: title + live value on one line, full-width slider
+    // below, marks aligned to the slider. (The old ActionRow squeezed the
+    // scale into a suffix box next to the title, which overflowed the card
+    // edge and duplicated the switch row's state text.)
+    let temp_title = gtk::Label::new(Some("Maximum temperature"));
+    temp_title.add_css_class("row-title");
+    temp_title.set_halign(Align::Start);
+    tip(
+        &temp_title,
+        "70–98 °C slider — 96–98 °C needs explicit confirmation (above TjMax)",
+    );
+    value.set_halign(Align::End);
+    value.set_hexpand(true);
+    let temp_top = gtk::Box::new(Orientation::Horizontal, 12);
+    temp_top.set_hexpand(true);
+    temp_top.append(&temp_title);
+    temp_top.append(&value);
+    let temp_box = gtk::Box::new(Orientation::Vertical, 6);
+    temp_box.set_hexpand(true);
+    temp_box.append(&temp_top);
+    temp_box.append(&scale);
+    temp_box.append(&scale_marks);
+    group.add(&temp_box);
 
     // Muted slider when throttling off — also used by initial load + toggle.
     let apply_mute: Rc<dyn Fn(bool)> = {
         let scale_c = scale.clone();
-        let row_c = temp_row.clone();
+        let row_c = temp_box.clone();
         let marks_c = scale_marks.clone();
         Rc::new(move |on: bool| {
             if on {
@@ -3380,12 +3371,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             "Off · no frequency clamp".into()
         }
     };
-    let fmt_temp_sub = |max: u8| -> String {
-        format!(
-            "Throttle at {max} °C · restores at {} °C",
-            max.saturating_sub(7)
-        )
-    };
 
     // Immediate daemon write (no hysteresis UI, no inline ack).
     let do_apply = {
@@ -3396,7 +3381,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let last_max_c = last_max.clone();
         let last_on_c = last_on.clone();
         let acked_c = acked.clone();
-        let temp_row_c = temp_row.clone();
         let value_c = value.clone();
         let apply_mute_c = apply_mute.clone();
         Rc::new(move |max_temp: u8, enabled_val: bool, acknowledge: bool| {
@@ -3407,7 +3391,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             let last_on_cc = last_on_c.clone();
             let acked_cc = acked_c.clone();
             let scale_cc = scale_c.clone();
-            let temp_row_cc = temp_row_c.clone();
             let value_cc = value_c.clone();
             let apply_mute_cc = apply_mute_c.clone();
             run_daemon_command_async(
@@ -3424,7 +3407,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                             .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                         scale_cc.set_value(st.config.max_temp as f64);
                         value_cc.set_text(&format!("{} °C", st.config.max_temp));
-                        temp_row_cc.set_subtitle(&fmt_temp_sub(st.config.max_temp));
                         apply_mute_cc(st.config.enabled);
                         suppress_cc.set(false);
                         // Persist ack state: daemon accepted this max, so if it was ≥96 we are acked
@@ -3453,7 +3435,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let suppress_c = suppress.clone();
         let last_max_c = last_max.clone();
         let acked_c = acked.clone();
-        let temp_row_c = temp_row.clone();
         let value_c = value.clone();
         let do_apply_c = do_apply.clone();
         Rc::new(move || {
@@ -3465,7 +3446,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             let suppress_cc = suppress_c.clone();
             let last_max_cc = last_max_c.clone();
             let acked_cc = acked_c.clone();
-            let temp_row_cc = temp_row_c.clone();
             let value_cc = value_c.clone();
             let debounce_cc = debounce_c.clone();
             let do_apply_cc = do_apply_c.clone();
@@ -3477,7 +3457,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                 let enabled_val = enabled_cc.is_active();
                 // Live label + subtitle — always reflect slider immediately
                 value_cc.set_text(&format!("{max_temp} °C"));
-                temp_row_cc.set_subtitle(&fmt_temp_sub(max_temp));
                 suppress_cc.set(true);
                 enabled_cc.set_subtitle(&fmt_throttle_sub(enabled_val, max_temp));
                 suppress_cc.set(false);
@@ -3496,7 +3475,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                                 suppress_for_dialog.set(true);
                                 scale_for_dialog.set_value(last as f64);
                                 value_cc.set_text(&format!("{last} °C"));
-                                temp_row_cc.set_subtitle(&fmt_temp_sub(last));
                                 let en = enabled_cc.is_active();
                                 enabled_cc.set_subtitle(&fmt_throttle_sub(en, last));
                                 suppress_for_dialog.set(false);
@@ -3522,7 +3500,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let scale_c = scale.clone();
         let enabled_c = enabled.clone();
         let value_c = value.clone();
-        let temp_row_c = temp_row.clone();
         let suppress_c = suppress.clone();
         let last_max_c = last_max.clone();
         let last_on_c = last_on.clone();
@@ -3546,7 +3523,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                     scale_c.set_value(st.config.max_temp as f64);
                     value_c.set_text(&format!("{} °C", st.config.max_temp));
-                    temp_row_c.set_subtitle(&fmt_temp_sub(st.config.max_temp));
                     last_max_c.set(st.config.max_temp);
                     last_on_c.set(st.config.enabled);
                     acked_c.set(st.config.max_temp >= 96);
@@ -3673,7 +3649,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let enabled_p = enabled.clone();
     let scale_p = scale.clone();
     let value_p = value.clone();
-    let temp_row_p = temp_row.clone();
     let suppress_p = suppress.clone();
     let last_max_p = last_max.clone();
     let last_on_p = last_on.clone();
@@ -3692,7 +3667,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let enabled_c = enabled_p.clone();
         let scale_c = scale_p.clone();
         let value_c = value_p.clone();
-        let temp_row_c = temp_row_p.clone();
         let suppress_c = suppress_p.clone();
         let last_max_c = last_max_p.clone();
         let last_on_c = last_on_p.clone();
@@ -3743,8 +3717,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                             .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                         scale_c.set_value(st.config.max_temp as f64);
                         value_c.set_text(&format!("{} °C", st.config.max_temp));
-                        temp_row_c.set_subtitle(&fmt_temp_sub(st.config.max_temp));
-                        apply_mute_c(st.config.enabled);
+                            apply_mute_c(st.config.enabled);
                         suppress_c.set(false);
                         acked_c.set(st.config.max_temp >= 96);
                         last_max_c.set(st.config.max_temp);
@@ -4303,7 +4276,7 @@ fn build_battery_pages(
 // ─── Troubleshoot ───────────────────────────────────────────────────────────
 
 fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("Speaker diagnostics and repair");
+    let page = page_lede("");
     page.append(&build_speakers_section(toast_overlay));
     page
 }
@@ -4311,7 +4284,7 @@ fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 /// One "Fix" destination with an internal switcher instead of three sidebar
 /// rows — keeps the rail short while all diagnostics stay one click away.
 fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Diagnostics and repair — speakers, Spectrum RGB, service logs");
+    let page = page_lede("");
 
     let inner = adw::ViewStack::new();
     inner.set_vexpand(true);
@@ -4349,13 +4322,13 @@ fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::
 }
 
 fn build_fix_lighting_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    let page = page_lede("Spectrum RGB diagnostics and recovery");
+    let page = page_lede("");
     page.append(&build_lighting_reset_section(toast_overlay, gate));
     page
 }
 
 fn build_fix_logs_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("Recent control-service output");
+    let page = page_lede("");
     page.append(&build_logs_section(toast_overlay));
     page
 }
@@ -4537,10 +4510,7 @@ fn build_lighting_reset_section(
 fn build_logs_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
 
-    let group = pref_group(
-        "Daemon logs",
-        Some("Recent log lines from the running daemon"),
-    );
+    let group = pref_group("Daemon logs", None);
 
     let text_view = gtk::TextView::new();
     text_view.set_editable(false);
@@ -4766,10 +4736,7 @@ fn remove_kde_widget() -> Result<(), String> {
 
 fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     let installed = kde_widget_installed();
-    let group = pref_group(
-        "KDE Plasma widget",
-        Some("Temperatures and quick controls in Plasma"),
-    );
+    let group = pref_group("KDE Plasma widget", None);
     let row = adw::ActionRow::builder()
         .title("Legion Control widget")
         .subtitle(if installed {
@@ -4853,7 +4820,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 }
 
 fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("First-time setup", Some("Required and optional components"));
+    let group = pref_group("First-time setup", None);
 
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
     let daemon_row = adw::ActionRow::builder()
@@ -5007,7 +4974,7 @@ fn build_about_pages(
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
 
-    let help = pref_group("Help", Some("Support the project or report problems"));
+    let help = pref_group("Help", None);
     let report_btn = primary_button_tip(
         "Report an issue",
         Some("Opens GitHub — report bugs or request features"),
@@ -5049,10 +5016,7 @@ fn build_about_pages(
 
     help_page.append(&help);
 
-    let legal = pref_group(
-        "Legal notice",
-        Some("Read before changing power or firmware settings"),
-    );
+    let legal = pref_group("Legal notice", None);
     legal.add(&property_row(
         "Not Lenovo",
         "Unofficial community tool",
@@ -5070,10 +5034,7 @@ fn build_about_pages(
     ));
     help_page.append(&legal);
 
-    let laptop = pref_group(
-        "This laptop",
-        Some("Detected from DMI + model database (LenovoLegionLinux / PSREF) — read-only"),
-    );
+    let laptop = pref_group("This laptop", None);
     let gen_s = if info.gen > 0 {
         format!("Gen {}", info.gen)
     } else {
@@ -5196,10 +5157,7 @@ fn build_about_pages(
     }
     hardware_page.append(&laptop);
 
-    let lighting = pref_group(
-        "Lighting and profiles",
-        Some("Where lighting and named profiles are stored on disk"),
-    );
+    let lighting = pref_group("Lighting and profiles", None);
     let saved = legion_core::config::config_dir_display();
     lighting.add(&property_row(
         "Controller",

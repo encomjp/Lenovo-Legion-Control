@@ -120,26 +120,15 @@ fn build_keyboard_tab(
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.set_margin_top(14);
 
-    let (sec_fx, fx_card) = section_tip(
-        "Whole keyboard",
-        Some(
-            "One Spectrum effect on every key — painting in the per-key window overrides it until you Clear map",
-        ),
-    );
+    let (sec_fx, fx_card) = section_tip("Whole keyboard", None);
     fx_card.append(&zone_editor(RgbZone::Keyboard, layer, true, toast));
     box_.append(&sec_fx);
 
-    let (sec_brush, brush_card) = section_tip(
-        "Paint colour",
-        Some("Brush colour used when you paint keys in the per-key lighting window"),
-    );
+    let (sec_brush, brush_card) = section_tip("Paint colour", None);
     brush_card.append(&colour_toolbar(brush));
     box_.append(&sec_brush);
 
-    let (sec_map, map_card) = section_tip(
-        "Per-key lighting",
-        Some("Paint individual keys in a dedicated full-size window — no downscaling"),
-    );
+    let (sec_map, map_card) = section_tip("Per-key lighting", None);
     let open_btn = gtk::Button::with_label("Open individual key lighting…");
     open_btn.add_css_class("suggested-action");
     open_btn.add_css_class("pill-btn");
@@ -220,7 +209,7 @@ fn open_perkey_window(app: &adw::Application, brush: Rc<Cell<(u8, u8, u8)>>) -> 
 
 fn build_zone_tab(
     title: &str,
-    blurb: &str,
+    _blurb: &str,
     zone: RgbZone,
     layer: &ZoneEffect,
     toast: &adw::ToastOverlay,
@@ -228,7 +217,7 @@ fn build_zone_tab(
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.set_margin_top(14);
 
-    let (sec, card) = section_tip(title, Some(blurb));
+    let (sec, card) = section_tip(title, None);
     card.append(&zone_editor(zone, layer, false, toast));
     box_.append(&sec);
     box_
@@ -239,10 +228,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.set_margin_top(14);
 
-    let (sec_look, look) = section_tip(
-        "Brightness and logo",
-        Some("Global Spectrum brightness and lid logo power switch"),
-    );
+    let (sec_look, look) = section_tip("Brightness and logo", None);
 
     let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
     bright.set_value(cfg.brightness as f64);
@@ -316,10 +302,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     ));
     box_.append(&sec_look);
 
-    let (sec_all, all_card) = section_tip(
-        "Everything at once",
-        Some("Apply one effect to keyboard, front bar, rear bar, and logo together"),
-    );
+    let (sec_all, all_card) = section_tip("Everything at once", None);
     tip(
         &all_card,
         "Writes one effect to keyboard, front, rear, and logo together",
@@ -327,10 +310,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     all_card.append(&zone_editor(RgbZone::All, &cfg.keyboard, false, &toast));
     box_.append(&sec_all);
 
-    let (sec_r, restore_card) = section_tip(
-        "Session",
-        Some("Push your saved lighting file back to the hardware"),
-    );
+    let (sec_r, restore_card) = section_tip("Session", None);
     let restore = gtk::Button::with_label("Re-apply saved");
     restore.add_css_class("flat");
     tip(
