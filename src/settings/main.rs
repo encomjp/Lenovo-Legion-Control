@@ -5529,4 +5529,70 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn offsets_text_formats_uniform_mixed_and_empty() {
+        assert_eq!(offsets_text(&[]), "—");
+        assert_eq!(offsets_text(&[-15, -15, -15]), "All cores: -15");
+        assert_eq!(offsets_text(&[-15, -4, -15]), "Mixed");
+    }
+
+    #[test]
+    fn page_titles_resolve_for_every_top_level_page() {
+        for (id, title) in PAGE_TITLES {
+            assert_eq!(page_title(id), Some(*title), "page_title({id})");
+        }
+        assert_eq!(page_title("does-not-exist"), None);
+    }
+
+    #[test]
+    fn legacy_page_ids_resolve_to_a_registered_hub_tab() {
+        // Every id the LEGION_PAGE override accepts (current + legacy) must
+        // land on a top-level stack page, and hub tabs must belong to it.
+        let known = [
+            "overview",
+            "cpu",
+            "cpu-features",
+            "cpu-tuning",
+            "cpu-power",
+            "cooling-fans",
+            "lighting",
+            "lighting-keyboard",
+            "battery-status",
+            "battery-limit",
+            "fix",
+            "fix-audio",
+            "fix-lighting",
+            "fix-logs",
+            "profiles",
+            "about",
+            "about-setup",
+            "about-hardware",
+            "about-storage",
+            "about-help",
+        ];
+        for id in known {
+            let top = top_level_page(id);
+            assert!(page_title(top).is_some(), "top_level_page({id}) = {top} has no title");
+            if let Some(tab) = hub_initial_tab(id) {
+                let hub = match top {
+                    "cpu" => "cpu hub",
+                    "about" => "about hub",
+                    "fix" => "fix hub",
+                    other => panic!("hub tab {tab} mapped into non-hub page {other}"),
+                };
+                let _ = hub;
+                let valid = match top {
+                    "cpu" => ["features", "tuning", "power"].contains(&tab),
+                    "about" => ["setup", "hardware", "storage", "help"].contains(&tab),
+                    "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
+                    _ => false,
+                };
+                assert!(valid, "tab {tab} not registered in {top} hub");
+            }
+        }
+        // Unknown ids fall back to Home without a tab.
+        assert_eq!(top_level_page("garbage"), "overview");
+        assert_eq!(hub_initial_tab("garbage"), None);
+    }
 }
