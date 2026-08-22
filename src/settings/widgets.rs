@@ -127,11 +127,12 @@ pub fn pref_group(title: &str, description: Option<&str>) -> adw::PreferencesGro
 }
 
 /// Read-only property-style ActionRow (title + value subtitle).
-pub fn property_row(title: &str, value: &str, _tooltip: Option<&str>) -> adw::ActionRow {
+pub fn property_row(title: &str, value: &str, tooltip: Option<&str>) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
         .title(title)
         .subtitle(value)
         .build();
+    tip(&row, tooltip.unwrap_or(""));
     row.add_css_class("property");
     row.set_subtitle_selectable(true);
     row.set_activatable(false);
@@ -230,11 +231,12 @@ pub fn labeled_row_tip(
     title: &str,
     subtitle: &str,
     suffix: &impl glib::object::IsA<gtk::Widget>,
-    _tooltip: Option<&str>,
+    tooltip: Option<&str>,
 ) -> gtk::Box {
     let row = gtk::Box::new(Orientation::Vertical, 8);
     row.add_css_class("row");
     row.set_hexpand(true);
+    tip(&row, tooltip.unwrap_or(""));
 
     let top = gtk::Box::new(Orientation::Horizontal, 12);
     top.set_hexpand(true);
@@ -280,10 +282,11 @@ pub fn labeled_row_tip(
     row
 }
 
-pub fn metric_chip_tip(title: &str, _tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
+pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::Label, gtk::Label) {
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.add_css_class("metric-chip");
     box_.set_hexpand(true);
+    tip(&box_, tooltip.unwrap_or(""));
     let l = gtk::Label::new(Some(title));
     l.add_css_class("label");
     l.set_halign(Align::Start);
