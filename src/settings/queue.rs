@@ -6,6 +6,7 @@
 use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
 
 use gtk4::glib;
+use gtk4::prelude::*;
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -134,8 +135,23 @@ fn flush(inner: Rc<Inner>) {
             if let Some(old) = inner.busy_toast.borrow_mut().take() {
                 old.dismiss();
             }
-            if let Some(err) = errs.first() {
-                let t = adw::Toast::new(err);
+            if !errs.is_empty() {
+                // Surface every failure, not just the first — multi-fan or
+                // multi-attr batches must not collapse silently.
+                let detail = if errs.len() <= 3 {
+                    errs.join(" · ")
+                } else {
+                    format!("{} · …and {} more", errs[..3].join(" · "), errs.len() - 3)
+                };
+                let msg = if errs.len() == 1 {
+                    detail
+                } else {
+                    format!("{} changes failed: {detail}", errs.len())
+                };
+                let label = gtk4::Label::new(Some(&msg));
+                label.add_css_class("toast-error");
+                let t = adw::Toast::new("");
+                t.set_custom_title(Some(&label));
                 t.set_timeout(4);
                 inner.overlay.add_toast(t);
             } else if oks.len() > 1 {

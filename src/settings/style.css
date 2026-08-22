@@ -11,19 +11,19 @@
 @define-color lab_rule alpha(currentColor, 0.10);
 @define-color lab_rule_strong alpha(currentColor, 0.14);
 @define-color glass_bg @theme_base_color;
-@define-color glass_border alpha(white, 0.10);
-@define-color glass_highlight alpha(white, 0.06);
+@define-color glass_border alpha(@window_fg_color, 0.10);
+@define-color glass_highlight alpha(@window_fg_color, 0.06);
 
 .glass-card {
     background: @theme_base_color;
-    border: 1px solid alpha(white, 0.10);
+    border: 1px solid alpha(@window_fg_color, 0.10);
     border-radius: 16px;
     box-shadow: 0 8px 28px alpha(black, 0.12);
 }
 
 .glass-panel {
     background: @theme_base_color;
-    border: 1px solid alpha(white, 0.09);
+    border: 1px solid alpha(@window_fg_color, 0.09);
     border-radius: 14px;
     box-shadow: 0 6px 20px alpha(black, 0.10);
 }
@@ -61,7 +61,7 @@ headerbar windowtitle.subtitle {
 /* ── Sidebar — instrument rail ───────────────────────────────────── */
 .sidebar-brand {
     padding: 18px 16px 14px;
-    border-bottom: 1px solid alpha(white, 0.07);
+    border-bottom: 1px solid alpha(@window_fg_color, 0.07);
 }
 
 .sidebar-brand .brand-name {
@@ -82,11 +82,11 @@ headerbar windowtitle.subtitle {
 
 .sidebar-foot {
     padding: 12px 14px 14px;
-    border-top: 1px solid alpha(white, 0.09);
+    border-top: 1px solid alpha(@window_fg_color, 0.09);
     background: alpha(@theme_base_color, 0.36);
     border-radius: 14px;
     margin: 8px 10px 10px 10px;
-    box-shadow: 0 8px 24px alpha(black, 0.08), 0 1px 0 alpha(white, 0.06) inset;
+    box-shadow: 0 8px 24px alpha(black, 0.08), 0 1px 0 alpha(@window_fg_color, 0.06) inset;
 }
 
 .sidebar-foot .conn-label {
@@ -132,8 +132,8 @@ headerbar windowtitle.subtitle {
 }
 
 .navigation-sidebar row:hover {
-    background: alpha(white, 0.07);
-    border-color: alpha(white, 0.06);
+    background: alpha(@window_fg_color, 0.07);
+    border-color: alpha(@window_fg_color, 0.06);
 }
 
 .navigation-sidebar row:selected {
@@ -200,7 +200,7 @@ headerbar windowtitle.subtitle {
 
 .home-btn:hover {
     background: alpha(@theme_base_color, 0.42);
-    border-color: alpha(white, 0.08);
+    border-color: alpha(@window_fg_color, 0.08);
 }
 
 .home-btn:active {
@@ -229,6 +229,22 @@ headerbar windowtitle.subtitle {
 .sidebar-chevron.open {
     transform: rotate(90deg);
     opacity: 0.78;
+}
+
+/* Section header toggle — reads as a flat label row, but is a real,
+   keyboard-focusable button. */
+button.sidebar-header-btn {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0 4px;
+    border-radius: 8px;
+}
+
+button.sidebar-header-btn:hover,
+button.sidebar-header-btn:active,
+button.sidebar-header-btn:checked {
+    background: alpha(@window_fg_color, 0.05);
 }
 
 /* ── Pages — a touch more air, cards breathe ─────────────────────── */
@@ -291,7 +307,7 @@ headerbar windowtitle.subtitle {
 
 .card {
     background: @theme_base_color;
-    border: 1px solid alpha(white, 0.08);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 16px;
     padding: 16px 16px;
     box-shadow: 0 8px 24px alpha(black, 0.10);
@@ -357,12 +373,12 @@ headerbar windowtitle.subtitle {
 
 .metric-chip {
     background: linear-gradient(180deg, alpha(@theme_base_color, 0.46), alpha(@theme_base_color, 0.34));
-    border: 1px solid alpha(white, 0.11);
+    border: 1px solid alpha(@window_fg_color, 0.11);
     border-left-width: 4px;
     border-radius: 16px;
     padding: 14px 16px;
     min-width: 148px;
-    box-shadow: 0 10px 28px alpha(black, 0.10), 0 1px 0 alpha(white, 0.07) inset;
+    box-shadow: 0 10px 28px alpha(black, 0.10), 0 1px 0 alpha(@window_fg_color, 0.07) inset;
     /* Micro-interactions: 150 ms per NN/g — fast enough to feel immediate,
        slow enough to be perceivable. Material standard curve. */
     transition: border-color 150ms cubic-bezier(0.2, 0, 0, 1),
@@ -371,10 +387,10 @@ headerbar windowtitle.subtitle {
 }
 
 .metric-chip:hover {
-    border-color: alpha(white, 0.16);
+    border-color: alpha(@window_fg_color, 0.16);
     background: linear-gradient(180deg, alpha(@theme_base_color, 0.52), alpha(@theme_base_color, 0.40));
     transform: translateY(-1px);
-    box-shadow: 0 14px 32px alpha(black, 0.13), 0 1px 0 alpha(white, 0.08) inset;
+    box-shadow: 0 14px 32px alpha(black, 0.13), 0 1px 0 alpha(@window_fg_color, 0.08) inset;
 }
 
 /* Cross-fade metric values so 2-3 s data refreshes don't hard-snap —
@@ -433,7 +449,7 @@ headerbar windowtitle.subtitle {
     min-height: 28px;
     padding: 0 10px;
     border-radius: 8px;
-    border: 1px solid alpha(white, 0.09);
+    border: 1px solid alpha(@window_fg_color, 0.09);
     background: alpha(@theme_base_color, 0.38);
     box-shadow: 0 4px 14px alpha(black, 0.07);
 }
@@ -474,7 +490,7 @@ headerbar windowtitle.subtitle {
     font-weight: 750;
     font-size: 0.88rem;
     letter-spacing: -0.01em;
-    border: 1px solid alpha(white, 0.09);
+    border: 1px solid alpha(@window_fg_color, 0.09);
     background: alpha(@theme_base_color, 0.38);
     box-shadow: 0 4px 14px alpha(black, 0.07);
     transition: background 150ms cubic-bezier(0.2, 0, 0, 1),
@@ -637,7 +653,7 @@ button.destructive-action {
     border-radius: 10px;
     font-weight: 700;
     background: alpha(@theme_base_color, 0.52);
-    border: 1px solid alpha(white, 0.08);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     box-shadow: 0 2px 10px alpha(black, 0.05);
 }
 
@@ -653,7 +669,7 @@ button.destructive-action {
     border-radius: 0;
     box-shadow: none;
     padding-bottom: 6px;
-    border-bottom: 1px solid alpha(white, 0.07);
+    border-bottom: 1px solid alpha(@window_fg_color, 0.07);
     margin-bottom: 8px;
 }
 
@@ -717,12 +733,18 @@ banner {
     border-bottom: 1px solid alpha(@accent_bg_color, 0.18);
 }
 
+/* ── Toasts — failures read differently from confirmations ─────── */
+toast label.toast-error {
+    font-weight: 800;
+    color: #ff97a6;
+}
+
 /* ── Scales — bench sliders (always a bar, never a dot) ────────────── */
 scale trough {
     min-height: 8px;
     border-radius: 99px;
     background: alpha(currentColor, 0.10);
-    border: 1px solid alpha(white, 0.06);
+    border: 1px solid alpha(@window_fg_color, 0.06);
 }
 
 scale highlight {
@@ -843,10 +865,22 @@ scale trough highlight {
    transition in the 100–300 ms window, use ease-out (Material
    cubic-bezier 0.2,0,0,1) on entrance, and honor the platform
    "reduce motion" preference. */
+/* GTK CSS has no ::before/::after pseudo-elements and no !important —
+   a bare * plus the class selectors this file gives transitions is what
+   actually parses and wins specificity. */
 @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        transition-duration: 0.01ms !important;
-        animation-duration: 0.01ms !important;
+    * {
+        transition-duration: 0.01ms;
+        animation-duration: 0.01ms;
+    }
+    .navigation-sidebar row,
+    .sidebar-chevron,
+    .metric-chip,
+    .metric-chip .value,
+    .metric-chip .detail,
+    .pill-btn,
+    .swatch {
+        transition-duration: 0.01ms;
     }
 }
 
