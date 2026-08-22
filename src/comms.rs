@@ -521,4 +521,120 @@ mod tests {
             unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) };
         }
     }
+
+    /// The GUI and daemon evolve independently — every command/response
+    /// variant must survive a wire round-trip byte-for-byte.
+    #[test]
+    fn daemon_commands_round_trip_over_the_wire() {
+        let cmds = [
+            DaemonCommand::GetSensors,
+            DaemonCommand::GetProfile,
+            DaemonCommand::SetProfile("custom".into()),
+            DaemonCommand::GetFanRpm(2),
+            DaemonCommand::SetFanTarget(1, 4400),
+            DaemonCommand::SetFwAttr {
+                name: "ppt_pl1_spl".into(),
+                value: "80".into(),
+            },
+            DaemonCommand::SetChargeLimit(80),
+            DaemonCommand::SetSmt(false),
+            DaemonCommand::SetBoost(true),
+            DaemonCommand::GetThermalStatus,
+            DaemonCommand::SetThermal {
+                enabled: true,
+                max_temp: 92,
+                acknowledge: false,
+            },
+            DaemonCommand::GetCurveOptimizer,
+            DaemonCommand::SetCurveOptimizer {
+                offset: -15,
+                acknowledge: true,
+            },
+            DaemonCommand::ResetCurveOptimizerAcknowledged {
+                acknowledge: true,
+            },
+            DaemonCommand::GetCurveOptimizerPersistence,
+            DaemonCommand::SetCurveOptimizerPersistence {
+                enabled: true,
+                offset: -15,
+                acknowledge: true,
+            },
+            DaemonCommand::GetRecentLogs(100),
+            DaemonCommand::SetLogLevel("debug".into()),
+        ];
+        for cmd in &cmds {
+            let bytes = bincode_opts().serialize(cmd).expect("serialize");
+            let back: DaemonCommand = bincode_opts().deserialize(&bytes).expect("deserialize");
+            assert_eq!(bincode_opts().serialize(&back).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn daemon_responses_round_trip_over_the_wire() {
+        let resps = [
+            DaemonResponse::Ok,
+            DaemonResponse::Error("Parse: byte 2".into()),
+            DaemonResponse::Profile("performance".into()),
+            DaemonResponse::FanRpm(4400),
+            DaemonResponse::FanTarget(0),
+            DaemonResponse::ChargeLimit(80),
+            DaemonResponse::Smt {
+                active: true,
+                control: "on".into(),
+                logical_cpus: 32,
+            },
+            DaemonResponse::ThermalStatus(crate::thermal::ThermalStatus {
+                config: crate::thermal::ThermalConfig {
+                    enabled: true,
+                    max_temp: 92,
+                },
+                active: false,
+                tctl_mc: Some(82_000),
+                tccd2_mc: Some(75_200),
+                cur_max_freq: 5_460_527,
+                restore_temp: 85,
+            }),
+            DaemonResponse::CurveOptimizer(crate::undervolt::CurveOptimizerStatus {
+                available: true,
+                reason: "probe".into(),
+                codename: Some(23),
+                driver_version: Some("0.1.7".into()),
+                firmware_version: Some("4.98.26.0".into()),
+                current: vec![-15; 16],
+                boot_baseline: vec![-4; 16],
+                previous: Some(-4),
+                minimum: -30,
+                maximum: 0,
+                temporary_only: true,
+            }),
+        ];
+        for resp in &resps {
+            let bytes = bincode_opts().serialize(resp).expect("serialize");
+            let back: DaemonResponse = bincode_opts().deserialize(&bytes).expect("deserialize");
+            assert_eq!(bincode_opts().serialize(&back).unwrap(), bytes);
+        }
+    }
+
+    /// Mirrors the live robustness probe. Short/garbage frames CAN decode
+    /// into write commands with degenerate values — the daemon must reject
+    /// those server-side. Pin both halves of that contract:
+    /// - all-FF / plain junk / empty never decode at all;
+    /// - the 2-byte frame [0x02, 0x00] decodes to SetProfile(""), which
+    ///   profile::set refuses before any hardware write.
+    #[test]
+    fn garbage_frames_decode_only_into_degenerate_writes_that_are_rejected() {
+        for raw in [&[0xff_u8; 64][..], &[1, 2, 3, 4, 5, 6, 7, 8][..], &[][..]] {
+            let decoded: Result<DaemonCommand, _> = bincode_opts().deserialize(raw);
+            assert!(decoded.is_err(), "{raw:?} should not decode into a command");
+        }
+        let decoded: DaemonCommand =
+            bincode_opts().deserialize(&[0x02, 0x00]).expect("known degenerate frame");
+        match decoded {
+            DaemonCommand::SetProfile(name) => {
+                assert!(name.is_empty(), "expected the degenerate empty name");
+                assert_eq!(crate::profile::set(&name).unwrap_err(), "empty profile name");
+            }
+            other => panic!("unexpected decode: {}", cmd_label(&other)),
+        }
+    }
 }
