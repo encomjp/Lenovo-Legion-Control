@@ -55,6 +55,16 @@ install -Dm644 data/icons/tray.svg \
 if [ -d /run/systemd/system ]; then
     systemctl enable --now legion-control.service >/dev/null 2>&1 || :
 fi
+# The daemon socket is 0660 root:legion — CLI/GUI need group membership.
+getent group legion >/dev/null 2>&1 || groupadd -r legion >/dev/null 2>&1 || :
+if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ] && id "${SUDO_USER}" >/dev/null 2>&1; then
+    if ! id -nG "${SUDO_USER}" 2>/dev/null | tr ' ' '\n' | grep -qx legion; then
+        usermod -aG legion "${SUDO_USER}" >/dev/null 2>&1 || :
+        echo "legion-control: added ${SUDO_USER} to group 'legion' - log out and back in for CLI/GUI access" >&2
+    fi
+else
+    echo "legion-control: for CLI/GUI daemon access run: sudo usermod -aG legion \$USER  (then re-login)" >&2
+fi
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules || :
     udevadm trigger -s hidraw || :

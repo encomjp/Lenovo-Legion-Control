@@ -212,7 +212,7 @@ install_deps_dnf() {
 install_deps_zypper() {
   local pkgs=(
     gcc gcc-c++ make curl pkgconf
-    gtk4-devel libadwaita-devel
+    gtk4-devel libadwaita-devel systemd-devel
   )
   info "openSUSE packages: ${pkgs[*]}"
   if confirm "Install packages with zypper?"; then
@@ -360,8 +360,10 @@ check_native_deps() {
     esac
   fi
 
+  # Nothing currently links libudev (hidapi uses the linux-native backend);
+  # missing -dev files only matter if that changes, so warn instead of dying.
   pkg-config --exists libudev \
-    || die "libudev development files are required (libudev-dev / systemd-devel / systemd)"
+    || warn "libudev development files not found — fine unless a future build links udev"
   ok "Native libraries: GTK $(pkg-config --modversion gtk4), libadwaita $(pkg-config --modversion libadwaita-1)"
 }
 

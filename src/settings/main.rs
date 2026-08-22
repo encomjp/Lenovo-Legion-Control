@@ -1066,8 +1066,9 @@ fn open_uri(uri: &str) {
 
 fn setup_helper_path() -> Option<&'static str> {
     [
-        "/usr/libexec/legion-control-setup",
-        "/usr/local/libexec/legion-control-setup",
+        "/usr/libexec/legion-control-setup",        // Fedora, Arch, source --prefix /usr
+        "/usr/local/libexec/legion-control-setup",  // source installs (default prefix)
+        "/usr/lib/legion-control-setup",            // Debian-style relocation, just in case
     ]
     .into_iter()
     .find(|path| std::path::Path::new(path).is_file())
