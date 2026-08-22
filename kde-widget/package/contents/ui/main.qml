@@ -21,8 +21,6 @@ PlasmoidItem {
     property string batteryStatus: "--"
     property string chargeLimit: ""
     property string profile: "--"
-    property string kbdBrightness: "--"
-    property string logoOn: "false"
     property bool daemonOnline: false
     property string batWatts: "--"
     property string cliCommand: "bash " + Qt.resolvedUrl("legion-command.sh").toString().replace("file://", "")
@@ -202,7 +200,7 @@ PlasmoidItem {
                 visible: root.showGauges
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: fullRoot.gaugeSize + 22
+                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (sparkline.visible ? 26 : 0)
                     radius: 10
                     clip: true
                     color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
@@ -215,7 +213,27 @@ PlasmoidItem {
                         anchors.bottom: parent.bottom
                         color: root.accentRed
                     }
-                    Gauge { anchors.centerIn: parent; size: fullRoot.gaugeSize; value: parseFloat(root.cpuTemp); label: "CPU"; unit: "°C"; minValue: 20; maxValue: 100 }
+                    Gauge {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.topMargin: 8
+                        size: fullRoot.gaugeSize
+                        value: parseFloat(root.cpuTemp)
+                        label: "CPU"; unit: "°C"; minValue: 20; maxValue: 100
+                    }
+                    Sparkline {
+                        id: sparkline
+                        visible: root.showSparklines && root.tempHistory.length > 3
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.bottomMargin: 6
+                        height: 18
+                        points: root.tempHistory
+                        lineColor: Qt.rgba(root.accentRed.r, root.accentRed.g, root.accentRed.b, 0.75)
+                    }
                 }
                 Rectangle {
                     Layout.fillWidth: true
@@ -233,6 +251,30 @@ PlasmoidItem {
                         color: root.benchSteel
                     }
                     Gauge { anchors.centerIn: parent; size: fullRoot.gaugeSize; value: parseFloat(root.gpuTemp); label: "GPU"; unit: "°C"; minValue: 20; maxValue: 100 }
+                }
+            }
+
+            // ── Service state — controls are dead without the daemon ──
+            Rectangle {
+                visible: !root.daemonOnline
+                Layout.fillWidth: true
+                Layout.leftMargin: fullRoot.pagePadding
+                Layout.rightMargin: fullRoot.pagePadding
+                Layout.preferredHeight: offlineLabel.implicitHeight + 14
+                radius: 8
+                color: Qt.rgba(1, 0.42, 0.10, 0.14)
+                border.width: 1
+                border.color: Qt.rgba(1, 0.42, 0.10, 0.35)
+                Text {
+                    id: offlineLabel
+                    anchors.centerIn: parent
+                    width: parent.width - 16
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    text: "Service offline — fan, profile and charge controls are unavailable"
+                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize - 1
+                    color: Kirigami.Theme.textColor
+                    opacity: 0.9
                 }
             }
 
@@ -284,17 +326,46 @@ PlasmoidItem {
                     QuickControl {
                         Layout.fillWidth: true
                         iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "CPU Fan"; valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
-                        onClicked: { root._lastWriteTime = Date.now(); var pr=[0,3000,3500,4000,4500]; var c=parseInt(root.fanCpu)||0; var i=pr.indexOf(c); if(i<0)i=0; executable.exec(root.cliCommand+" set-fan 1 "+pr[(i+1)%pr.length]); refreshTimer.restart() }
+                        onClicked: {
+                            var pr=[0,3000,3500,4000,4500]
+                            var c=parseInt(root.fanCpu)||0
+                            var i=pr.indexOf(c); if(i<0)i=0
+                            var next=pr[(i+1)%pr.length]
+                            // Optimistic: show the new value NOW; the write
+                            // guard keeps the next poll from staling it.
+                            root.fanCpu=String(next)
+                            root._lastWriteTime=Date.now()
+                            executable.exec(root.cliCommand+" set-fan 1 "+next)
+                            refreshTimer.restart()
+                        }
                     }
                     QuickControl {
                         Layout.fillWidth: true
                         iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "GPU Fan"; valueText: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
-                        onClicked: { root._lastWriteTime = Date.now(); var pr=[0,3000,3500,4000,4500]; var c=parseInt(root.fanGpu)||0; var i=pr.indexOf(c); if(i<0)i=0; executable.exec(root.cliCommand+" set-fan 2 "+pr[(i+1)%pr.length]); refreshTimer.restart() }
+                        onClicked: {
+                            var pr=[0,3000,3500,4000,4500]
+                            var c=parseInt(root.fanGpu)||0
+                            var i=pr.indexOf(c); if(i<0)i=0
+                            var next=pr[(i+1)%pr.length]
+                            root.fanGpu=String(next)
+                            root._lastWriteTime=Date.now()
+                            executable.exec(root.cliCommand+" set-fan 2 "+next)
+                            refreshTimer.restart()
+                        }
                     }
                     QuickControl {
                         Layout.fillWidth: true
                         iconSource: Qt.resolvedUrl("icons/charge-limit.svg"); label: "Charge Limit"; valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit+"%"; valueColor: root.chargeLimit!==""?Kirigami.Theme.textColor:Kirigami.Theme.disabledTextColor
-                        onClicked: { root._lastWriteTime = Date.now(); var L=[100,80,60]; var c=parseInt(root.chargeLimit)||100; var i=L.indexOf(c); if(i<0)i=0; executable.exec(root.cliCommand+" charge-limit "+L[(i+1)%L.length]); refreshTimer.restart() }
+                        onClicked: {
+                            var L=[100,80,60]
+                            var c=parseInt(root.chargeLimit)||100
+                            var i=L.indexOf(c); if(i<0)i=0
+                            var next=L[(i+1)%L.length]
+                            root.chargeLimit=next===100?"":String(next)
+                            root._lastWriteTime=Date.now()
+                            executable.exec(root.cliCommand+" charge-limit "+next)
+                            refreshTimer.restart()
+                        }
                     }
                 }
             }
@@ -361,7 +432,7 @@ PlasmoidItem {
         onNewData: function(sourceName, data){
             var stdout=data["stdout"]; if(!stdout||stdout.trim()===""){root.daemonOnline=false;return}
             var lines=stdout.split("\n"); var pollSucceeded=false
-            for(var i=0;i<lines.length;i++){var line=lines[i].trim(); if(!line)continue; var eq=line.indexOf("="); if(eq<1)continue; var key=line.substring(0,eq); var val=line.substring(eq+1).trim(); if(!val)continue; var writeGuard=(Date.now()-root._lastWriteTime)<2500; switch(key){case "LEGION_OK":pollSucceeded=val==="1";break;case "LEGION_DAEMON_OFFLINE":case "LEGION_CLI_NOT_FOUND":pollSucceeded=false;break;case "CPU_TEMP":if(!writeGuard)cpuTemp=val;break;case "CPU_POWER":cpuPower=val;break;case "DGPU_TEMP":if(!writeGuard)gpuTemp=val;break;case "DGPU_POWER":gpuPower=val;break;case "FAN_CPU":if(!writeGuard)fanCpu=val;break;case "FAN_GPU":if(!writeGuard)fanGpu=val;break;case "FAN_AUX":if(!writeGuard)fanAux=val;break;case "BATTERY":batteryPct=val;break;case "BAT_STATUS":batteryStatus=val;break;case "CHARGE_LIMIT":chargeLimit=val==="100"?"":val;break;case "BAT_POWER":batWatts=val;break;case "PROFILE":if(!writeGuard)profile=val;break;case "KBD_BRIGHTNESS":if(!writeGuard)kbdBrightness=val;break;case "LOGO":if(!writeGuard)logoOn=val==="on"?"true":"false";break}}
+            for(var i=0;i<lines.length;i++){var line=lines[i].trim(); if(!line)continue; var eq=line.indexOf("="); if(eq<1)continue; var key=line.substring(0,eq); var val=line.substring(eq+1).trim(); if(!val)continue; var writeGuard=(Date.now()-root._lastWriteTime)<2500; switch(key){case "LEGION_OK":pollSucceeded=val==="1";break;case "LEGION_DAEMON_OFFLINE":case "LEGION_CLI_NOT_FOUND":pollSucceeded=false;break;case "CPU_TEMP":if(!writeGuard)cpuTemp=val;break;case "CPU_POWER":cpuPower=val;break;case "DGPU_TEMP":if(!writeGuard)gpuTemp=val;break;case "DGPU_POWER":gpuPower=val;break;case "FAN_CPU":if(!writeGuard)fanCpu=val;break;case "FAN_GPU":if(!writeGuard)fanGpu=val;break;case "FAN_AUX":if(!writeGuard)fanAux=val;break;case "BATTERY":batteryPct=val;break;case "BAT_STATUS":batteryStatus=val;break;case "CHARGE_LIMIT":chargeLimit=val==="100"?"":val;break;case "BAT_POWER":batWatts=val;break;case "PROFILE":if(!writeGuard)profile=val;break;}}
             root.daemonOnline=pollSucceeded
             if(cpuTemp!=="--"){var h=root.tempHistory.slice(); h.push(parseFloat(cpuTemp)); if(h.length>30)h.shift(); root.tempHistory=h}
         }
@@ -370,5 +441,13 @@ PlasmoidItem {
         id: infoSource; engine: "executable"; connectedSources: ["bash "+Qt.resolvedUrl("legion-info.sh").toString().replace("file://","")]
         onNewData: function(sourceName, data){var stdout=data["stdout"]; if(!stdout)return; var lines=stdout.split("\n"); for(var i=0;i<lines.length;i++){var line=lines[i].trim(); var eq=line.indexOf("="); if(eq<1)continue; var key=line.substring(0,eq); var val=line.substring(eq+1).trim(); switch(key){case "CPU_NAME":cpuName=val;break;case "GPU_NAME":gpuName=val;break}} disconnectSource(sourceName)}
     }
-    Timer { id: refreshTimer; interval: 800; onTriggered: sensorSource.connectSource(sensorSource.sensorCmd) }
+    function refreshNow() {
+        // disconnect+connect makes the interval source run immediately
+        // instead of waiting out the current interval — plain
+        // connectSource on an already-connected source is a no-op.
+        sensorSource.disconnectSource(sensorSource.sensorCmd)
+        sensorSource.connectSource(sensorSource.sensorCmd)
+    }
+    // Small delay after a write so the daemon reflects it before we re-read.
+    Timer { id: refreshTimer; interval: 400; onTriggered: root.refreshNow() }
 }
