@@ -3306,16 +3306,15 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp Tctl/Tccd2).",
     );
 
-    let enabled = adw::SwitchRow::builder()
-        .title("Thermal throttle")
-        .subtitle("Off · no frequency clamp")
-        .active(false)
-        .build();
+    // Bare switch in the group header — the slider below explains itself,
+    // no duplicated title/subtitle row.
+    let enabled = gtk::Switch::new();
+    enabled.set_valign(Align::Center);
     tip(
         &enabled,
         "On = daemon steps scaling_max_freq when temp ≥ max; Off = no clamp",
     );
-    group.add(&enabled);
+    group.set_header_suffix(Some(&enabled));
 
     let value = gtk::Label::new(Some("90 °C"));
     value.add_css_class("numeric");
@@ -3427,16 +3426,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let acked: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
 
-    let fmt_throttle_sub = |on: bool, max: u8| -> String {
-        if on {
-            format!(
-                "On · cap at {max} °C · restores at {} °C",
-                max.saturating_sub(7)
-            )
-        } else {
-            "Off · no frequency clamp".into()
-        }
-    };
 
     // Immediate daemon write (no hysteresis UI, no inline ack).
     let do_apply = {
@@ -3469,8 +3458,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     Ok(DaemonResponse::ThermalStatus(st)) => {
                         suppress_cc.set(true);
                         enabled_cc.set_active(st.config.enabled);
-                        enabled_cc
-                            .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                         scale_cc.set_value(st.config.max_temp as f64);
                         value_cc.set_text(&format!("{} °C", st.config.max_temp));
                         apply_mute_cc(st.config.enabled);
@@ -3524,7 +3511,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                 // Live label + subtitle — always reflect slider immediately
                 value_cc.set_text(&format!("{max_temp} °C"));
                 suppress_cc.set(true);
-                enabled_cc.set_subtitle(&fmt_throttle_sub(enabled_val, max_temp));
                 suppress_cc.set(false);
                 if max_temp >= 96 && !acked_cc.get() {
                     let scale_for_dialog = scale_cc.clone();
@@ -3541,8 +3527,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                                 suppress_for_dialog.set(true);
                                 scale_for_dialog.set_value(last as f64);
                                 value_cc.set_text(&format!("{last} °C"));
-                                let en = enabled_cc.is_active();
-                                enabled_cc.set_subtitle(&fmt_throttle_sub(en, last));
                                 suppress_for_dialog.set(false);
                                 return;
                             }
@@ -3585,8 +3569,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             match result {
                 Ok(DaemonResponse::ThermalStatus(st)) => {
                     enabled_c.set_active(st.config.enabled);
-                    enabled_c
-                        .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                     scale_c.set_value(st.config.max_temp as f64);
                     value_c.set_text(&format!("{} °C", st.config.max_temp));
                     last_max_c.set(st.config.max_temp);
@@ -3653,7 +3635,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             }
             let on = row.is_active();
             let max_temp = scale_c.value().round().clamp(70.0, 98.0) as u8;
-            row.set_subtitle(&fmt_throttle_sub(on, max_temp));
             (*apply_mute_c)(on);
             if max_temp >= 96 && !acked_c.get() {
                 let row_c = row.clone();
@@ -3670,7 +3651,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         if !ok {
                             suppress_c2.set(true);
                             row_c.set_active(!on);
-                            row_c.set_subtitle(&fmt_throttle_sub(!on, max_temp));
                             (*apply_mute_ok)(false);
                             suppress_c2.set(false);
                             return;
@@ -3682,7 +3662,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                 );
                 suppress_c.set(true);
                 row.set_active(!on);
-                row.set_subtitle(&fmt_throttle_sub(!on, max_temp));
                 suppress_c.set(false);
                 return;
             }
@@ -3779,8 +3758,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     {
                         suppress_c.set(true);
                         enabled_c.set_active(st.config.enabled);
-                        enabled_c
-                            .set_subtitle(&fmt_throttle_sub(st.config.enabled, st.config.max_temp));
                         scale_c.set_value(st.config.max_temp as f64);
                         value_c.set_text(&format!("{} °C", st.config.max_temp));
                             apply_mute_c(st.config.enabled);
