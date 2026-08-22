@@ -34,3 +34,4 @@ __pycache__/
 
 # Nested repo (lenovo-legion-tool has its own git repo + remote)
 lenovo-legion-tool/
+.zcode/
