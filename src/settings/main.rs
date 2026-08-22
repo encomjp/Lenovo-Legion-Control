@@ -3303,7 +3303,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
-        "Governor clamps scaling_max_freq when hot (5.46→4.60 GHz in 200 MHz/s, 1 s poll), restores 7 °C below. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp Tctl/Tccd2).",
+        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp Tctl/Tccd2).",
     );
 
     let enabled = adw::SwitchRow::builder()

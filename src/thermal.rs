@@ -6,7 +6,15 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_FULL: u32 = 5_460_527;
 pub const MIN: u32 = 4_600_000;
-pub const STEP: u32 = 200_000;
+/// Recovery ramp — gentle so restored headroom never jolts a running game.
+pub const STEP_UP: u32 = 100_000;
+/// Clamp steps scale with how far we are over the limit (see [down_step]).
+pub const STEP_GENTLE: u32 = 100_000;
+pub const STEP_MODERATE: u32 = 200_000;
+pub const STEP_URGENT: u32 = 300_000;
+/// A raw reading this far above the limit bypasses smoothing: real heat
+/// still clamps fast.
+pub const URGENT_OVERSHOOT_MC: i32 = 4_000;
 pub const HYSTERESIS: i32 = 7;
 pub const INTERVAL: Duration = Duration::from_secs(1);
 
@@ -45,6 +53,50 @@ pub fn validate(max_temp: u8, acknowledge: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Down-step size by overshoot: ≤2 °C → 100 MHz, 2–4 °C → 200 MHz,
+/// ≥4 °C → 300 MHz. Mild crossings get gentle steps (no gameplay jolt);
+/// serious heat gets clamped quickly.
+pub fn down_step(overshoot_mc: i32) -> u32 {
+    if overshoot_mc >= URGENT_OVERSHOOT_MC {
+        STEP_URGENT
+    } else if overshoot_mc >= 2_000 {
+        STEP_MODERATE
+    } else {
+        STEP_GENTLE
+    }
+}
+
+/// Exponential moving average over the 1 s governor samples (α = ½).
+/// Halves single-sample sensor spikes so one k10temp blip cannot yank the
+/// frequency ceiling; sustained heat converges within ~2 samples.
+#[derive(Debug, Clone, Default)]
+pub struct TempFilter {
+    smoothed: Option<i32>,
+}
+
+impl TempFilter {
+    /// Feed one raw sample, get the smoothed value.
+    pub fn update(&mut self, temp_mc: i32) -> i32 {
+        let next = match self.smoothed {
+            None => temp_mc,
+            Some(prev) => (prev + temp_mc) / 2,
+        };
+        self.smoothed = Some(next);
+        next
+    }
+
+    /// Effective temperature for a governor decision: urgent overshoot
+    /// bypasses (and re-seeds) the filter so protection stays fast.
+    pub fn effective(&mut self, raw_mc: i32, limit_mc: i32) -> i32 {
+        if raw_mc >= limit_mc + URGENT_OVERSHOOT_MC {
+            self.smoothed = Some(raw_mc);
+            raw_mc
+        } else {
+            self.update(raw_mc)
+        }
+    }
+}
+
 pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option<u32> {
     if !cfg.enabled {
         return None;
@@ -52,9 +104,13 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
     let max_mc = cfg.max_temp as i32 * 1000;
     let restore_mc = (cfg.max_temp as i32 - HYSTERESIS) * 1000;
     if temp_mc >= max_mc && cur_max > MIN {
-        Some(cur_max.saturating_sub(STEP).max(MIN))
+        Some(
+            cur_max
+                .saturating_sub(down_step(temp_mc - max_mc))
+                .max(MIN),
+        )
     } else if temp_mc <= restore_mc && cur_max < MAX_FULL {
-        Some(cur_max.saturating_add(STEP).min(MAX_FULL))
+        Some(cur_max.saturating_add(STEP_UP).min(MAX_FULL))
     } else {
         None
     }
@@ -130,13 +186,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compute_target_throttles_at_max() {
+    fn compute_target_throttles_gently_at_max() {
         let cfg = ThermalConfig {
             enabled: true,
             max_temp: 90,
         };
-        // temp ≥ 90°C (90000 mC), cur > MIN → step down
-        assert_eq!(compute_target(5_460_527, 90_000, &cfg), Some(5_260_527));
+        // Barely over (0°C overshoot) → gentle 100 MHz step, no jolt
+        assert_eq!(compute_target(5_460_527, 90_000, &cfg), Some(5_360_527));
+    }
+
+    #[test]
+    fn compute_target_throttles_proportionally() {
+        let cfg = ThermalConfig {
+            enabled: true,
+            max_temp: 90,
+        };
+        // 2.5°C over → 200 MHz step
+        assert_eq!(compute_target(5_460_527, 92_500, &cfg), Some(5_260_527));
+        // 4.5°C over → urgent 300 MHz step
+        assert_eq!(compute_target(5_460_527, 94_500, &cfg), Some(5_160_527));
     }
 
     #[test]
@@ -155,8 +223,8 @@ mod tests {
             enabled: true,
             max_temp: 90,
         };
-        // ≤83°C (90000-7000) and cur < MAX_FULL → step up
-        assert_eq!(compute_target(4_600_000, 83_000, &cfg), Some(4_800_000));
+        // ≤83°C (90000-7000) and cur < MAX_FULL → gentle 100 MHz ramp up
+        assert_eq!(compute_target(4_600_000, 83_000, &cfg), Some(4_700_000));
     }
 
     #[test]
@@ -231,7 +299,7 @@ mod tests {
         // 83_001 is just above restore (83_000) → hold
         assert_eq!(compute_target(4_800_000, 83_001, &cfg), None);
         // exactly at restore → step up
-        assert_eq!(compute_target(4_800_000, 83_000, &cfg), Some(5_000_000));
+        assert_eq!(compute_target(4_800_000, 83_000, &cfg), Some(4_900_000));
     }
 
     #[test]
@@ -245,5 +313,45 @@ mod tests {
     fn validate_accepts_95_without_ack() {
         // 95 is TjMax itself, should not require acknowledge
         assert!(validate(95, false).is_ok());
+    }
+
+    #[test]
+    fn down_step_tiers_by_overshoot() {
+        assert_eq!(down_step(0), STEP_GENTLE);
+        assert_eq!(down_step(1_999), STEP_GENTLE);
+        assert_eq!(down_step(2_000), STEP_MODERATE);
+        assert_eq!(down_step(3_999), STEP_MODERATE);
+        assert_eq!(down_step(4_000), STEP_URGENT);
+        assert_eq!(down_step(12_000), STEP_URGENT);
+    }
+
+    #[test]
+    fn temp_filter_seeds_then_averages() {
+        let mut f = TempFilter::default();
+        assert_eq!(f.update(80_000), 80_000); // seeds with the first sample
+        assert_eq!(f.update(84_000), 82_000); // (80+84)/2
+        assert_eq!(f.update(84_000), 83_000); // converges
+    }
+
+    #[test]
+    fn temp_filter_halves_single_sample_spikes() {
+        let mut f = TempFilter::default();
+        let limit = 90_000;
+        // Steady at 88, one 92 blip: smoothed stays below the limit → no clamp
+        assert_eq!(f.effective(88_000, limit), 88_000);
+        assert_eq!(f.effective(92_000, limit), 90_000);
+        // A real crossing needs to persist: 92 again → smoothed 91 → clamps
+        assert_eq!(f.effective(92_000, limit), 91_000);
+    }
+
+    #[test]
+    fn temp_filter_urgent_overshoot_bypasses_smoothing() {
+        let mut f = TempFilter::default();
+        let limit = 90_000;
+        assert_eq!(f.effective(80_000, limit), 80_000);
+        // 95 = limit+5°C: urgent, returns raw immediately and re-seeds
+        assert_eq!(f.effective(95_000, limit), 95_000);
+        // Filter state followed the raw value, not the average
+        assert_eq!(f.update(95_000), 95_000);
     }
 }

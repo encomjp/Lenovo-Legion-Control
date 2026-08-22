@@ -453,6 +453,8 @@ fn thermal_governor(
     notify: Arc<(Mutex<bool>, Condvar)>,
 ) {
     let mut warned_missing = false;
+    // Sensor-spike smoothing carried across ticks (α=½ EMA, urgent bypass).
+    let mut temp_filter = thermal::TempFilter::default();
     while !shutdown.load(Ordering::Relaxed) {
         let (tctl, tccd2) = thermal::read_thermal_temps();
         let cur_max_opt = thermal::read_cur_max();
@@ -530,11 +532,14 @@ fn thermal_governor(
         };
 
         let cfg_snapshot = cfg.read().unwrap_or_else(|p| p.into_inner()).clone();
-        if let Some(target) = thermal::compute_target(cur, temp_mc, &cfg_snapshot) {
+        let limit_mc = cfg_snapshot.max_temp as i32 * 1000;
+        let smooth_mc = temp_filter.effective(temp_mc, limit_mc);
+        if let Some(target) = thermal::compute_target(cur, smooth_mc, &cfg_snapshot) {
             match thermal::write_all_cpus(target) {
                 Ok(()) => {
                     log::info!(
-                        "thermal governor: {}°C (max {}°C, restore {}°C) cur {} → {} kHz",
+                        "thermal governor: {}°C smoothed (raw {}°C, max {}°C, restore {}°C) cur {} → {} kHz",
+                        smooth_mc as f64 / 1000.0,
                         temp_mc as f64 / 1000.0,
                         cfg_snapshot.max_temp,
                         cfg_snapshot
@@ -550,7 +555,8 @@ fn thermal_governor(
             }
         } else {
             log::trace!(
-                "thermal governor: hold temp {:.1}°C cur {} kHz (max {}°C)",
+                "thermal governor: hold temp {:.1}°C (raw {:.1}°C) cur {} kHz (max {}°C)",
+                smooth_mc as f64 / 1000.0,
                 temp_mc as f64 / 1000.0,
                 cur,
                 cfg_snapshot.max_temp
