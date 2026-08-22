@@ -118,6 +118,16 @@ fn toast_with_button(
     overlay.add_toast(t);
 }
 
+/// Quiet row-suffix button for opening external links.
+fn flat_open_button(tooltip: &str) -> gtk::Button {
+    let btn = gtk::Button::with_label("Open");
+    btn.add_css_class("flat");
+    btn.add_css_class("open-btn");
+    btn.set_valign(Align::Center);
+    tip(&btn, tooltip);
+    btn
+}
+
 /// Single source of truth for top-level page ids → header titles. nav_to callers,
 /// the LEGION_PAGE override, and the visible-child sync all read this so the
 /// maps can never disagree.
@@ -1703,18 +1713,22 @@ fn update_curve_optimizer_ui(
         .copied()
         .filter(|v| status.boot_baseline.iter().all(|x| x == v));
     let prev = status.previous.filter(|p| Some(*p) != current_val);
-    // Subtitle: Current X · reset Y · previous Z (so you see old values you saved)
+    // Keep this unambiguous: the applied offset is live (the slider mirrors
+    // it); baseline/history are only context. Never print the same number
+    // twice — "reset -4 · previous -4" reads like the value reverted.
     let mut subtitle = format!(
-        "Current {}",
+        "Applied {}",
         offsets_text(&status.current).replace("All cores: ", "")
     );
     if let Some(b) = baseline_val {
         if Some(b) != current_val {
-            subtitle.push_str(&format!(" · reset {b}"));
+            subtitle.push_str(&format!(" · Reset goes back to {b}"));
         }
     }
     if let Some(p) = prev {
-        subtitle.push_str(&format!(" · previous {p}"));
+        if Some(p) != baseline_val {
+            subtitle.push_str(&format!(" · was {p} before"));
+        }
     }
     ui.status_row.set_subtitle(&subtitle);
     ui.offset_scale
@@ -1900,12 +1914,14 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
         .valign(Align::Center)
         .sensitive(false)
         .build();
+    reset_button.add_css_class("pill-btn");
     let apply_button = gtk::Button::builder()
         .label("Apply")
         .valign(Align::Center)
         .sensitive(false)
         .build();
     apply_button.add_css_class("destructive-action");
+    apply_button.add_css_class("pill-btn");
     actions_row.add_suffix(&reset_button);
     actions_row.add_suffix(&apply_button);
     group.add(&actions_row);
@@ -2095,31 +2111,78 @@ fn build_cpu_power_page(
     go_home: &Rc<dyn Fn(&'static str, &'static str)>,
 ) -> gtk::Box {
     let page = page_lede("");
-    let note = pref_group("Custom watts", None);
+    let mode = legion_core::profile::current();
+
+    // Guidance row — live wording, one clear way out.
+    let guide = pref_group("Power limits", None);
     tip(
-        &note,
-        "Power limits (CPU PPT / GPU) live on Home when Mode is Custom — this tab is a pointer so you do not hunt for them",
+        &guide,
+        "CPU PPT and GPU power sliders are edited on Home — they unlock when Power mode is Custom",
     );
-    let tip_row = adw::ActionRow::builder()
-        .title("Edit on Home")
-        .subtitle("Custom mode unlocks the sliders")
+    let lock_row = adw::ActionRow::builder()
+        .title(if mode == "custom" {
+            "Custom mode is active"
+        } else {
+            "Locked outside Custom mode"
+        })
+        .subtitle(if mode == "custom" {
+            "Adjust the watts below on Home → Power mode"
+        } else {
+            "Set Power mode on Home to Custom to unlock these sliders"
+        })
         .activatable(false)
         .build();
     tip(
-        &tip_row,
-        "Choose Custom in Home → Power mode to unlock CPU PPT and GPU power sliders. Other modes use firmware defaults.",
+        &lock_row,
+        "Firmware PPT/attribute writes are only accepted while the EC is in Custom mode — other modes use firmware defaults",
     );
     let go_home = go_home.clone();
     let go_home_btn = primary_button_tip(
-        "Open Power on Home",
-        Some("Power limits live on Home — switch Mode to Custom to edit CPU PPT and GPU watts"),
+        "Edit on Home",
+        Some("Opens Home with the Power mode picker and the Custom-watt sliders"),
     );
     go_home_btn.connect_clicked(move |_| {
         go_home("overview", "Home");
     });
-    tip_row.add_suffix(&go_home_btn);
-    note.add(&tip_row);
-    page.append(&note);
+    lock_row.add_suffix(&go_home_btn);
+    guide.add(&lock_row);
+    page.append(&guide);
+
+    // Live preview of the same sliders Home shows — greyed out here. Values
+    // mirror the firmware read so the page informs instead of pointing.
+    let preview = pref_group("Custom watts", None);
+    tip(
+        &preview,
+        "Read-only mirror of the Custom-mode limits — edit them on Home",
+    );
+    for lim in legion_core::profile::all_ppt_limits() {
+        let row = adw::ActionRow::builder()
+            .title(lim.label)
+            .activatable(false)
+            .build();
+        tip(&row, &format!("{} · {}–{} W", lim.label, lim.min, lim.max));
+        let val = gtk::Label::new(Some(&format!("{} W", lim.current)));
+        val.add_css_class("dim-label");
+        val.add_css_class("numeric");
+        row.add_suffix(&val);
+        let adj = gtk::Adjustment::new(
+            lim.current as f64,
+            lim.min as f64,
+            lim.max as f64,
+            1.0,
+            5.0,
+            0.0,
+        );
+        let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adj));
+        scale.set_draw_value(false);
+        scale.set_hexpand(true);
+        scale.set_width_request(160);
+        tip(&scale, &format!("{} · {}–{} W", lim.label, lim.min, lim.max));
+        row.add_suffix(&scale);
+        preview.add(&row);
+    }
+    preview.set_sensitive(false);
+    page.append(&preview);
     page
 }
 
@@ -2353,48 +2416,54 @@ fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
         .build();
     group.add(&status);
 
+    // One button, two roles — Start test ↔ Stop. A separate Stop button left
+    // an odd half-empty actions row.
     let actions = adw::ActionRow::new();
-    let stop_button = gtk::Button::with_label("Stop");
-    stop_button.add_css_class("destructive-action");
-    stop_button.set_visible(false);
-    let start_button = gtk::Button::with_label("Start test");
-    start_button.add_css_class("suggested-action");
-    actions.add_suffix(&stop_button);
-    actions.add_suffix(&start_button);
+    let run_button = gtk::Button::with_label("Start test");
+    run_button.add_css_class("suggested-action");
+    run_button.add_css_class("pill-btn");
+    actions.add_suffix(&run_button);
     group.add(&actions);
     page.append(&group);
 
     let active_stop: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
-    let stop_slot = active_stop.clone();
-    stop_button.connect_clicked(move |_| {
-        if let Some(stop) = stop_slot.borrow().as_ref() {
-            stop.store(true, Ordering::Relaxed);
-        }
-    });
+    let running = {
+        let run_button = run_button.clone();
+        let status = status.clone();
+        Rc::new(move |on: bool| {
+            if on {
+                run_button.set_label("Stop");
+                run_button.remove_css_class("suggested-action");
+                run_button.add_css_class("destructive-action");
+                status.set_title("Testing…");
+                status.set_subtitle("5:00 remaining");
+            } else {
+                run_button.set_label("Start test");
+                run_button.remove_css_class("destructive-action");
+                run_button.add_css_class("suggested-action");
+            }
+        })
+    };
 
     let stop_slot = active_stop.clone();
-    let status_start = status.clone();
-    let start_start = start_button.clone();
-    let stop_start = stop_button.clone();
+    let running_start = running.clone();
     let overlay = toast_overlay.clone();
-    start_button.connect_clicked(move |_| {
-        if stop_slot.borrow().is_some() {
+    run_button.connect_clicked(move |_| {
+        // While a test runs the same button requests the stop.
+        if let Some(stop) = stop_slot.borrow().as_ref() {
+            stop.store(true, Ordering::Relaxed);
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
         *stop_slot.borrow_mut() = Some(stop.clone());
-        start_start.set_sensitive(false);
-        stop_start.set_visible(true);
-        status_start.set_title("Testing…");
-        status_start.set_subtitle("5:00 remaining");
+        running_start(true);
 
         let (tx, rx) = mpsc::channel();
         spawn_stability_test(stop, tx);
 
         let stop_slot = stop_slot.clone();
-        let status = status_start.clone();
-        let start = start_start.clone();
-        let stop_button = stop_start.clone();
+        let status = status.clone();
+        let running = running_start.clone();
         let overlay = overlay.clone();
         glib::timeout_add_local(Duration::from_millis(250), move || {
             while let Ok(event) = rx.try_recv() {
@@ -2408,8 +2477,7 @@ fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
                     }
                     StabilityEvent::Finished { cancelled, errors } => {
                         *stop_slot.borrow_mut() = None;
-                        start.set_sensitive(true);
-                        stop_button.set_visible(false);
+                        running(false);
                         if cancelled {
                             status.set_title("Stopped");
                             status.set_subtitle("No result");
@@ -3228,9 +3296,9 @@ degrade the CPU or reduce its lifespan.
 Only continue if you accept this risk.";
 
 fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
-    // Design: chips on top inside the card (no separate glass page leak) — Garage Lab glass correct.
-    let card = gtk::Box::new(Orientation::Vertical, 0);
-    card.add_css_class("card");
+    // Same visual grammar as the sections below (Curve Optimizer etc.):
+    // chips row directly on the page, then a plain boxed-list group — no
+    // extra .card wrapper that made this section wider than its neighbours.
     let page = gtk::Box::new(Orientation::Vertical, 18);
     let group = pref_group("Thermal throttle", None);
     tip(
@@ -3323,7 +3391,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         })
     };
 
-    // Chips inside the card — not floating on a transparent page (fixes glass bleed in ss1).
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
@@ -3333,7 +3400,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .row_spacing(12)
         .build();
     chips.add_css_class("metric-grid");
-    chips.set_margin_bottom(4);
     let (tctl_chip, tctl_v, tctl_d) =
         metric_chip_tip("Tctl", Some("k10temp Tctl — main package temp"));
     let (tccd2_chip, tccd2_v, tccd2_d) =
@@ -3345,9 +3411,9 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     chips.append(&tctl_chip);
     chips.append(&tccd2_chip);
     chips.append(&freq_chip);
-    card.append(&chips);
-    card.append(&group);
-    page.append(&card);
+    chips.set_margin_bottom(0);
+    page.append(&chips);
+    page.append(&group);
     gate.track(&group);
     gate.track(&chips);
 
@@ -3946,10 +4012,10 @@ fn build_battery_pages(
 ) -> gtk::Box {
     let status_page = page_lede("");
 
-    // Chips on top — like Overview / Thermal: Capacity · Voltage · Power · Health
+    // Chips on top — 3×2: Capacity · Voltage · Power · Health · Cycles · Limit
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
-        .max_children_per_line(4)
+        .max_children_per_line(3)
         .min_children_per_line(2)
         .homogeneous(true)
         .column_spacing(12)
@@ -3977,10 +4043,22 @@ fn build_battery_pages(
         &health_chip,
         "Wear vs design capacity — 100% is a fresh pack",
     );
+    let (cycles_chip, cycles_v, cycles_d) = metric_chip_tip("Cycles", None);
+    tip(
+        &cycles_chip,
+        "Charge cycle count from the battery gauge — grows with use",
+    );
+    let (limit_chip, limit_v, limit_d) = metric_chip_tip("Limit", None);
+    tip(
+        &limit_chip,
+        "Charge cap (60/80/100%) — set it in the rows below",
+    );
     chips.append(&cap_chip);
     chips.append(&volt_chip);
     chips.append(&power_chip);
     chips.append(&health_chip);
+    chips.append(&cycles_chip);
+    chips.append(&limit_chip);
     status_page.append(&chips);
 
     let hero = pref_group("Battery", None);
@@ -4144,6 +4222,12 @@ fn build_battery_pages(
             health_v.set_text(&format!("{h:.0}%"));
             health_d.set_text(if h < 80.0 { "worn" } else { "good" });
         }
+        if let Some(c) = legion_core::battery::cycles() {
+            cycles_v.set_text(&format!("{c}"));
+            cycles_d.set_text("charge cycles");
+        }
+        limit_v.set_text(&format!("{}%", legion_core::battery::charge_limit_pct()));
+        limit_d.set_text("charge cap");
     }
     // Keep chips + rows in sync every 3 s
     let cap_v_c = cap_v.clone();
@@ -4158,6 +4242,10 @@ fn build_battery_pages(
     let volt_chip_c = volt_chip.clone();
     let power_chip_c = power_chip.clone();
     let health_chip_c = health_chip.clone();
+    let cycles_v_c = cycles_v.clone();
+    let cycles_d_c = cycles_d.clone();
+    let limit_v_c = limit_v.clone();
+    let limit_d_c = limit_d.clone();
     // All sysfs reads happen on a worker thread; only widget updates run on
     // the GTK loop (same pattern as the Overview poller).
     #[derive(Default)]
@@ -4170,6 +4258,7 @@ fn build_battery_pages(
         energy_full: Option<f64>,
         health: Option<f64>,
         cycles: Option<u32>,
+        limit: u32,
         mfr: String,
         model: String,
         tech: String,
@@ -4185,6 +4274,7 @@ fn build_battery_pages(
             energy_full: legion_core::battery::energy_full_wh(),
             health: legion_core::battery::health_pct(),
             cycles: legion_core::battery::cycles(),
+            limit: legion_core::battery::charge_limit_pct(),
             mfr: legion_core::battery::manufacturer().unwrap_or_default(),
             model: legion_core::battery::model_name().unwrap_or_default(),
             tech: legion_core::battery::technology().unwrap_or_default(),
@@ -4262,7 +4352,14 @@ fn build_battery_pages(
             }
             if let Some(c) = s.cycles {
                 cycles_l.set_subtitle(&format!("{c}"));
+                cycles_v_c.set_text(&format!("{c}"));
+                cycles_d_c.set_text("charge cycles");
+            } else {
+                cycles_v_c.set_text("—");
+                cycles_d_c.set_text("no sensor");
             }
+            limit_v_c.set_text(&format!("{}%", s.limit));
+            limit_d_c.set_text("charge cap");
             cell_l.set_subtitle(format!("{} {} · {}", s.mfr, s.model, s.tech).trim());
             glib::ControlFlow::Continue
         }
@@ -4975,33 +5072,29 @@ fn build_about_pages(
     setup_page.append(&build_kde_widget_section(toast_overlay));
 
     let help = pref_group("Help", None);
-    let report_btn = primary_button_tip(
-        "Report an issue",
-        Some("Opens GitHub — report bugs or request features"),
-    );
-    report_btn.connect_clicked(|_| {
-        open_uri("https://github.com/encomjp/");
-    });
     let report_row = adw::ActionRow::builder()
         .title("Report an issue")
         .subtitle("GitHub — bugs and feature requests")
-        .activatable(false)
+        .activatable(true)
         .build();
     tip(
         &report_row,
         "Opens https://github.com/encomjp/ — report bugs or request features",
     );
-    report_row.add_suffix(&report_btn);
+    report_row.connect_activated(|_| {
+        open_uri("https://github.com/encomjp/");
+    });
+    let report_open = flat_open_button("Opens GitHub in your browser");
+    report_open.connect_clicked(|_| {
+        open_uri("https://github.com/encomjp/");
+    });
+    report_row.add_suffix(&report_open);
     help.add(&report_row);
 
-    let donate_btn = primary_button_tip("Donate", Some("Support development via PayPal"));
-    donate_btn.connect_clicked(|_| {
-        open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A");
-    });
     let donate_row = adw::ActionRow::builder()
         .title("Donate")
-        .subtitle("PayPal — thank you for supporting the project")
-        .activatable(false)
+        .subtitle("PayPal — optional support for the project")
+        .activatable(true)
         .build();
     donate_row.add_prefix(&color_icon(
         include_bytes!("../../data/icons/donate.svg"),
@@ -5011,7 +5104,14 @@ fn build_about_pages(
         &donate_row,
         "Opens the PayPal donate page — optional support for continued development",
     );
-    donate_row.add_suffix(&donate_btn);
+    donate_row.connect_activated(|_| {
+        open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A");
+    });
+    let donate_open = flat_open_button("Opens PayPal in your browser");
+    donate_open.connect_clicked(|_| {
+        open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A");
+    });
+    donate_row.add_suffix(&donate_open);
     help.add(&donate_row);
 
     help_page.append(&help);

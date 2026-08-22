@@ -412,6 +412,23 @@ headerbar windowtitle.subtitle {
         border-color 150ms cubic-bezier(0.2, 0, 0, 1), transform 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* Breathing room inside boxed-list rows and cards. */
+row .pill-btn,
+row button {
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+row .pill-btn + .pill-btn {
+    margin-start: 8px;
+}
+
+/* Quiet link-style opener for external destinations. */
+button.open-btn {
+    font-weight: 700;
+    padding: 6px 14px;
+}
+
 .pill-btn:hover {
     border-color: alpha(currentColor, 0.16);
 }
