@@ -118,23 +118,18 @@ fn toast_with_button(
     overlay.add_toast(t);
 }
 
-/// Single source of truth for stack page ids → header titles. nav_to callers,
+/// Single source of truth for top-level page ids → header titles. nav_to callers,
 /// the LEGION_PAGE override, and the visible-child sync all read this so the
 /// maps can never disagree.
 const PAGE_TITLES: &[(&str, &str)] = &[
     ("overview", "Home"),
-    ("cpu-features", "CPU Features"),
-    ("cpu-tuning", "CPU Tuning"),
-    ("cpu-power", "CPU Power Limits"),
-    ("cooling-fans", "Cooling Fans"),
+    ("cpu", "CPU"),
+    ("cooling-fans", "Cooling"),
     ("lighting", "Lighting"),
     ("battery-status", "Battery"),
     ("fix", "Fix"),
     ("profiles", "Profiles"),
-    ("about-setup", "Setup"),
-    ("about-hardware", "Hardware"),
-    ("about-storage", "Storage"),
-    ("about-help", "Help"),
+    ("about", "About"),
 ];
 
 fn page_title(name: &str) -> Option<&'static str> {
@@ -142,6 +137,69 @@ fn page_title(name: &str) -> Option<&'static str> {
         .iter()
         .find(|(id, _)| *id == name)
         .map(|(_, title)| *title)
+}
+
+/// Map any page id (current or legacy) to its top-level stack page.
+fn top_level_page(id: &str) -> &'static str {
+    match id {
+        "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" => "cpu",
+        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" => "about",
+        "lighting" | "lighting-keyboard" => "lighting",
+        "battery-status" | "battery-limit" => "battery-status",
+        "fix" | "fix-audio" | "fix-lighting" | "fix-logs" => "fix",
+        "cooling-fans" => "cooling-fans",
+        "profiles" => "profiles",
+        _ => "overview",
+    }
+}
+
+/// Initial hub tab for a (possibly legacy) page id, if it names one.
+fn hub_initial_tab(id: &str) -> Option<&'static str> {
+    match id {
+        "cpu-features" => Some("features"),
+        "cpu-tuning" => Some("tuning"),
+        "cpu-power" => Some("power"),
+        "about-setup" => Some("setup"),
+        "about-hardware" => Some("hardware"),
+        "about-storage" => Some("storage"),
+        "about-help" => Some("help"),
+        "fix-audio" => Some("fix-audio"),
+        "fix-lighting" => Some("fix-lighting"),
+        "fix-logs" => Some("fix-logs"),
+        _ => None,
+    }
+}
+
+/// Horizontal-tab hub: an AdwViewSwitcher bar on top, the sub-pages below.
+/// Each sub-page scrolls inside its own page_shell so the bar stays pinned.
+fn hub_page(
+    children: Vec<(gtk::Box, &'static str, &'static str)>,
+    initial: Option<&str>,
+) -> gtk::Box {
+    let tabs = adw::ViewStack::new();
+    tabs.set_vexpand(true);
+    for (page, id, title) in children {
+        tabs.add_titled(&page_shell(&page), Some(id), title);
+    }
+    if let Some(id) = initial {
+        if tabs.child_by_name(id).is_some() {
+            tabs.set_visible_child_name(id);
+        }
+    }
+    let switcher = adw::ViewSwitcher::new();
+    switcher.set_stack(Some(&tabs));
+    switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+    switcher.set_halign(Align::Center);
+
+    let bar = gtk::Box::new(Orientation::Vertical, 0);
+    bar.add_css_class("hub-bar");
+    bar.append(&switcher);
+
+    let hub = gtk::Box::new(Orientation::Vertical, 0);
+    hub.set_vexpand(true);
+    hub.append(&bar);
+    hub.append(&tabs);
+    hub
 }
 
 fn copy_daemon_fix_cmd() {
@@ -288,11 +346,47 @@ fn build_ui(app: &adw::Application) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
 
+    // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
+    let legion_page_req = std::env::var("LEGION_PAGE").ok();
+
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
     let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
     let fix_page = build_fix_page(&toast_overlay, &daemon_gate);
     let (about_setup_page, about_help_page, about_hardware_page, about_storage_page) =
         build_about_pages(&toast_overlay);
+
+    // Lighting hub: the zone ViewStack existed but had no visible switcher —
+    // the sidebar used to reset it to "keyboard", leaving zones unreachable.
+    let lighting_hub = {
+        let switcher = adw::ViewSwitcher::new();
+        switcher.set_stack(Some(&lighting_tabs));
+        switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+        switcher.set_halign(Align::Center);
+        let bar = gtk::Box::new(Orientation::Vertical, 0);
+        bar.add_css_class("hub-bar");
+        bar.append(&switcher);
+        let hub = gtk::Box::new(Orientation::Vertical, 0);
+        hub.set_vexpand(true);
+        hub.append(&bar);
+        hub.append(&page_shell(&lighting_page));
+        hub
+    };
+    if legion_page_req.as_deref() == Some("lighting-keyboard") {
+        lighting_tabs.set_visible_child_name("keyboard");
+    }
+
+    let about_initial = legion_page_req
+        .as_deref()
+        .and_then(hub_initial_tab);
+    let about_hub = hub_page(
+        vec![
+            (about_setup_page, "setup", "Setup"),
+            (about_hardware_page, "hardware", "Hardware"),
+            (about_storage_page, "storage", "Storage"),
+            (about_help_page, "help", "Help"),
+        ],
+        about_initial,
+    );
 
     stack.add_titled(
         &page_shell(&build_overview(
@@ -309,16 +403,6 @@ fn build_ui(app: &adw::Application) {
         "Overview",
     );
     stack.add_titled(
-        &page_shell(&build_cpu_features_page(&toast_overlay, &daemon_gate)),
-        Some("cpu-features"),
-        "CPU Features",
-    );
-    stack.add_titled(
-        &page_shell(&build_cpu_tuning_page(&toast_overlay, &daemon_gate)),
-        Some("cpu-tuning"),
-        "CPU Tuning",
-    );
-    stack.add_titled(
         &page_shell(&build_cooling_overview_page(
             &toast_overlay,
             &apply_queue,
@@ -327,7 +411,7 @@ fn build_ui(app: &adw::Application) {
         Some("cooling-fans"),
         "Cooling Fans",
     );
-    stack.add_titled(&page_shell(&lighting_page), Some("lighting"), "Lighting");
+    stack.add_titled(&lighting_hub, Some("lighting"), "Lighting");
     stack.add_titled(
         &page_shell(&battery_page),
         Some("battery-status"),
@@ -344,15 +428,7 @@ fn build_ui(app: &adw::Application) {
         Some("profiles"),
         "Profiles",
     );
-
-    for (page, id, title) in [
-        (&about_setup_page, "about-setup", "Setup"),
-        (&about_hardware_page, "about-hardware", "Hardware"),
-        (&about_storage_page, "about-storage", "Storage"),
-        (&about_help_page, "about-help", "Help"),
-    ] {
-        stack.add_titled(&page_shell(page), Some(id), title);
-    }
+    stack.add_titled(&about_hub, Some("about"), "About");
 
     let sidebar_box = gtk::Box::new(Orientation::Vertical, 0);
     let brand = gtk::Box::new(Orientation::Horizontal, 12);
@@ -387,170 +463,62 @@ fn build_ui(app: &adw::Application) {
     nav_box.set_margin_top(2);
     nav_box.set_margin_bottom(4);
 
-    // Home — compact pill at icon scale, right below brand
-    let home_btn = gtk::Button::builder()
-        .halign(Align::Fill)
-        .margin_start(10)
-        .margin_end(10)
-        .margin_top(6)
-        .margin_bottom(2)
-        .build();
-    home_btn.add_css_class("home-btn");
-    home_btn.add_css_class("flat");
-    let home_inner = gtk::Box::new(Orientation::Horizontal, 7);
-    home_inner.set_halign(Align::Center);
-    home_inner.set_valign(Align::Center);
-    home_inner.append(&color_icon(
-        include_bytes!("../../data/icons/home.svg").as_slice(),
-        13,
-    ));
-    let home_label = gtk::Label::new(Some("Home"));
-    home_label.add_css_class("home-label");
-    home_inner.append(&home_label);
-    home_btn.set_child(Some(&home_inner));
-    home_btn.set_tooltip_text(Some("Temperatures, fans, battery, mode"));
-    nav_box.append(&home_btn);
-    let home_sep = gtk::Separator::new(Orientation::Horizontal);
-    home_sep.set_margin_top(6);
-    home_sep.set_margin_bottom(2);
-    home_sep.set_margin_start(14);
-    home_sep.set_margin_end(14);
-    home_sep.add_css_class("sidebar-sep");
-    nav_box.append(&home_sep);
-
-    let make_section =
-        |icon: &'static [u8],
-         title: &str,
-         entries: &[(&str, &str)]|
-         -> (gtk::Box, gtk::ListBox, gtk::ToggleButton) {
-            let sec = gtk::Box::new(Orientation::Vertical, 0);
-            sec.set_margin_top(2);
-            // Real toggle button (not a clickable Box): keyboard-focusable,
-            // activatable, and announced as a control by assistive tech.
-            let hdr = gtk::ToggleButton::new();
-            hdr.add_css_class("sidebar-header-btn");
-            hdr.set_margin_start(16);
-            hdr.set_margin_end(10);
-            hdr.set_margin_top(6);
-            hdr.set_margin_bottom(2);
-            let hdr_row = gtk::Box::new(Orientation::Horizontal, 8);
-            hdr_row.set_halign(Align::Start);
-            hdr_row.set_valign(Align::Center);
-            let chev = gtk::Image::from_icon_name("go-next-symbolic");
-            chev.set_pixel_size(10);
-            chev.add_css_class("sidebar-chevron");
-            let ic = color_icon(icon, 14);
-            ic.set_opacity(0.62);
-            let lb = gtk::Label::new(Some(title));
-            lb.add_css_class("sidebar-section");
-            lb.set_halign(Align::Start);
-            hdr_row.append(&chev);
-            hdr_row.append(&ic);
-            hdr_row.append(&lb);
-            hdr.set_child(Some(&hdr_row));
-            sec.append(&hdr);
-            let lb_list = gtk::ListBox::new();
-            lb_list.set_selection_mode(gtk::SelectionMode::Single);
-            lb_list.add_css_class("navigation-sidebar");
-            lb_list.add_css_class("sidebar-child");
-            for (t, s) in entries {
-                let row = adw::ActionRow::builder().title(*t).subtitle(*s).build();
-                row.set_activatable(true);
-                lb_list.append(&row);
-            }
-            let rev = gtk::Revealer::new();
-            rev.set_transition_type(gtk::RevealerTransitionType::SlideDown);
-            // NN/g: large panel reveals need 200–300 ms to be
-            // perceivable without dragging; 220 ms with ease-out.
-            rev.set_transition_duration(220);
-            rev.set_child(Some(&lb_list));
-            rev.set_reveal_child(false);
-            sec.append(&rev);
-            let chev_c = chev.clone();
-            let rev_c = rev.clone();
-            hdr.connect_toggled(move |btn| {
-                let open = btn.is_active();
-                rev_c.set_reveal_child(open);
-                if open {
-                    chev_c.add_css_class("open");
-                } else {
-                    chev_c.remove_css_class("open");
-                }
-            });
-            (sec, lb_list, hdr)
-        };
-
-    let (cpu_sec, cpu_list, cpu_btn) = make_section(
-        include_bytes!("../../data/icons/cpu.svg"),
-        "CPU",
-        &[
-            ("Features", "Boost and threading"),
-            ("Tuning", "Thermal + undervolt + stability"),
-            ("Power limits", "CPU and GPU limits"),
-        ],
-    );
-    let (cooling_sec, cooling_list, cooling_btn) = make_section(
-        include_bytes!("../../data/icons/cooling.svg"),
-        "Cooling",
-        &[("Fans", "All fans + reset")],
-    );
-    let (lighting_sec, lighting_list, lighting_btn) = make_section(
-        include_bytes!("../../data/icons/lighting.svg"),
-        "Lighting",
-        &[("Lighting", "Zones and effects")],
-    );
-    let (battery_sec, battery_list, battery_btn) = make_section(
-        include_bytes!("../../data/icons/battery.svg"),
-        "Battery",
-        &[("Battery", "Status and charge limit")],
-    );
-    let (fix_sec, fix_list, fix_btn) = make_section(
-        include_bytes!("../../data/icons/fix.svg"),
-        "Fix",
-        &[("Fix", "Diagnostics and repair")],
-    );
-    let (about_sec, about_list, about_btn) = make_section(
-        include_bytes!("../../data/icons/about.svg"),
-        "About",
-        &[
-            ("Setup", "Service, AMD backend, widget"),
-            ("Hardware", "Model and capabilities"),
-            ("Storage", "Settings and profiles"),
-            ("Help", "Help and legal"),
-        ],
-    );
-    nav_box.append(&cpu_sec);
-    nav_box.append(&cooling_sec);
-    nav_box.append(&lighting_sec);
-    nav_box.append(&battery_sec);
-    nav_box.append(&fix_sec);
-    // Profiles + About at bottom — less frequent, out of primary flow
-    let bot_sep = gtk::Separator::new(Orientation::Horizontal);
-    bot_sep.set_margin_top(8);
-    bot_sep.set_margin_bottom(4);
-    bot_sep.set_margin_start(14);
-    bot_sep.set_margin_end(14);
-    bot_sep.add_css_class("sidebar-sep");
-    nav_box.append(&bot_sep);
-    let (profiles_sec, profiles_list, profiles_btn) = make_section(
-        include_bytes!("../../data/icons/profiles.svg"),
-        "Profiles",
-        &[("Manage", "Save and restore presets")],
-    );
-    nav_box.append(&profiles_sec);
-    // Density: only frequently-visited groups start expanded. Profiles and
-    // About stay collapsed — one click opens them, and they are rarely
-    // needed once configured.
-    for btn in [
-        &cpu_btn,
-        &cooling_btn,
-        &lighting_btn,
-        &battery_btn,
-        &fix_btn,
+    // Flat rail: one row per destination, no expandable sections — sub-pages
+    // live in horizontal tab bars at the top of each hub page.
+    let nav_list = gtk::ListBox::new();
+    nav_list.set_selection_mode(gtk::SelectionMode::Single);
+    nav_list.add_css_class("navigation-sidebar");
+    nav_list.add_css_class("sidebar-flat");
+    for (icon, title, tooltip) in [
+        (
+            include_bytes!("../../data/icons/home.svg").as_slice(),
+            "Home",
+            "Temperatures, fans, battery, power mode",
+        ),
+        (
+            include_bytes!("../../data/icons/cpu.svg"),
+            "CPU",
+            "Features (boost, threading) · Tuning (thermal, undervolt) · Power limits",
+        ),
+        (
+            include_bytes!("../../data/icons/cooling.svg"),
+            "Cooling",
+            "All fans at a glance — per-fan tuning and reset",
+        ),
+        (
+            include_bytes!("../../data/icons/lighting.svg"),
+            "Lighting",
+            "Keyboard, front and rear bars, logo, per-key",
+        ),
+        (
+            include_bytes!("../../data/icons/battery.svg"),
+            "Battery",
+            "Status and charge limit",
+        ),
+        (
+            include_bytes!("../../data/icons/fix.svg"),
+            "Fix",
+            "Diagnostics and repair — speakers, Spectrum RGB, service logs",
+        ),
+        (
+            include_bytes!("../../data/icons/profiles.svg"),
+            "Profiles",
+            "Save and restore presets",
+        ),
+        (
+            include_bytes!("../../data/icons/about.svg"),
+            "About",
+            "Setup, hardware, storage, help",
+        ),
     ] {
-        btn.set_active(true);
+        let row = adw::ActionRow::builder().title(title).activatable(true).build();
+        let ic = color_icon(icon, 15);
+        ic.set_opacity(0.72);
+        row.add_prefix(&ic);
+        tip(&row, tooltip);
+        nav_list.append(&row);
     }
-    nav_box.append(&about_sec);
+    nav_box.append(&nav_list);
     scroll.set_child(Some(&nav_box));
     sidebar_box.append(&scroll);
 
@@ -766,94 +734,51 @@ fn build_ui(app: &adw::Application) {
             nav_to(&stack, &page, &split, &title_widget, name, title)
         })
     };
-    // Registered after show_page exists so the pointer page can navigate to
-    // the real Custom-watts controls on Home.
-    stack.add_titled(
-        &page_shell(&build_cpu_power_page(&toast_overlay, &show_page)),
-        Some("cpu-power"),
-        "CPU Power",
+    // The CPU hub is registered here because its Power tab needs show_page
+    // to jump back to the Custom-watts controls on Home.
+    let cpu_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
+    let cpu_hub = hub_page(
+        vec![
+            (
+                build_cpu_features_page(&toast_overlay, &daemon_gate),
+                "features",
+                "Features",
+            ),
+            (
+                build_cpu_tuning_page(&toast_overlay, &daemon_gate),
+                "tuning",
+                "Tuning",
+            ),
+            (
+                build_cpu_power_page(&toast_overlay, &show_page),
+                "power",
+                "Power",
+            ),
+        ],
+        cpu_initial,
     );
-    // Helper to clear every sidebar ListBox except the one just selected, and to
-    // auto-expand the owning section so the selection is always visible.
-    let all_lists: Vec<gtk::ListBox> = vec![
-        cpu_list.clone(),
-        cooling_list.clone(),
-        lighting_list.clone(),
-        battery_list.clone(),
-        fix_list.clone(),
-        about_list.clone(),
-        profiles_list.clone(),
+    stack.add_titled(&cpu_hub, Some("cpu"), "CPU");
+
+    // One flat list: row order mirrors the rail above.
+    const FLAT_IDS: &[&str] = &[
+        "overview",
+        "cpu",
+        "cooling-fans",
+        "lighting",
+        "battery-status",
+        "fix",
+        "profiles",
+        "about",
     ];
-    fn ensure_expanded(btn: &gtk::ToggleButton) {
-        if !btn.is_active() {
-            btn.set_active(true);
-        }
-    }
-
-    // Data-driven sidebar navigation: one row-order id table per section
-    // instead of seven near-identical closures.
-    const CPU_IDS: &[&str] = &["cpu-features", "cpu-tuning", "cpu-power"];
-    const COOLING_IDS: &[&str] = &["cooling-fans"];
-    const BATTERY_IDS: &[&str] = &["battery-status"];
-    const FIX_IDS: &[&str] = &["fix"];
-    const PROFILES_IDS: &[&str] = &["profiles"];
-    const ABOUT_IDS: &[&str] = &["about-setup", "about-hardware", "about-storage", "about-help"];
-
-    let connect_nav = |list: &gtk::ListBox, btn: &gtk::ToggleButton, ids: &'static [&'static str]| {
-        let all = all_lists.clone();
-        let btn = btn.clone();
+    {
         let show = show_page.clone();
-        list.connect_row_selected(move |lb, row| {
+        nav_list.connect_row_selected(move |_, row| {
             let Some(r) = row else { return; };
-            for other in &all {
-                if !std::ptr::eq(other as *const _, lb as *const _) {
-                    other.unselect_all();
-                }
-            }
-            ensure_expanded(&btn);
-            if let Some(id) = ids.get(r.index() as usize) {
+            if let Some(id) = FLAT_IDS.get(r.index() as usize) {
                 if let Some(title) = page_title(id) {
                     show(id, title);
                 }
             }
-        });
-    };
-    connect_nav(&cpu_list, &cpu_btn, CPU_IDS);
-    connect_nav(&cooling_list, &cooling_btn, COOLING_IDS);
-    connect_nav(&battery_list, &battery_btn, BATTERY_IDS);
-    connect_nav(&fix_list, &fix_btn, FIX_IDS);
-    connect_nav(&about_list, &about_btn, ABOUT_IDS);
-    connect_nav(&profiles_list, &profiles_btn, PROFILES_IDS);
-    {
-        // Lighting additionally resets its internal zone tabs (Keyboard/
-        // Front/Rear/Logo/More) — the sidebar no longer duplicates them.
-        let all = all_lists.clone();
-        let tabs = lighting_tabs.clone();
-        let btn = lighting_btn.clone();
-        let show = show_page.clone();
-        lighting_list.connect_row_selected(move |lb, row| {
-            let Some(r) = row else { return; };
-            for other in &all {
-                if !std::ptr::eq(other as *const _, lb as *const _) {
-                    other.unselect_all();
-                }
-            }
-            ensure_expanded(&btn);
-            if r.index() == 0 {
-                tabs.set_visible_child_name("keyboard");
-                show("lighting", "Lighting");
-            }
-        });
-    }
-    // Home clears every sidebar selection — it's a standalone button, not a ListBox.
-    {
-        let all = all_lists.clone();
-        let show = show_page.clone();
-        home_btn.connect_clicked(move |_| {
-            for lb in &all {
-                lb.unselect_all();
-            }
-            show("overview", "Home");
         });
     }
     let about_action = gio::SimpleAction::new("about", None);
@@ -870,7 +795,7 @@ fn build_ui(app: &adw::Application) {
     window.add_action(&report_action);
 
     let donate_action = gio::SimpleAction::new("donate", None);
-    donate_action.connect_activate(|_, _| {
+    donate_action.connect_activate(move |_, _| {
         open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A");
     });
     window.add_action(&donate_action);
@@ -879,41 +804,24 @@ fn build_ui(app: &adw::Application) {
     split.set_content(Some(&content_page));
 
     // Dev/screenshots: LEGION_PAGE=<name> opens a specific page at startup
-    // (e.g. LEGION_PAGE=cpu-tuning legion-settings). Harmless if unset.
-    if let Ok(page) = std::env::var("LEGION_PAGE") {
-        if stack.child_by_name(&page).is_some() {
-            stack.set_visible_child_name(&page);
+    // (e.g. LEGION_PAGE=cpu-tuning legion-settings). Legacy ids resolve to
+    // their hub + tab. Harmless if unset.
+    if let Some(page) = legion_page_req {
+        let top = top_level_page(&page);
+        if stack.child_by_name(top).is_some() {
+            stack.set_visible_child_name(top);
             // Keep header in sync — the stack override bypasses nav_to().
-            if let Some(title) = page_title(&page) {
+            if let Some(title) = page_title(top) {
                 content_page.set_title(title);
                 window_title.set_title(title);
             }
-            // Mirror the sidebar selection so screenshots show the correct highlight.
-            let select = |lb: &gtk::ListBox, btn: &gtk::ToggleButton, idx: i32| {
-                ensure_expanded(btn);
-                if let Some(row) = lb.row_at_index(idx) {
-                    lb.select_row(Some(&row));
+            // Mirror the rail selection so screenshots show the highlight.
+            if top == "overview" {
+                nav_list.unselect_all();
+            } else if let Some(idx) = FLAT_IDS.iter().position(|id| *id == top) {
+                if let Some(row) = nav_list.row_at_index(idx as i32) {
+                    nav_list.select_row(Some(&row));
                 }
-            };
-            match page.as_str() {
-                "cpu-features" => select(&cpu_list, &cpu_btn, 0),
-                "cpu-tuning" => select(&cpu_list, &cpu_btn, 1),
-                "cpu-power" => select(&cpu_list, &cpu_btn, 2),
-                "cooling-fans" => select(&cooling_list, &cooling_btn, 0),
-                "lighting" => select(&lighting_list, &lighting_btn, 0),
-                "battery-status" => select(&battery_list, &battery_btn, 0),
-                "fix" => select(&fix_list, &fix_btn, 0),
-                "profiles" => select(&profiles_list, &profiles_btn, 0),
-                "about-setup" => select(&about_list, &about_btn, 0),
-                "about-hardware" => select(&about_list, &about_btn, 1),
-                "about-storage" => select(&about_list, &about_btn, 2),
-                "about-help" => select(&about_list, &about_btn, 3),
-                "overview" => {
-                    for lb in &all_lists {
-                        lb.unselect_all();
-                    }
-                }
-                _ => {}
             }
         }
     }
@@ -4405,26 +4313,6 @@ fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("Diagnostics and repair — speakers, Spectrum RGB, service logs");
 
-    let switcher = gtk::Box::new(Orientation::Horizontal, 8);
-    switcher.add_css_class("lighting-switcher");
-    let speakers_btn = gtk::ToggleButton::with_label("Speakers");
-    speakers_btn.add_css_class("pill-btn");
-    speakers_btn.set_active(true);
-    let lighting_btn = gtk::ToggleButton::with_label("Lighting");
-    lighting_btn.add_css_class("pill-btn");
-    let logs_btn = gtk::ToggleButton::with_label("Service logs");
-    logs_btn.add_css_class("pill-btn");
-    lighting_btn.set_group(Some(&speakers_btn));
-    logs_btn.set_group(Some(&speakers_btn));
-    tip(
-        &switcher,
-        "Speaker audio issues · stuck or dark Spectrum RGB · recent control-service output",
-    );
-    switcher.append(&speakers_btn);
-    switcher.append(&lighting_btn);
-    switcher.append(&logs_btn);
-    page.append(&switcher);
-
     let inner = adw::ViewStack::new();
     inner.set_vexpand(true);
     inner.add_titled(
@@ -4442,31 +4330,20 @@ fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::
         Some("fix-logs"),
         "Logs",
     );
-    // Wire the toggle row to the internal stack.
-    {
-        let inner_c = inner.clone();
-        speakers_btn.connect_toggled(move |b| {
-            if b.is_active() {
-                inner_c.set_visible_child_name("fix-audio");
-            }
-        });
-    }
-    {
-        let inner_c = inner.clone();
-        lighting_btn.connect_toggled(move |b| {
-            if b.is_active() {
-                inner_c.set_visible_child_name("fix-lighting");
-            }
-        });
-    }
-    {
-        let inner_c = inner.clone();
-        logs_btn.connect_toggled(move |b| {
-            if b.is_active() {
-                inner_c.set_visible_child_name("fix-logs");
-            }
-        });
-    }
+
+    // Same horizontal tab bar as the CPU/About/Lighting hubs.
+    let switcher = adw::ViewSwitcher::new();
+    switcher.set_stack(Some(&inner));
+    switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+    switcher.set_halign(Align::Center);
+    tip(
+        &switcher,
+        "Speaker audio issues · stuck or dark Spectrum RGB · recent control-service output",
+    );
+    let bar = gtk::Box::new(Orientation::Vertical, 0);
+    bar.add_css_class("hub-bar");
+    bar.append(&switcher);
+    page.append(&bar);
     page.append(&inner);
     page
 }
