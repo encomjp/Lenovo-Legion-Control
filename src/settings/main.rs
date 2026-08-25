@@ -398,8 +398,14 @@ fn build_ui(app: &adw::Application) {
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
     let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
     let fix_page = build_fix_page(&toast_overlay, &daemon_gate);
-    let (about_setup_page, about_help_page, about_hardware_page, about_storage_page) =
-        build_about_pages(&toast_overlay);
+    let (
+        about_setup_page,
+        about_help_page,
+        about_hardware_page,
+        about_storage_page,
+        welcome_consent,
+        welcome_share_switch,
+    ) = build_about_pages(&toast_overlay);
 
     // Lighting hub: the zone ViewStack existed but had no visible switcher —
     // the sidebar used to reset it to "keyboard", leaving zones unreachable.
@@ -939,7 +945,13 @@ fn build_ui(app: &adw::Application) {
     legion_core::keyboard::set_logo_async(cfg.logo_on);
     legion_core::keyboard::restore_lighting_async();
 
-    show_welcome_if_needed(&window, &stack, Some(&about_tabs));
+    show_welcome_if_needed(
+        &window,
+        &stack,
+        Some(&about_tabs),
+        &welcome_consent,
+        Some(&welcome_share_switch),
+    );
 
     // Click the connection strip to re-check the daemon.
     let foot_click = gtk::GestureClick::new();
@@ -1171,6 +1183,8 @@ fn show_welcome_if_needed(
     parent: &impl glib::object::IsA<gtk::Widget>,
     stack: &adw::ViewStack,
     about_tabs: Option<&adw::ViewStack>,
+    consent: &Rc<Cell<bool>>,
+    share_switch: Option<&adw::SwitchRow>,
 ) {
     if legion_core::config::welcome_seen() {
         return;
@@ -1184,7 +1198,7 @@ fn show_welcome_if_needed(
              ── Alpha telemetry ──\n\
              Share ONE anonymized report occasionally (hardware model, distro,\n\
              sensors, fan/battery stats, self-check results)?\n\
-             Never: hostname · username · serials · MACs · IPs · key colors.\n\
+             Never: hostname · username · serials · MACs · IPs · key colors · custom profile names.\n\
              Full details under Setup → Alpha diagnostics.",
         ),
     );
@@ -1199,13 +1213,22 @@ fn show_welcome_if_needed(
     dialog.set_close_response("ok");
     let stack = stack.clone();
     let about_tabs = about_tabs.cloned();
+    let consent = consent.clone();
+    let share_switch = share_switch.cloned();
     dialog.connect_response(None, move |_, response| {
         legion_core::config::mark_welcome_seen();
         match response {
             "share" => {
                 legion_core::config::update(|c| c.diagnostics.enabled = true);
-                // The Setup switch seeds itself from config on next build,
-                // and the debounced toggle keeps later changes in sync.
+                // The Setup-page diagnostics widgets are built once at
+                // startup, so writing config alone would leave the switch
+                // OFF until the next launch — flip the live controls too.
+                // set_active runs the normal debounced persist path (the
+                // extra write is an idempotent no-op).
+                consent.set(true);
+                if let Some(row) = share_switch.as_ref() {
+                    row.set_active(true);
+                }
             }
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
             "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
@@ -2671,6 +2694,7 @@ fn attach_custom_ppt_group(
         let id = lim.id.to_string();
         let lim_max = lim.max;
         let unit_sym = lim.unit.symbol();
+        let unit_celsius = lim.unit == legion_core::profile::LimitUnit::Celsius;
         let lim_label = lim.label.to_string();
         let val_l = val.clone();
         let drop_c = drop.clone();
@@ -2701,8 +2725,13 @@ fn attach_custom_ppt_group(
                     "High power limit",
                     &format!(
                         "{lim_label} at {v} {unit_sym} is near the firmware maximum ({lim_max} {unit_sym}).\n\n\
-                         Sustained high limits increase heat and fan noise.\n\n\
-                         Continue only if cooling is strong."
+                         {}\n\n\
+                         Continue only if cooling is strong.",
+                        if unit_celsius {
+                            "A high cutoff lets the CPU/GPU run hotter before firmware throttling kicks in."
+                        } else {
+                            "Sustained high limits increase heat and fan noise."
+                        }
                     ),
                     "Use high limit",
                     move |ok| {
@@ -2964,7 +2993,7 @@ fn apply_platform_profile(
                         for (id, scale, label) in ppt_scales.borrow().iter() {
                             if id == lim.id {
                                 scale.set_value(lim.current as f64);
-                                label.set_text(&format!("{} W", lim.current));
+                                label.set_text(&lim.value_label(lim.current));
                             }
                         }
                     }
@@ -4969,8 +4998,18 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 
 /// Alpha diagnostics opt-in — privacy disclosure, consent switch, self-check
 /// runner, and on-demand send. All of it works without the daemon running.
-fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+///
+/// Returns live handles alongside the group: a `Cell<bool>` mirroring the
+/// consent switch (shared with the welcome dialog so "Share ✓" can flip it)
+/// and the switch itself.
+fn build_diagnostics_section(
+    toast_overlay: &adw::ToastOverlay,
+) -> (adw::PreferencesGroup, Rc<Cell<bool>>, adw::SwitchRow) {
     let group = pref_group("Alpha diagnostics (anonymous)", None);
+
+    // Live consent mirror — updated by the switch handler below, read by the
+    // Send-now gating, and handed to show_welcome_if_needed by the caller.
+    let consent = Rc::new(Cell::new(legion_core::config::get().diagnostics.enabled));
 
     // Caption-style disclosure row — the exact data contract shown verbatim.
     let disclosure = adw::ActionRow::builder()
@@ -4979,7 +5018,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
             "Alpha program: with your consent, one anonymized JSON report is sent per click/schedule — \
              hardware model, distro/kernel, sensor readings, fan states, battery health stats, thermal & \
              Curve Optimizer settings, a settings digest, a log summary (warn/error counts + last error, home paths redacted), and self-check results. \
-             NEVER included: hostname, username, serials, MACs, IPs, per-key colors, profile names. \
+             NEVER included: hostname, username, serials, MACs, IPs, per-key colors, custom profile names. \
              Off by default.",
         )
         .build();
@@ -5011,16 +5050,22 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         "Collects and sends one anonymized report immediately",
     );
     send_row.add_suffix(&send_btn);
-    // Initial state from config: no consent → nothing may be sent.
-    send_btn.set_sensitive(share_row.is_active());
+    // Initial state from the consent mirror: no consent → nothing may be sent.
+    send_btn.set_sensitive(consent.get());
 
     {
         let overlay = toast_overlay.clone();
         let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
         let share_d = share_row.clone();
         let send_gate = send_btn.clone();
+        let consent_gate = consent.clone();
         share_row.connect_active_notify(move |row| {
             let enabled = row.is_active();
+            // Mirror to the shared cell immediately — the debounced persist
+            // below may lag, but Send-now gating must never read stale
+            // consent (e.g. while a send triggered by the welcome dialog is
+            // still in flight).
+            consent_gate.set(enabled);
             // Consent gate reacts immediately; the config write and toast are
             // debounced so rapid toggling does one disk RMW and one toast for
             // the FINAL state (ticket pattern, like the thermal slider).
@@ -5145,16 +5190,20 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         let overlay = toast_overlay.clone();
         let send_btn_connect = send_btn.clone();
         let send_btn_closure = send_btn.clone();
+        let consent_closure = consent.clone();
         send_btn_connect.connect_clicked(move |_| {
             send_btn_closure.set_sensitive(false);
             send_btn_closure.set_label("Sending…");
             let overlay = overlay.clone();
             let btn_inner = send_btn_closure.clone();
+            let consent_done = consent_closure.clone();
             dispatch_async(
                 move || legion_core::diagnostics::collect_and_send(None),
                 "Diagnostics send stopped without a result",
                 move |result| {
-                    btn_inner.set_sensitive(true);
+                    // Re-enable only if consent is STILL on — it may have
+                    // been toggled off while this send was in flight.
+                    btn_inner.set_sensitive(consent_done.get());
                     btn_inner.set_label("Send now");
                     match result {
                         Ok(_) => toast_info(&overlay, "Diagnostics sent — thank you!"),
@@ -5165,7 +5214,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         });
     }
 
-    group
+    (group, consent, share_row)
 }
 
 fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
@@ -5311,7 +5360,16 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 
 fn build_about_pages(
     toast_overlay: &adw::ToastOverlay,
-) -> (gtk::Box, gtk::Box, gtk::Box, gtk::Box) {
+) -> (
+    gtk::Box,
+    gtk::Box,
+    gtk::Box,
+    gtk::Box,
+    // Live diagnostics consent state + switch, threaded to
+    // show_welcome_if_needed so its "Share ✓" response can flip them.
+    Rc<Cell<bool>>,
+    adw::SwitchRow,
+) {
     let setup_page = page_lede("");
     let help_page = page_lede("");
     let hardware_page = page_lede("");
@@ -5320,7 +5378,8 @@ fn build_about_pages(
 
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
-    setup_page.append(&build_diagnostics_section(toast_overlay));
+    let (diag_group, diag_consent, diag_share_switch) = build_diagnostics_section(toast_overlay);
+    setup_page.append(&diag_group);
 
     let help = pref_group("Help", None);
     let report_row = adw::ActionRow::builder()
@@ -5526,7 +5585,14 @@ fn build_about_pages(
         Some("Left-click the tray icon to show the window again"),
     ));
     storage_page.append(&lighting);
-    (setup_page, help_page, hardware_page, storage_page)
+    (
+        setup_page,
+        help_page,
+        hardware_page,
+        storage_page,
+        diag_consent,
+        diag_share_switch,
+    )
 }
 
 fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
