@@ -14,6 +14,13 @@ use std::time::Duration;
 const VID: &str = "048d";
 const PID: &str = "c197";
 
+/// journalctl `-g` filter mirroring the device needles that
+/// [`scan_kernel_rgb_faults`] matches on (parens/dots regex-escaped).
+/// Filtering server-side lets us keep the 200-line network-cost cap without
+/// the window ever being able to evict the relevant lines.
+const KERNEL_FAULT_GREP: &str =
+    r"(048d:c197|048D:C197|ITE Device\(8258\)|ITE Tech\. Inc\. ITE Device)";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Health {
     /// Device open + ioctl OK; brightness matches expectation (or lights off intentionally).
@@ -140,9 +147,13 @@ pub fn diagnose() -> Diagnosis {
         );
     }
 
-    let bad_perms = permission_mode.map(|m| m & 0o006 == 0).unwrap_or(false);
+    // The shipped udev rule wants 0660 + uaccess: group rw is the healthy
+    // shape. World-writable is neither required nor desired here.
+    let bad_perms = permission_mode.map(|m| m & 0o060 != 0o060).unwrap_or(false);
     if bad_perms {
-        details.push("hidraw not world/group writable — userspace RGB blocked".into());
+        details.push(
+            "hidraw lacks group rw (expected udev 0660 + uaccess) — userspace RGB blocked".into(),
+        );
     }
 
     let (health, summary, fixable) = if !accessible || bad_perms {
@@ -167,7 +178,7 @@ pub fn diagnose() -> Diagnosis {
         let summary = if kernel_faults.is_empty() {
             "Spectrum RGB HID healthy".into()
         } else {
-            "Spectrum RGB OK now (kernel logged earlier USB/HID faults this boot)".into()
+            "Spectrum RGB OK now (recent kernel log shows earlier USB/HID faults)".into()
         };
         (Health::Ok, summary, false)
     };
@@ -210,12 +221,12 @@ pub fn troubleshoot() -> FixReport {
         };
     }
 
-    // 1) Permissions
+    // 1) Permissions — target state is udev 0660 + uaccess, not world-writable.
     if let Some(path) = &before.device_path {
         if let Some(mode) = before.permission_mode {
-            if mode & 0o006 == 0 {
+            if mode & 0o060 != 0o060 {
                 match fix_permissions(path) {
-                    Ok(()) => steps.push(format!("Fixed permissions on {}", path.display())),
+                    Ok(detail) => steps.push(detail),
                     Err(e) => errors.push(e),
                 }
             }
@@ -393,16 +404,62 @@ fn find_spectrum_usb_sysfs() -> Option<PathBuf> {
     find_spectrum_hidraw().and_then(|p| usb_sysfs_for_hidraw(&p))
 }
 
-fn fix_permissions(path: &Path) -> Result<(), String> {
+/// Bring the Spectrum hidraw node back into the state the packaged udev rule
+/// designs for: 0660 + uaccess. Never widen it to world-writable — the root
+/// watchdog auto-runs this, and 0666 on a /dev node is a hole, not a fix.
+///
+/// 1. Ask udev to re-apply its rules via `udevadm trigger` (fine when the
+///    binary is missing — we fall through).
+/// 2. Re-stat after 300 ms; if the node is still not group-accessible,
+///    chmod 0660 directly.
+/// 3. Report honestly which route was taken.
+fn fix_permissions(path: &Path) -> Result<String, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+
+        fn mode_of(p: &Path) -> Option<u32> {
+            fs::metadata(p).ok().map(|m| m.permissions().mode() & 0o777)
+        }
+
+        let dev = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+
+        // 1) Preferred route: let udev re-apply its own rules.
+        match Command::new("udevadm")
+            .args(["trigger", "-s", "hidraw", &format!("--name-match={dev}")])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                // udev applies events asynchronously — give it a beat, then re-stat.
+                std::thread::sleep(Duration::from_millis(300));
+                if let Some(mode) = mode_of(path) {
+                    if mode & 0o060 == 0o060 {
+                        return Ok(format!(
+                            "udevadm trigger reapplied udev rules for {dev} (mode now {mode:04o})"
+                        ));
+                    }
+                }
+            }
+            Ok(out) => log::debug!(
+                "udevadm trigger exited {:?} for {dev}; falling back to chmod",
+                out.status.code()
+            ),
+            Err(e) => log::debug!("udevadm unusable ({:?}); falling back to chmod", e.kind()),
+        }
+
+        // 2) Fallback: match the packaged udev rule's mode directly (0660, never 0666).
         let meta = fs::metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
         let mut perms = meta.permissions();
-        perms.set_mode(0o666);
+        perms.set_mode(0o660);
         fs::set_permissions(path, perms)
             .map_err(|e| format!("chmod {}: {e} (needs root daemon)", path.display()))?;
-        Ok(())
+        Ok(format!(
+            "chmod 0660 {} (udevadm trigger unavailable or ineffective)",
+            path.display()
+        ))
     }
     #[cfg(not(unix))]
     {
@@ -425,26 +482,44 @@ fn usb_reset(usb: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve `<iface>/driver` (a sysfs symlink) to the symlink path plus the
+/// driver basename it points at.
+fn iface_driver(iface: &Path) -> Option<(PathBuf, String)> {
+    let link = iface.join("driver");
+    let name = fs::read_link(&link)
+        .ok()?
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
+    Some((link, name))
+}
+
+/// Bounce hid-generic for the Spectrum HID interface.
+///
+/// Only touches interfaces actually bound to `hid-generic`; refuses to
+/// unbind/bind foreign drivers (usbhid etc.) blindly. Returns `Err`
+/// summarizing every step that failed (with io error kinds) instead of
+/// pretending success; on success the driver symlink is verified to have
+/// reappeared and that is noted in the message.
 fn hid_rebind_spectrum() -> Result<String, String> {
     // Find hid device symlink under the USB device and bounce hid-generic.
     let usb = find_spectrum_usb_sysfs().ok_or_else(|| "Spectrum USB path gone".to_string())?;
-    let mut hid_id = None;
+    let mut hid_iface: Option<(String, PathBuf, String)> = None;
     if let Ok(rd) = fs::read_dir(&usb) {
         for e in rd.flatten() {
             let n = e.file_name();
             let n = n.to_string_lossy();
             // e.g. 3-2.4:1.0
             if n.contains(':') {
-                let driver = e.path().join("driver");
-                if driver.exists() {
-                    hid_id = Some(n.into_owned());
+                if let Some((link, drv)) = iface_driver(&e.path()) {
+                    hid_iface = Some((n.into_owned(), link, drv));
                     break;
                 }
             }
         }
     }
     // Also search one level of interfaces
-    if hid_id.is_none() {
+    if hid_iface.is_none() {
         if let Ok(rd) = fs::read_dir(&usb) {
             for iface in rd.flatten() {
                 if let Ok(sub) = fs::read_dir(iface.path()) {
@@ -452,40 +527,66 @@ fn hid_rebind_spectrum() -> Result<String, String> {
                         let n = e.file_name();
                         let n = n.to_string_lossy();
                         if n.contains(':') {
-                            let driver = e.path().join("driver");
-                            if driver.exists() {
-                                hid_id = Some(n.into_owned());
+                            if let Some((link, drv)) = iface_driver(&e.path()) {
+                                hid_iface = Some((n.into_owned(), link, drv));
                                 break;
                             }
                         }
                     }
                 }
-                if hid_id.is_some() {
+                if hid_iface.is_some() {
                     break;
                 }
             }
         }
     }
-    let id = hid_id.ok_or_else(|| "No HID interface id under Spectrum USB".to_string())?;
+    let Some((id, driver_link, driver)) = hid_iface else {
+        return Err("No HID interface id under Spectrum USB".into());
+    };
+    if driver != "hid-generic" {
+        // Writing to unbind/bind for a foreign driver could drop hardware we
+        // do not own (usbhid owns more than the lighting node) — refuse and
+        // say what we saw instead of writing blindly.
+        return Ok(format!(
+            "Skipped HID rebind: {id} is bound to {driver}, not hid-generic"
+        ));
+    }
 
     let unbind = Path::new("/sys/bus/hid/drivers/hid-generic/unbind");
     let bind = Path::new("/sys/bus/hid/drivers/hid-generic/bind");
-    if unbind.exists() {
-        if let Err(e) = fs::write(unbind, &id) {
-            log::warn!("failed to unbind HID {id} from hid-generic: {e}");
-        }
+    let mut failures: Vec<String> = Vec::new();
+
+    if let Err(e) = fs::write(unbind, &id) {
+        log::warn!("failed to unbind HID {id} from hid-generic: {e}");
+        failures.push(format!("unbind {id}: {:?} ({e})", e.kind()));
     }
-    // Some kernels expose only bind; try binding anyway.
-    if bind.exists() {
-        std::thread::sleep(Duration::from_millis(50));
-        if let Err(e) = fs::write(bind, &id) {
-            log::warn!("failed to rebind HID {id} to hid-generic: {e}");
-        }
+    std::thread::sleep(Duration::from_millis(50));
+    if let Err(e) = fs::write(bind, &id) {
+        log::warn!("failed to rebind HID {id} to hid-generic: {e}");
+        failures.push(format!("bind {id}: {:?} ({e})", e.kind()));
     }
-    Ok(format!("Rebound hid-generic for {id}"))
+
+    if !failures.is_empty() {
+        return Err(format!("HID rebind incomplete: {}", failures.join("; ")));
+    }
+
+    // Verify the driver really came back before claiming success.
+    match fs::read_link(&driver_link)
+        .ok()
+        .and_then(|t| t.file_name().map(|f| f.to_string_lossy().into_owned()))
+    {
+        Some(d) if d == "hid-generic" => {
+            Ok(format!("Rebound hid-generic for {id} (driver symlink verified)"))
+        }
+        other => Err(format!(
+            "HID rebind incomplete: bind accepted for {id} but driver symlink is {}, not hid-generic",
+            other.as_deref().unwrap_or("gone")
+        )),
+    }
 }
 
-/// Scan kernel log this boot for Spectrum USB/HID trouble.
+/// Scan recent kernel logs for Spectrum USB/HID trouble: the current boot via
+/// journalctl, else whatever is in the kernel ring buffer via dmesg.
 pub fn scan_kernel_rgb_faults() -> Vec<String> {
     let mut out = Vec::new();
     let blob = kernel_log_blob();
@@ -533,11 +634,23 @@ pub fn scan_kernel_rgb_faults() -> Vec<String> {
 }
 
 fn kernel_log_blob() -> String {
-    // Prefer journalctl (works without CAP_SYSLOG on many systems). Only the
-    // most recent lines matter — the whole boot log would be a multi-MB
-    // subprocess result on the GUI/watchdog hot path.
+    // Prefer journalctl (works without CAP_SYSLOG on many systems). `-g`
+    // narrows to Spectrum-related lines server-side and `-n 200` keeps the
+    // subprocess result small on the GUI/watchdog hot path — together, the
+    // cap can no longer evict the lines we care about. The dmesg fallback
+    // stays untrimmed: the kernel ring buffer bounds its size already.
     let raw = if let Ok(o) = Command::new("journalctl")
-        .args(["-k", "-b", "--no-pager", "-o", "cat", "-n", "200"])
+        .args([
+            "-k",
+            "-b",
+            "--no-pager",
+            "-o",
+            "cat",
+            "-g",
+            KERNEL_FAULT_GREP,
+            "-n",
+            "200",
+        ])
         .output()
     {
         if o.status.success() {
@@ -554,11 +667,7 @@ fn kernel_log_blob() -> String {
     } else {
         String::new()
     };
-    let mut lines: Vec<&str> = raw.lines().collect();
-    if lines.len() > 200 {
-        lines.drain(..lines.len() - 200);
-    }
-    lines.join("\n")
+    raw
 }
 
 struct OpenOptionsCompat;
