@@ -1,5 +1,7 @@
 # Spectrum RGB zones — Legion Pro 7 Gen 10 (83RU)
 
+> Related: [SHORT.md](SHORT.md) · production implementation: `lenovo-legion-tool/src/keyboard.rs`
+
 Verified live on hardware (`048d:c197`, ITE 8258) via
 [legion-spectrum-control](https://github.com/alstergee/legion-spectrum-control)
 protocol (960-byte HID feature reports, report ID `0x07`).

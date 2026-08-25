@@ -1,5 +1,7 @@
 # Embedded Controller (EC) Sensor Documentation
 
+> Related: [EC-REGISTER-MAP.md](EC-REGISTER-MAP.md) · [RESEARCH-TOOLING.md](RESEARCH-TOOLING.md) · [sensor-research-findings.md](sensor-research-findings.md)
+
 ## Lenovo Legion Pro 7 16AFR10H (83RU) — BIOS SMCN20WW — ITE IT5508
 
 ---
@@ -98,10 +100,12 @@ xxd -l 256 /sys/kernel/debug/ec/ec0/io
 - Pros: Kernel-managed locking, safe concurrent access
 - Cons: 256-byte limit, needs debugfs mounted
 
+> hwmon/hidraw indices (`hwmon7`, `hidraw12`, …) in this file are boot-specific
+> examples — enumerate by `name`, never hardcode the index.
+
 ### Method 2: /dev/port (raw I/O) — HACKY
-```python
-fd = os.open("/dev/port", os.O_RDWR)
-# Send 0x80 to 0x66, then addr to 0x62, read 0x62
+```bash
+# Handshake: write 0x80 to port 0x66, write addr to port 0x62, read 0x62
 ```
 - Pros: Works without loading any module
 - Cons: Bypasses kernel locking, possible race with ACPI EC driver
@@ -169,19 +173,21 @@ These work fine already — no EC hacking needed for fan RPM.
 
 ## Keyboard RGB (USB HID)
 
-The per-key RGB backlight uses USB HID device 048d:c197 at
-`/dev/hidraw12`. Controlled via 33-byte HID feature reports:
+The per-key RGB backlight uses USB HID device 048d:c197 (hidraw instance
+varies per boot). Two report sizes on the same device:
 
-```python
-# Report format for lighting state
-payload = bytearray(33)
-payload[0] = 0xCC      # Report ID
-payload[1] = 0x16      # Sub-command
-payload[2] = effect    # 0x01=static, 0x03=breath, 0x04=wave, 0x06=smooth
-payload[3] = speed     # 1-4
-payload[4] = brightness # 1-2
-payload[5:17] = rgb    # 12 bytes for 4 zones (RGB x4)
-# Send via hidraw ioctl or write
+- **960-byte feature reports** (report ID `0x07`) — full effect packets /
+  per-zone control. See `SPECTRUM-ZONES.md` and production
+  `lenovo-legion-tool/src/keyboard.rs`.
+- **33-byte reports** — lighting-state query/set (`0xCC` sub-command shape):
+
+```
+byte 0: report ID 0xCC
+byte 1: 0x16      # sub-command
+byte 2: effect    # 0x01=static, 0x03=breath, 0x04=wave, 0x06=smooth
+byte 3: speed     # 1-4
+byte 4: brightness # 1-2
+bytes 5-16: rgb   # 12 bytes for 4 zones (RGB x4)
 ```
 
 White keyboard backlight (on/off/brightness levels 0/1/2) uses WMI,
