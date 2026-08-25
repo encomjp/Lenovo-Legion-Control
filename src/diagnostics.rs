@@ -231,17 +231,30 @@ fn read_os_release() -> OsInfo {
 /// `/run/user/<uid>` prefix. Applied to the daemon log tail only — every
 /// other field is anonymous by construction.
 fn redact_home_paths(text: &str) -> String {
+    let mut replacements = 0usize;
     let mut out = text.to_string();
     // Most specific first: this process's actual HOME.
     if let Ok(home) = std::env::var("HOME") {
         let home = home.trim_end_matches('/');
         if home.len() > 1 {
-            out = out.replace(home, "~");
+            let hits = out.matches(home).count();
+            if hits > 0 {
+                out = out.replace(home, "~");
+                replacements += hits;
+            }
         }
     }
     // Generic prefixes last: cover foreign homes and XDG runtime dirs.
+    let run_hits = out.matches("/run/user/").count();
     let out = rewrite_prefix_to_tilde(&out, "/run/user/");
-    rewrite_prefix_to_tilde(&out, "/home/")
+    let home_hits = out.matches("/home/").count();
+    let out = rewrite_prefix_to_tilde(&out, "/home/");
+    replacements += run_hits + home_hits;
+    log::debug!(
+        "redact_home_paths: {} chars in → {replacements} replacement(s)",
+        text.len()
+    );
+    out
 }
 
 /// True when the character terminates a home-path token.
@@ -279,8 +292,17 @@ fn rewrite_prefix_to_tilde(text: &str, prefix: &str) -> String {
 /// typically <1 s, worst case ~15 s (subprocess timeouts inside the
 /// self-checks). Also sweeps stale temp payloads — see [`sweep_stale_temp`].
 pub fn collect() -> DiagnosticsReport {
+    log::debug!("diagnostics: collecting report");
     sweep_stale_temp();
     let s = sensors::read_all();
+    log::debug!(
+        "diag sensors: cpu {:.1}°C · dgpu {:.1}°C · igpu {:.1}°C · {} ssd(s) · {} ram module(s)",
+        s.cpu_temp,
+        s.dgpu_temp,
+        s.igpu_edge,
+        s.ssd_composite.len(),
+        s.ram_temps.len()
+    );
     let cfg = config::get();
 
     let battery_summary = BatterySummary {
@@ -291,6 +313,12 @@ pub fn collect() -> DiagnosticsReport {
         health_pct: battery::health_pct(),
         charge_limit_pct: battery::charge_limit_pct(),
     };
+    log::debug!(
+        "diag battery: capacity {:?}% · status {:?} · limit {}%",
+        battery_summary.capacity_pct,
+        battery_summary.status,
+        battery_summary.charge_limit_pct
+    );
 
     let mut fan_list = Vec::new();
     for f in fans::channels() {
@@ -303,18 +331,46 @@ pub fn collect() -> DiagnosticsReport {
             target: fans::read_target(f.id),
         });
     }
+    log::debug!("diag fans: {} channel(s)", fan_list.len());
 
     let thermal_digest = ThermalDigest {
         config: cfg.thermal.clone(),
         cur_max_freq: thermal::read_cur_max(),
     };
+    log::debug!(
+        "diag thermal: enabled={} · max {}°C · cur_max {:?} kHz",
+        thermal_digest.config.enabled,
+        thermal_digest.config.max_temp,
+        thermal_digest.cur_max_freq
+    );
 
     let generated_at = chrono::Utc::now().to_rfc3339();
 
     let entries = crate::logging::recent_logs(200);
     let digest = build_log_digest(&entries);
+    log::debug!(
+        "diag log digest: {} info / {} warn / {} error(s)",
+        digest.info_count,
+        digest.warn_count,
+        digest.error_count
+    );
 
     let faults = crate::selftest::scan_faults();
+    let fault_criticals = faults
+        .iter()
+        .filter(|f| f.severity == crate::selftest::Severity::Critical)
+        .count();
+    let fault_warnings = faults
+        .iter()
+        .filter(|f| f.severity == crate::selftest::Severity::Warning)
+        .count();
+    let fault_infos = faults
+        .iter()
+        .filter(|f| f.severity == crate::selftest::Severity::Info)
+        .count();
+    log::debug!(
+        "diag faults: {fault_criticals} critical / {fault_warnings} warning / {fault_infos} info"
+    );
     for f in &faults {
         if f.severity == crate::selftest::Severity::Critical {
             log::warn!("fault: {}: {}", f.id, f.detail);
@@ -323,7 +379,7 @@ pub fn collect() -> DiagnosticsReport {
 
     let system_info = read_system_info();
 
-    DiagnosticsReport {
+    let report = DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
         generated_at,
         app_version: env!("CARGO_PKG_VERSION"),
@@ -348,7 +404,49 @@ pub fn collect() -> DiagnosticsReport {
         faults,
         self_checks: run_self_checks(),
         system_info,
-    }
+    };
+
+    // Sections built inline above — traced from the finished report so every
+    // report section leaves exactly one event-log entry.
+    log::debug!(
+        "diag device: model={} machine={}",
+        report.device.model,
+        report.device.machine_type
+    );
+    log::debug!(
+        "diag os: distro={} kernel={}",
+        report.os.distro,
+        report.os.kernel
+    );
+    log::debug!(
+        "diag profiles: current='{}' · {} choice(s)",
+        report.profiles.current,
+        report.profiles.choices.len()
+    );
+    log::debug!(
+        "diag curve optimizer: available={} ({})",
+        report.curve_optimizer.available,
+        report.curve_optimizer.reason
+    );
+    log::debug!(
+        "diag settings: lighting={} layout={} restore_on_launch={}",
+        report.settings.lighting_mode,
+        report.settings.keyboard_layout,
+        report.settings.restore_on_launch
+    );
+    let self_passed = report.self_checks.iter().filter(|c| c.ok).count();
+    log::debug!(
+        "diag self-checks: {self_passed}/{} passed",
+        report.self_checks.len()
+    );
+    log::debug!(
+        "diag system info: uptime {} s · load {:.2} · mem available {:?} MB",
+        report.system_info.uptime_secs,
+        report.system_info.load_avg_1m,
+        report.system_info.mem_available_mb
+    );
+
+    report
 }
 
 /// Read system context for the diagnostics report (read-only /proc + sysfs).
@@ -406,14 +504,27 @@ pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> Strin
         .map(str::trim)
         .filter(|s| !s.is_empty() && has_http_scheme(s));
     let cfg_endpoint = cfg_endpoint.trim();
+    let cfg_valid = !cfg_endpoint.is_empty() && has_http_scheme(cfg_endpoint);
+    log::debug!(
+        "resolve_endpoint: precedence winner: {}",
+        if override_url.is_some() {
+            "override"
+        } else if from_env.is_some() {
+            "env"
+        } else if cfg_valid {
+            "config"
+        } else {
+            "default"
+        }
+    );
     override_url
         .map(str::to_string)
         .or(from_env)
         .or_else(|| {
-            if cfg_endpoint.is_empty() || !has_http_scheme(cfg_endpoint) {
-                None
-            } else {
+            if cfg_valid {
                 Some(cfg_endpoint.to_string())
+            } else {
+                None
             }
         })
         .unwrap_or_else(|| DEFAULT_WAN_ENDPOINT.to_string())
@@ -537,6 +648,11 @@ fn build_curl_args(endpoint: &str, tmp_path: &str, header_path: Option<&str>) ->
         "--".to_string(),
         endpoint.to_string(),
     ]);
+    log::debug!(
+        "build_curl_args: {} argument(s), secret header: {}",
+        args.len(),
+        header_path.is_some()
+    );
     args
 }
 
@@ -648,15 +764,17 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
 /// payload creation and the always-run removal in [`send`]. Called at the
 /// top of [`collect`]; safe to call from anywhere, ignores all IO errors.
 pub fn sweep_stale_temp() {
-    sweep_older_than(
+    let removed = sweep_older_than(
         &std::env::temp_dir(),
         SystemTime::now() - PAYLOAD_STALE_AFTER,
     );
+    log::debug!("stale payload sweep: removed {removed} file(s)");
 }
 
-fn sweep_older_than(dir: &Path, cutoff: SystemTime) {
+fn sweep_older_than(dir: &Path, cutoff: SystemTime) -> usize {
+    let mut removed = 0usize;
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+        return 0;
     };
     for entry in entries.flatten() {
         let is_payload = entry
@@ -673,10 +791,11 @@ fn sweep_older_than(dir: &Path, cutoff: SystemTime) {
             continue;
         }
         let stale = meta.modified().map(|m| m <= cutoff).unwrap_or(false);
-        if stale {
-            let _ = std::fs::remove_file(entry.path());
+        if stale && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
         }
     }
+    removed
 }
 
 /// Opt-in state for diagnostics collection. GUI/background callers must
@@ -736,6 +855,7 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
         cfg.machine_id.clone()
     };
     let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
+    log::debug!("diagnostics send → endpoint {endpoint}");
     let mut report = collect();
     report.machine_id = machine_id.clone();
     let resp = send(&report, &endpoint)?;

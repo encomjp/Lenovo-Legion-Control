@@ -57,13 +57,15 @@ pub fn validate(max_temp: u8, acknowledge: bool) -> Result<(), String> {
 /// ≥4 °C → 300 MHz. Mild crossings get gentle steps (no gameplay jolt);
 /// serious heat gets clamped quickly.
 pub fn down_step(overshoot_mc: i32) -> u32 {
-    if overshoot_mc >= URGENT_OVERSHOOT_MC {
-        STEP_URGENT
+    let (step, tier) = if overshoot_mc >= URGENT_OVERSHOOT_MC {
+        (STEP_URGENT, "urgent")
     } else if overshoot_mc >= 2_000 {
-        STEP_MODERATE
+        (STEP_MODERATE, "moderate")
     } else {
-        STEP_GENTLE
-    }
+        (STEP_GENTLE, "gentle")
+    };
+    log::debug!("thermal: down_step(overshoot={overshoot_mc}) → {step} [{tier} tier]");
+    step
 }
 
 /// Exponential moving average over the 1 s governor samples (α = ½).
@@ -77,11 +79,16 @@ pub struct TempFilter {
 impl TempFilter {
     /// Feed one raw sample, get the smoothed value.
     pub fn update(&mut self, temp_mc: i32) -> i32 {
-        let next = match self.smoothed {
-            None => temp_mc,
-            Some(prev) => (prev + temp_mc) / 2,
+        let (seeded, next) = match self.smoothed {
+            None => (true, temp_mc),
+            Some(prev) => (false, (prev + temp_mc) / 2),
         };
         self.smoothed = Some(next);
+        if seeded {
+            log::debug!("thermal: TempFilter seeded ← {temp_mc}");
+        } else {
+            log::debug!("thermal: TempFilter average(raw={temp_mc}) → {next}");
+        }
         next
     }
 
@@ -90,6 +97,9 @@ impl TempFilter {
     pub fn effective(&mut self, raw_mc: i32, limit_mc: i32) -> i32 {
         if raw_mc >= limit_mc + URGENT_OVERSHOOT_MC {
             self.smoothed = Some(raw_mc);
+            log::debug!(
+                "thermal: TempFilter urgent bypass: raw {raw_mc} ≥ limit {limit_mc} + {URGENT_OVERSHOOT_MC} — filter re-seeded"
+            );
             raw_mc
         } else {
             self.update(raw_mc)
@@ -98,16 +108,33 @@ impl TempFilter {
 }
 
 pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option<u32> {
+    log::debug!(
+        "thermal: compute_target(cur_max={cur_max}, temp_mc={temp_mc}, enabled={}, max_temp={})",
+        cfg.enabled,
+        cfg.max_temp
+    );
     if !cfg.enabled {
+        log::debug!("thermal: compute_target → None (disabled)");
         return None;
     }
     let max_mc = cfg.max_temp as i32 * 1000;
     let restore_mc = (cfg.max_temp as i32 - HYSTERESIS) * 1000;
     if temp_mc >= max_mc && cur_max > MIN {
-        Some(cur_max.saturating_sub(down_step(temp_mc - max_mc)).max(MIN))
+        let target = cur_max.saturating_sub(down_step(temp_mc - max_mc)).max(MIN);
+        log::debug!(
+            "thermal: compute_target → Some({target}) (throttle: temp ≥ max {max_mc}, floor MIN {MIN})"
+        );
+        Some(target)
     } else if temp_mc <= restore_mc && cur_max < MAX_FULL {
-        Some(cur_max.saturating_add(STEP_UP).min(MAX_FULL))
+        let target = cur_max.saturating_add(STEP_UP).min(MAX_FULL);
+        log::debug!(
+            "thermal: compute_target → Some({target}) (restore: temp ≤ restore {restore_mc}, cap MAX_FULL {MAX_FULL})"
+        );
+        Some(target)
     } else {
+        log::debug!(
+            "thermal: compute_target → None (hold in hysteresis band {restore_mc}..{max_mc})"
+        );
         None
     }
 }
@@ -117,40 +144,75 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
 /// with fallback to `temp3_input`).
 pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
     let base = Path::new("/sys/class/hwmon");
-    if let Ok(entries) = fs::read_dir(base) {
-        for entry in entries.flatten() {
-            let name_path = entry.path().join("name");
-            if let Ok(name) = fs::read_to_string(&name_path) {
-                if name.trim() == "k10temp" {
-                    let hw = entry.path();
-                    let cpu_temp = fs::read_to_string(hw.join("temp1_input"))
-                        .ok()
-                        .and_then(|s| s.trim().parse::<i32>().ok());
-                    let cpu_temp_2 = fs::read_to_string(hw.join("temp4_input"))
-                        .ok()
-                        .and_then(|s| s.trim().parse::<i32>().ok())
-                        .or_else(|| {
-                            fs::read_to_string(hw.join("temp3_input"))
-                                .ok()
-                                .and_then(|s| s.trim().parse::<i32>().ok())
-                        });
-                    return (cpu_temp, cpu_temp_2);
+    match fs::read_dir(base) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name_path = entry.path().join("name");
+                if let Ok(name) = fs::read_to_string(&name_path) {
+                    if name.trim() == "k10temp" {
+                        let hw = entry.path();
+                        log::debug!("thermal: k10temp matched at {}", hw.display());
+                        let cpu_temp = fs::read_to_string(hw.join("temp1_input"))
+                            .ok()
+                            .and_then(|s| s.trim().parse::<i32>().ok());
+                        log::debug!("thermal: temp1_input (Tctl) → {cpu_temp:?}");
+                        let tccd1 = fs::read_to_string(hw.join("temp4_input"))
+                            .ok()
+                            .and_then(|s| s.trim().parse::<i32>().ok());
+                        let cpu_temp_2 = match tccd1 {
+                            Some(v) => {
+                                log::debug!("thermal: temp4_input (Tccd1) → {v}");
+                                Some(v)
+                            }
+                            None => {
+                                let fallback = fs::read_to_string(hw.join("temp3_input"))
+                                    .ok()
+                                    .and_then(|s| s.trim().parse::<i32>().ok());
+                                log::debug!(
+                                    "thermal: temp4_input unusable — temp3_input (Tccd1 fallback) → {fallback:?}"
+                                );
+                                fallback
+                            }
+                        };
+                        log::debug!("thermal: read_cpu_temps → ({cpu_temp:?}, {cpu_temp_2:?})");
+                        return (cpu_temp, cpu_temp_2);
+                    } else {
+                        log::trace!(
+                            "thermal: hwmon {} name={:?} — not k10temp, skipping",
+                            entry.path().display(),
+                            name.trim()
+                        );
+                    }
                 }
             }
+            log::debug!("thermal: no k10temp hwmon found under {}", base.display());
         }
+        Err(e) => log::warn!("thermal: cannot list {}: {e}", base.display()),
     }
     (None, None)
 }
 
 pub fn read_cur_max() -> Option<u32> {
-    fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")
+    let policy = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq";
+    let parsed = fs::read_to_string(policy)
         .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    match parsed {
+        Some(v) => log::debug!("thermal: policy {policy} → {v}"),
+        None => log::debug!("thermal: policy {policy} unreadable"),
+    }
+    parsed
 }
 
 pub fn write_all_cpus(freq: u32) -> Result<(), String> {
     let base = Path::new("/sys/devices/system/cpu");
-    let entries = fs::read_dir(base).map_err(|e| e.to_string())?;
+    let entries = match fs::read_dir(base) {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::error!("thermal: cannot list {}: {e}", base.display());
+            return Err(e.to_string());
+        }
+    };
     let mut found = false;
     let mut last_err: Option<String> = None;
     for entry in entries.flatten() {
@@ -166,17 +228,27 @@ pub fn write_all_cpus(freq: u32) -> Result<(), String> {
         let p = entry.path().join("cpufreq/scaling_max_freq");
         if p.exists() {
             found = true;
-            if let Err(e) = fs::write(&p, freq.to_string()) {
-                last_err = Some(format!("{}: {e}", p.display()));
+            match fs::write(&p, freq.to_string()) {
+                Ok(()) => log::debug!("thermal: {fname}/scaling_max_freq ← {freq}"),
+                Err(e) => {
+                    log::warn!("thermal: write {} failed: {e}", p.display());
+                    last_err = Some(format!("{}: {e}", p.display()));
+                }
             }
         }
     }
     if !found {
+        log::error!(
+            "thermal: no cpu*/cpufreq/scaling_max_freq found under {}",
+            base.display()
+        );
         return Err("no cpu*/cpufreq/scaling_max_freq found".into());
     }
     if let Some(e) = last_err {
+        log::error!("thermal: write_all_cpus({freq}) failed: {e}");
         return Err(e);
     }
+    log::debug!("thermal: write_all_cpus({freq}) ok — all policy files written");
     Ok(())
 }
 

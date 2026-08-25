@@ -314,25 +314,37 @@ impl KeyboardLayout {
 pub fn keycode_by_name(name: &str) -> Option<u16> {
     let n = name.trim();
     if let Some(hex) = n.strip_prefix("0x").or_else(|| n.strip_prefix("0X")) {
-        return u16::from_str_radix(hex, 16).ok();
+        let parsed = u16::from_str_radix(hex, 16).ok();
+        log::trace!("keycodes: lookup {n:?} (hex literal) → {parsed:?}");
+        return parsed;
     }
-    DE_KEYCODES
+    let found = DE_KEYCODES
         .iter()
         .chain(US_KEYCODES.iter())
         .find(|(k, _)| *k == n)
-        .map(|(_, c)| *c)
+        .map(|(_, c)| *c);
+    log::trace!("keycodes: lookup {n:?} → {found:?}");
+    found
 }
 
 pub fn layout_keycodes(layout: KeyboardLayout) -> &'static [(&'static str, u16)] {
-    match layout {
+    let table = match layout {
         KeyboardLayout::De => DE_KEYCODES,
         KeyboardLayout::Us => US_KEYCODES,
-    }
+    };
+    log::trace!(
+        "keycodes: layout_keycodes({}) → {} entries",
+        layout.name(),
+        table.len()
+    );
+    table
 }
 
 /// Stable map key for per-key colour storage (layout-independent).
 pub fn color_key_for_code(code: u16) -> String {
-    format!("0x{code:04x}")
+    let key = format!("0x{code:04x}");
+    log::trace!("keycodes: color_key_for_code(0x{code:04x}) → {key:?}");
+    key
 }
 
 // ioctl: HIDIOCSFEATURE(len) / HIDIOCGFEATURE(len) — same as spectrum-ctl.py
@@ -512,12 +524,20 @@ impl RgbZone {
 }
 
 fn find_spectrum_hidraw() -> Option<PathBuf> {
-    let entries = std::fs::read_dir("/sys/class/hidraw").ok()?;
+    log::debug!("spectrum: scanning /sys/class/hidraw for ITE {VID}:{PID}");
+    let entries = match std::fs::read_dir("/sys/class/hidraw") {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::warn!("spectrum: hidraw scan aborted — cannot list /sys/class/hidraw: {e}");
+            return None;
+        }
+    };
     let mut fallback = None;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let Ok(mut cur) = std::fs::canonicalize(entry.path().join("device")) else {
+            log::trace!("hidraw scan: {name}: no resolvable sysfs device node — skipping");
             continue;
         };
         let mut matched = false;
@@ -531,8 +551,22 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                     (Ok(vendor), Ok(product)) => {
                         matched = vendor.trim().to_lowercase() == VID
                             && product.trim().to_lowercase() == PID;
+                        if matched {
+                            log::trace!("hidraw scan: {name}: VID/PID match {VID}:{PID}");
+                        } else {
+                            log::trace!(
+                                "hidraw scan: {name}: no-match vid:pid {}:{} (want {VID}:{PID})",
+                                vendor.trim(),
+                                product.trim()
+                            );
+                        }
                     }
-                    _ => break,
+                    _ => {
+                        log::trace!(
+                            "hidraw scan: {name}: unreadable idVendor/idProduct (mid-unplug?) — skipping branch"
+                        );
+                        break;
+                    }
                 }
                 break;
             }
@@ -541,6 +575,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             }
         }
         if !matched {
+            log::trace!("hidraw scan: {name}: rejected — not the Spectrum USB interface");
             continue;
         }
         let path = PathBuf::from(format!("/dev/{name}"));
@@ -550,16 +585,41 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                 .windows(SPECTRUM_USAGE.len())
                 .any(|w| w == SPECTRUM_USAGE)
             {
+                log::debug!(
+                    "hidraw scan: {name}: Spectrum usage page 0xff89 present — selected {}",
+                    path.display()
+                );
                 return Some(path);
             }
+            log::trace!(
+                "hidraw scan: {name}: Spectrum usage page absent from {}-byte report descriptor — kept as fallback",
+                desc.len()
+            );
+        } else {
+            log::trace!("hidraw scan: {name}: report_descriptor unreadable — kept as fallback");
         }
         fallback = Some(path);
+    }
+    match &fallback {
+        Some(p) => log::debug!(
+            "hidraw scan: done — no usage-page match, falling back to {}",
+            p.display()
+        ),
+        None => log::debug!("hidraw scan: done — no {VID}:{PID} candidate found"),
     }
     fallback
 }
 
 struct SpectrumDevice {
     file: std::fs::File,
+    /// Remembered only so fd close events can be logged with context.
+    path: PathBuf,
+}
+
+impl Drop for SpectrumDevice {
+    fn drop(&mut self) {
+        log::debug!("spectrum: closing hidraw fd ({})", self.path.display());
+    }
 }
 
 fn hid_lock() -> &'static Mutex<()> {
@@ -583,18 +643,26 @@ impl SpectrumDevice {
                 msg
             })?;
         log::debug!("spectrum: opened {}", path.display());
-        Ok(Self { file })
+        Ok(Self { file, path })
     }
 
     fn set_feature(&self, data: &[u8]) -> Result<(), String> {
         // Never silently truncate: a cut-off report sends garbage to the ITE
         // controller. Surface the error so callers can reduce the payload.
         if data.len() > REPORT_SIZE {
-            return Err(format!(
+            let msg = format!(
                 "HID feature report too large: {} bytes (max {REPORT_SIZE}) — fewer painted keys or simpler effect",
                 data.len()
-            ));
+            );
+            log::warn!("spectrum: send rejected — {msg}");
+            return Err(msg);
         }
+        let opcode = data.get(1).copied().unwrap_or(0);
+        log::trace!(
+            "spectrum: HIDIOCSFEATURE op=0x{opcode:02X} len={} report_id=0x{:02X}",
+            data.len(),
+            data.first().copied().unwrap_or(0)
+        );
         let mut buf = [0u8; REPORT_SIZE];
         buf[..data.len()].copy_from_slice(data);
         // SAFETY: ioctl on a valid fd (self.file is owned/opened) with HID_SET_FEATURE
@@ -609,9 +677,16 @@ impl SpectrumDevice {
         };
         if ret < 0 {
             let msg = format!("HIDIOCSFEATURE failed: {}", Error::last_os_error());
-            log::warn!("spectrum: {msg}");
+            log::warn!(
+                "spectrum: HIDIOCSFEATURE op=0x{opcode:02X} len={} FAILED: {msg}",
+                data.len()
+            );
             return Err(msg);
         }
+        log::trace!(
+            "spectrum: HIDIOCSFEATURE op=0x{opcode:02X} len={} ok",
+            data.len()
+        );
         Ok(())
     }
 
@@ -628,8 +703,17 @@ impl SpectrumDevice {
             )
         };
         if ret < 0 {
-            return Err(format!("HIDIOCGFEATURE failed: {}", Error::last_os_error()));
+            let msg = format!("HIDIOCGFEATURE failed: {}", Error::last_os_error());
+            log::warn!("spectrum: {msg}");
+            return Err(msg);
         }
+        log::trace!(
+            "spectrum: HIDIOCGFEATURE requested={} received={} resp_id=0x{:02X} op=0x{:02X}",
+            REPORT_SIZE,
+            ret,
+            buf[0],
+            buf[1]
+        );
         Ok(buf)
     }
 
@@ -689,16 +773,25 @@ fn build_effect(
 
 fn get_profile_raw(dev: &SpectrumDevice) -> Result<u8, String> {
     dev.request(OP_GET_PROFILE, &[])?;
-    Ok(dev.get_feature()?[4].min(6))
+    let profile = dev.get_feature()?[4].min(6);
+    log::trace!("spectrum: active hardware profile read: {profile}");
+    Ok(profile)
 }
 
 fn get_brightness_raw(dev: &SpectrumDevice) -> Result<u8, String> {
     dev.request(OP_GET_BRIGHTNESS, &[])?;
-    Ok(dev.get_feature()?[4])
+    let raw = dev.get_feature()?[4];
+    log::debug!(
+        "spectrum: brightness get → raw response byte 0x{raw:02X} (level {})",
+        raw.min(9)
+    );
+    Ok(raw)
 }
 
 fn set_brightness_raw(dev: &SpectrumDevice, level: u8) -> Result<(), String> {
-    dev.request(OP_BRIGHTNESS, &[level.min(9)])
+    let clamped = level.min(9);
+    log::debug!("spectrum: brightness set level={clamped} (requested {level})");
+    dev.request(OP_BRIGHTNESS, &[clamped])
 }
 
 fn send_effects(dev: &SpectrumDevice, profile: u8, effects: &[Vec<u8>]) -> Result<(), String> {
@@ -708,11 +801,28 @@ fn send_effects(dev: &SpectrumDevice, profile: u8, effects: &[Vec<u8>]) -> Resul
     }
     let mut packet = vec![0x07, OP_EFFECT_CHANGE, 0xC0, 0x03];
     packet.extend_from_slice(&payload);
+    log::trace!(
+        "spectrum: OP_EFFECT_CHANGE profile={profile} effects={} packet_len={}",
+        effects.len(),
+        packet.len()
+    );
     // Match spectrum-ctl exactly — no profile hop after write.
-    dev.set_feature(&packet)
+    let result = dev.set_feature(&packet);
+    if result.is_ok() {
+        log::debug!(
+            "spectrum: effect packet applied — profile={profile} effects={}",
+            effects.len()
+        );
+    }
+    result
 }
 
-fn zone_blob(effect_no: u8, layer: &crate::config::ZoneEffect, keys: &[u16]) -> Vec<u8> {
+fn zone_blob(
+    effect_no: u8,
+    zone_label: &str,
+    layer: &crate::config::ZoneEffect,
+    keys: &[u16],
+) -> Vec<u8> {
     let effect = if layer.is_off() {
         RgbEffect::Static
     } else {
@@ -721,17 +831,34 @@ fn zone_blob(effect_no: u8, layer: &crate::config::ZoneEffect, keys: &[u16]) -> 
     let colors = layer.colors();
     let speed = layer.speed.clamp(1, 3);
     let clockwise = u8::from(matches!(effect, RgbEffect::ScrewRainbow));
+    log::debug!(
+        "spectrum: zone '{zone_label}' effect_no={effect_no}: effect={} colors={} speed={speed} keys={} off={}",
+        effect.name(),
+        colors.len(),
+        keys.len(),
+        layer.is_off()
+    );
     build_effect(effect_no, effect as u8, &colors, keys, speed, 0, clockwise)
 }
 
 /// Build a full multi-effect packet from persisted zone (and optional per-key) state.
 /// Zones stay independent — changing front does not black out the keyboard.
 fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> Result<(), String> {
+    log::debug!(
+        "spectrum: apply_config start (lighting_mode='{}', saved brightness={}, per-key entries={})",
+        cfg.lighting_mode,
+        cfg.brightness,
+        cfg.per_key.len()
+    );
     if get_brightness_raw(dev)? < 1 {
         let level = cfg.brightness.max(1);
+        log::debug!(
+            "spectrum: apply_config: device reads dark — raising brightness to {level} first"
+        );
         set_brightness_raw(dev, level)?;
     }
     let profile = get_profile_raw(dev)?;
+    log::debug!("spectrum: apply_config: active profile {profile}");
     let mut blobs = Vec::new();
     let mut n = 1u8;
 
@@ -741,15 +868,30 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
     };
 
     if cfg.lighting_mode == "per-key" && !cfg.per_key.is_empty() {
+        log::debug!(
+            "spectrum: apply_config: per-key mode — painting {} named key(s)",
+            cfg.per_key.len()
+        );
         // Group painted keys by colour → one static effect per colour.
         let mut by_color: std::collections::BTreeMap<(u8, u8, u8), Vec<u16>> =
             std::collections::BTreeMap::new();
         for (name, rgb) in &cfg.per_key {
-            if let Some(code) = keycode_by_name(name) {
-                by_color
-                    .entry((rgb[0], rgb[1], rgb[2]))
-                    .or_default()
-                    .push(code);
+            match keycode_by_name(name) {
+                Some(code) => {
+                    log::trace!(
+                        "spectrum: per-key paint {name:?} → code 0x{code:04X} rgb=({},{},{})",
+                        rgb[0],
+                        rgb[1],
+                        rgb[2]
+                    );
+                    by_color
+                        .entry((rgb[0], rgb[1], rgb[2]))
+                        .or_default()
+                        .push(code);
+                }
+                None => log::warn!(
+                    "spectrum: per-key paint skipped — {name:?} does not resolve to a Spectrum code"
+                ),
             }
         }
         // Unpainted keyboard keys stay dark so the map is readable.
@@ -761,28 +903,52 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
             .filter(|c| !painted.contains(c))
             .collect();
         if !rest.is_empty() {
+            log::trace!(
+                "spectrum: apply_config: blackout layer over {} unpainted keyboard key(s)",
+                rest.len()
+            );
             let blob = build_effect(n, 11, &[(0, 0, 0)], &rest, 2, 0, 0);
             push(&mut blobs, &mut n, blob);
+        } else {
+            log::trace!(
+                "spectrum: apply_config: every keyboard key painted — no blackout layer needed"
+            );
         }
         for ((r, g, b), keys) in by_color {
             if keys.is_empty() {
+                log::trace!(
+                    "spectrum: apply_config: skipping empty colour group rgb=({r},{g},{b})"
+                );
                 continue;
             }
+            log::debug!(
+                "spectrum: apply_config: static rgb=({r},{g},{b}) over {} key(s)",
+                keys.len()
+            );
             let blob = build_effect(n, 11, &[(r, g, b)], &keys, 2, 0, 0);
             push(&mut blobs, &mut n, blob);
         }
     } else {
-        let blob = zone_blob(n, &cfg.keyboard, KEYBOARD_KEYS);
+        if cfg.lighting_mode == "per-key" {
+            log::debug!(
+                "spectrum: apply_config: per-key mode but colour map empty — falling back to zone effects"
+            );
+        }
+        let blob = zone_blob(n, "keyboard", &cfg.keyboard, KEYBOARD_KEYS);
         push(&mut blobs, &mut n, blob);
     }
 
-    let blob = zone_blob(n, &cfg.front, FRONT_KEYS);
+    let blob = zone_blob(n, "front", &cfg.front, FRONT_KEYS);
     push(&mut blobs, &mut n, blob);
-    let blob = zone_blob(n, &cfg.rear, REAR_KEYS);
+    let blob = zone_blob(n, "rear", &cfg.rear, REAR_KEYS);
     push(&mut blobs, &mut n, blob);
-    let blob = zone_blob(n, &cfg.logo, LOGO_KEYS);
+    let blob = zone_blob(n, "logo", &cfg.logo, LOGO_KEYS);
     push(&mut blobs, &mut n, blob);
 
+    log::debug!(
+        "spectrum: apply_config: sending {} effect blob(s) to profile {profile}",
+        blobs.len()
+    );
     send_effects(dev, profile, &blobs)
 }
 
@@ -802,6 +968,10 @@ fn apply_effect_on_dev(
     } else {
         effect.name()
     };
+    log::debug!(
+        "spectrum: effect apply zone='{}' effect={name} rgb=({r},{g},{b}) speed={speed} brightness={brightness}",
+        zone.name()
+    );
     let cfg = crate::config::apply_zone_update(zone, name, r, g, b, speed, brightness);
     apply_config_on_dev(dev, &cfg)
 }
@@ -837,6 +1007,34 @@ enum SpectrumJob {
     },
 }
 
+impl SpectrumJob {
+    /// One-line description for event logs (job type + parameters).
+    fn describe(&self) -> String {
+        match self {
+            Self::Effect {
+                effect,
+                r,
+                g,
+                b,
+                speed,
+                brightness,
+                zone,
+                done,
+            } => format!(
+                "Effect(effect={}, rgb=({r},{g},{b}), speed={speed}, brightness={brightness}, zone={}, wait={})",
+                effect.name(),
+                zone.name(),
+                done.is_some()
+            ),
+            Self::Restore { done } => format!("Restore(wait={})", done.is_some()),
+            Self::Brightness { level, done } => {
+                format!("Brightness(level={level}, wait={})", done.is_some())
+            }
+            Self::Logo { on, done } => format!("Logo(on={on}, wait={})", done.is_some()),
+        }
+    }
+}
+
 fn spectrum_tx() -> &'static Sender<SpectrumJob> {
     static TX: OnceLock<Sender<SpectrumJob>> = OnceLock::new();
     TX.get_or_init(|| {
@@ -845,7 +1043,7 @@ fn spectrum_tx() -> &'static Sender<SpectrumJob> {
             .name("spectrum-hid".into())
             .spawn(move || spectrum_worker(rx))
         {
-            Ok(_) => {}
+            Ok(_) => log::info!("spectrum: HID worker thread started"),
             Err(e) => log::error!("failed to start spectrum HID worker: {e}"),
         }
         tx
@@ -856,12 +1054,14 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
     use std::collections::HashMap;
 
     while let Ok(first) = rx.recv() {
+        log::debug!("spectrum: worker dequeued job: {}", first.describe());
         // Per-zone coalescing: rapid Front+Keyboard tweaks must not drop one zone.
         let mut effects: HashMap<RgbZone, (RgbEffect, u8, u8, u8, u8, u8)> = HashMap::new();
         let mut restore = false;
         let mut brightness: Option<u8> = None;
         let mut logo: Option<bool> = None;
         let mut waiters: Vec<Sender<Result<(), String>>> = Vec::new();
+        let mut drained = 0usize;
 
         let mut absorb = |job: SpectrumJob| match job {
             SpectrumJob::Effect {
@@ -909,8 +1109,15 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
 
         absorb(first);
         while let Ok(job) = rx.try_recv() {
+            drained += 1;
             absorb(job);
         }
+        log::debug!(
+            "spectrum: worker batch drain: 1 + {drained} coalesced job(s) — zones={:?} restore={} waiters={}",
+            effects.keys().map(|z| z.name()).collect::<Vec<_>>(),
+            restore,
+            waiters.len()
+        );
 
         let result = (|| {
             let _guard = hid_lock()
@@ -922,11 +1129,17 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
             // the keyboard dark even though colours were written.
             if let Some(level) = brightness {
                 if !(!effects.is_empty() && level == 0) {
+                    log::debug!("spectrum: worker applying brightness {level}");
                     set_brightness_raw(&dev, level)?;
                     crate::config::set_brightness(level);
+                } else {
+                    log::debug!(
+                        "spectrum: worker ignoring queued brightness 0 — effect batch present"
+                    );
                 }
             }
             if restore {
+                log::debug!("spectrum: worker: restoring persisted lighting config");
                 let cfg = crate::config::get();
                 apply_config_on_dev(&dev, &cfg)?;
             } else {
@@ -940,16 +1153,33 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
                     RgbZone::Chassis => 4,
                     RgbZone::Logo => 5,
                 });
-                for (zone, (e, r, g, b, speed, brightness)) in zones {
+                let total = zones.len();
+                for (i, (zone, (e, r, g, b, speed, brightness))) in zones.into_iter().enumerate() {
+                    log::debug!(
+                        "spectrum: worker zone {}/{}: '{}' effect={} rgb=({r},{g},{b}) speed={speed}",
+                        i + 1,
+                        total,
+                        zone.name(),
+                        e.name()
+                    );
                     apply_effect_on_dev(&dev, e, r, g, b, speed, brightness, zone)?;
                 }
             }
             if let Some(on) = logo {
+                log::debug!(
+                    "spectrum: worker setting logo {}",
+                    if on { "on" } else { "off" }
+                );
                 dev.request(OP_LOGO, &[u8::from(on)])?;
                 crate::config::set_logo_on(on);
             }
             Ok(())
         })();
+
+        match &result {
+            Ok(()) => log::debug!("spectrum: worker batch complete"),
+            Err(e) => log::error!("spectrum: worker batch FAILED: {e}"),
+        }
 
         for w in waiters {
             let _ = w.send(result.clone());
@@ -958,6 +1188,7 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
 }
 
 fn enqueue(job: SpectrumJob, wait: bool) -> Result<(), String> {
+    log::debug!("spectrum: enqueue job {} (wait={wait})", job.describe());
     if wait {
         let (done_tx, done_rx) = mpsc::channel();
         let job = match job {
@@ -1048,6 +1279,11 @@ pub fn set_rgb_effect_zone_async(
     brightness: u8,
     zone: RgbZone,
 ) {
+    log::debug!(
+        "spectrum: async effect submit zone='{}' effect={} rgb=({r},{g},{b}) speed={speed} brightness={brightness}",
+        zone.name(),
+        effect.name()
+    );
     let _ = enqueue(
         SpectrumJob::Effect {
             effect,
@@ -1065,34 +1301,49 @@ pub fn set_rgb_effect_zone_async(
 
 /// Re-apply `~/.config/legion-control/settings.json` lighting to hardware.
 pub fn restore_lighting_async() {
+    log::debug!("spectrum: restore_lighting requested (async)");
     let _ = enqueue(SpectrumJob::Restore { done: None }, false);
 }
 
 pub fn restore_lighting() -> Result<(), String> {
+    log::debug!("spectrum: restore_lighting requested (blocking)");
     enqueue(SpectrumJob::Restore { done: None }, true)
 }
 
 pub fn clear_per_key_async() {
+    log::info!("spectrum: clearing per-key colour map, then restoring saved zones");
     crate::config::clear_per_key();
     restore_lighting_async();
+}
+
+/// Record a troubleshoot step: event-log it and collect it for the caller.
+fn record_troubleshoot_step(steps: &mut Vec<String>, step: &str) {
+    log::info!("troubleshoot: {step}");
+    steps.push(step.to_string());
 }
 
 /// Soft-reset Spectrum when lighting is stuck/glitched: max brightness, clear
 /// per-key paints, static white, logo on, then re-apply saved config.
 pub fn troubleshoot_lighting() -> Result<Vec<String>, String> {
+    log::info!("troubleshoot: starting Spectrum soft-reset sequence");
     let mut steps = Vec::new();
     set_rgb_brightness(9)?;
-    steps.push("Spectrum brightness → 9".into());
+    record_troubleshoot_step(&mut steps, "Spectrum brightness → 9");
     crate::config::clear_per_key();
-    steps.push("Cleared per-key colour map".into());
+    record_troubleshoot_step(&mut steps, "Cleared per-key colour map");
     set_rgb_static(255, 255, 255)?;
-    steps.push("Static white on all zones".into());
+    record_troubleshoot_step(&mut steps, "Static white on all zones");
     match set_logo(true) {
-        Ok(()) => steps.push("Logo LED on".into()),
-        Err(e) => steps.push(format!("Logo LED skipped: {e}")),
+        Ok(()) => record_troubleshoot_step(&mut steps, "Logo LED on"),
+        Err(e) => {
+            let step = format!("Logo LED skipped: {e}");
+            log::warn!("troubleshoot: {step}");
+            steps.push(step);
+        }
     }
     restore_lighting()?;
-    steps.push("Re-applied saved lighting config".into());
+    record_troubleshoot_step(&mut steps, "Re-applied saved lighting config");
+    log::info!("troubleshoot: sequence finished ({} step(s))", steps.len());
     Ok(steps)
 }
 
@@ -1113,8 +1364,20 @@ pub fn set_rgb_off() -> Result<(), String> {
 /// Spectrum brightness 0–9 (reads still hit the device directly; rare/fast).
 pub fn rgb_brightness() -> Option<u8> {
     let _guard = hid_lock().lock().ok()?;
-    let dev = SpectrumDevice::open().ok()?;
-    get_brightness_raw(&dev).ok()
+    let dev = match SpectrumDevice::open() {
+        Ok(dev) => dev,
+        Err(e) => {
+            log::debug!("spectrum: rgb_brightness: device unavailable: {e}");
+            return None;
+        }
+    };
+    match get_brightness_raw(&dev) {
+        Ok(level) => Some(level),
+        Err(e) => {
+            log::debug!("spectrum: rgb_brightness: read failed: {e}");
+            None
+        }
+    }
 }
 
 pub fn set_rgb_brightness(level: u8) -> Result<(), String> {
@@ -1129,7 +1392,10 @@ pub fn logo_on() -> Option<bool> {
     let _guard = hid_lock().lock().ok()?;
     let dev = SpectrumDevice::open().ok()?;
     dev.request(OP_GET_LOGO, &[]).ok()?;
-    Some(dev.get_feature().ok()?[4] == 1)
+    let raw = dev.get_feature().ok()?[4];
+    let on = raw == 1;
+    log::debug!("spectrum: logo state query → raw byte 0x{raw:02X} (on={on})");
+    Some(on)
 }
 
 pub fn set_logo(on: bool) -> Result<(), String> {
@@ -1149,9 +1415,17 @@ pub fn peek_effect_rgb() -> Option<(u8, u8, u8)> {
     let resp = dev.get_feature().ok()?;
     let ncolors = *resp.get(21)?;
     if ncolors == 0 {
+        log::trace!("spectrum: peek_effect_rgb: response reports 0 colours");
         return None;
     }
-    Some((resp[22], resp[23], resp[24]))
+    let rgb = (resp[22], resp[23], resp[24]);
+    log::debug!(
+        "spectrum: peek_effect_rgb: ncolors={ncolors} first rgb=({}, {}, {})",
+        rgb.0,
+        rgb.1,
+        rgb.2
+    );
+    Some(rgb)
 }
 
 // ─── White backlight (WMI LED — rare on Gen 10 RGB models) ───
@@ -1165,9 +1439,15 @@ fn find_kbd_led() -> Option<PathBuf> {
     for p in KBD_LED_CANDIDATES {
         let path = PathBuf::from(p);
         if path.join("brightness").exists() {
+            log::trace!("kbd-backlight: using LED {}", path.display());
             return Some(path);
         }
+        log::trace!(
+            "kbd-backlight: candidate {} has no brightness node — trying next",
+            path.display()
+        );
     }
+    log::debug!("kbd-backlight: no white keyboard backlight LED found");
     None
 }
 
@@ -1187,13 +1467,23 @@ pub fn brightness() -> Option<u8> {
 
 pub fn set_brightness(level: u8) -> IoResult<()> {
     let led = find_kbd_led().ok_or_else(|| {
+        log::warn!("kbd-backlight: set_brightness({level}) requested but no LED present");
         Error::new(
             ErrorKind::NotFound,
             "No white keyboard backlight LED (RGB Spectrum only on this model)",
         )
     })?;
     let max = max_brightness().unwrap_or(2);
-    std::fs::write(led.join("brightness"), format!("{}", level.min(max)))
+    let effective = level.min(max);
+    log::debug!(
+        "kbd-backlight: set brightness {effective} (requested {level}, max {max}) at {}",
+        led.display()
+    );
+    let result = std::fs::write(led.join("brightness"), format!("{effective}"));
+    if let Err(e) = &result {
+        log::warn!("kbd-backlight: brightness write failed: {e}");
+    }
+    result
 }
 
 pub fn max_brightness() -> Option<u8> {
@@ -1203,10 +1493,24 @@ pub fn max_brightness() -> Option<u8> {
 /// Camera privacy kill-switch (ideapad).
 pub fn camera_power() -> Option<bool> {
     let known = "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power";
-    if let Ok(val) = std::fs::read_to_string(known) {
-        return Some(val.trim() == "1");
+    match std::fs::read_to_string(known) {
+        Ok(val) => {
+            let enabled = val.trim() == "1";
+            log::trace!(
+                "camera: camera_power → {}",
+                if enabled {
+                    "camera enabled"
+                } else {
+                    "kill-switch engaged"
+                }
+            );
+            Some(enabled)
+        }
+        Err(e) => {
+            log::trace!("camera: camera_power unreadable ({e}) — reporting unknown");
+            None
+        }
     }
-    None
 }
 
 #[cfg(test)]

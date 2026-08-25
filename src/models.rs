@@ -567,58 +567,135 @@ pub fn lookup(
     let mt = machine_type.trim();
     let mkt = marketing.trim();
     let bios = bios_prefix.trim().to_ascii_uppercase();
+    log::debug!("model lookup: mt={mt:?} marketing={mkt:?} bios_prefix={bios:?}");
 
+    // Tier 1: exact machine-type row.
     if !mt.is_empty() && mt != "Unknown" {
-        if let Some(p) = MODEL_PROFILES.iter().find(|p| p.machine_type == Some(mt)) {
-            return Some(p);
+        for p in MODEL_PROFILES.iter() {
+            if p.machine_type == Some(mt) {
+                log::trace!(
+                    "model lookup: row {} machine_type == {mt:?} → match",
+                    p.bios_prefix
+                );
+                log::info!(
+                    "model profile: machine type {mt} → {} ({} gen {}, source {})",
+                    p.marketing,
+                    p.series,
+                    p.gen,
+                    p.source
+                );
+                return Some(p);
+            }
+            log::trace!(
+                "model lookup: row {} machine_type {:?} ≠ {mt:?} — no match",
+                p.bios_prefix,
+                p.machine_type
+            );
         }
+        log::debug!("model lookup: tier 1 exhausted — no row for machine type {mt:?}");
+    } else {
+        log::debug!("model lookup: machine type {mt:?} unusable — tier 1 skipped");
     }
 
     if bios.len() >= 4 {
         let prefix = &bios[..4];
         // Prefer MT-tagged entries for this BIOS family when marketing hints match.
-        if let Some(p) = MODEL_PROFILES.iter().find(|p| {
-            p.bios_prefix.eq_ignore_ascii_case(prefix)
-                && p.machine_type.is_some()
+        for p in MODEL_PROFILES.iter() {
+            if !p.bios_prefix.eq_ignore_ascii_case(prefix) {
+                log::trace!(
+                    "model lookup: row {} bios prefix ≠ {prefix:?} — skipped (tier 2a)",
+                    p.bios_prefix
+                );
+                continue;
+            }
+            log::trace!(
+                "model lookup: row {} bios prefix matches {prefix:?} (MT-tagged: {})",
+                p.bios_prefix,
+                p.machine_type.is_some()
+            );
+            if p.machine_type.is_some()
                 && !mkt.is_empty()
                 && mkt
                     .to_ascii_lowercase()
                     .contains(&p.marketing.to_ascii_lowercase())
-        }) {
-            return Some(p);
+            {
+                log::info!(
+                    "model profile: bios prefix {prefix} + MT tag + marketing hint → {} (source {})",
+                    p.marketing,
+                    p.source
+                );
+                return Some(p);
+            }
         }
-        if let Some(p) = MODEL_PROFILES
-            .iter()
-            .find(|p| p.bios_prefix.eq_ignore_ascii_case(prefix))
-        {
-            return Some(p);
+        log::trace!("model lookup: no MT-tagged {prefix:?} row matched the marketing hint");
+
+        for p in MODEL_PROFILES.iter() {
+            if p.bios_prefix.eq_ignore_ascii_case(prefix) {
+                log::info!(
+                    "model profile: bios prefix {prefix} → {} ({} gen {}, source {})",
+                    p.marketing,
+                    p.series,
+                    p.gen,
+                    p.source
+                );
+                return Some(p);
+            }
+            log::trace!(
+                "model lookup: row {} bios prefix ≠ {prefix:?} — no match",
+                p.bios_prefix
+            );
         }
+        log::debug!("model lookup: tier 2 exhausted — no row for bios prefix {prefix:?}");
+    } else {
+        log::debug!("model lookup: bios prefix {bios:?} too short — tier 2 skipped");
     }
 
-    // Fuzzy marketing match against known names
+    // Fuzzy marketing match against known names.
     let mkt_l = mkt.to_ascii_lowercase();
-    MODEL_PROFILES.iter().find(|p| {
+    for p in MODEL_PROFILES.iter() {
         let name = p.marketing.to_ascii_lowercase();
-        (!mkt_l.is_empty() && (mkt_l.contains(&name) || name.contains(&mkt_l)))
-            || mkt_l.contains("16afr10h") && p.machine_type == Some("83RU")
-            || mkt_l.contains("16iax10h") && p.machine_type == Some("83F5")
-    })
+        let substr_hit = !mkt_l.is_empty() && (mkt_l.contains(&name) || name.contains(&mkt_l));
+        let alias_hit = (mkt_l.contains("16afr10h") && p.machine_type == Some("83RU"))
+            || (mkt_l.contains("16iax10h") && p.machine_type == Some("83F5"));
+        if substr_hit || alias_hit {
+            log::debug!(
+                "model lookup: fuzzy match {mkt:?} → {} ({})",
+                p.marketing,
+                if substr_hit {
+                    "substring"
+                } else {
+                    "gen10 model alias"
+                }
+            );
+            return Some(p);
+        }
+        log::trace!(
+            "model lookup: row {} fuzzy no-match (marketing {name:?} vs input {mkt:?})",
+            p.bios_prefix
+        );
+    }
+
+    log::warn!("model lookup: no profile for mt={mt:?} marketing={mkt:?} bios_prefix={bios:?}");
+    None
 }
 
 /// PSREF-style peak TGP guess from GPU marketing string (W). Probe still preferred.
 pub fn expected_tgp_from_gpu_name(gpu: &str) -> Option<u32> {
     let g = gpu.to_ascii_lowercase();
-    if g.contains("5090") || g.contains("5080") || g.contains("4090") || g.contains("4080") {
-        Some(175) // Pro 7 Gen 10 laptop SKUs commonly 175W class
-    } else if g.contains("5070 ti") || g.contains("5070ti") {
-        Some(140)
-    } else if g.contains("5070") || g.contains("5060") || g.contains("4050") {
-        Some(115)
-    } else if g.contains("4070 ti") || g.contains("4070ti") {
-        Some(150)
-    } else if g.contains("4070") || g.contains("4060") {
-        Some(140)
-    } else {
-        None
-    }
+    let tgp =
+        if g.contains("5090") || g.contains("5080") || g.contains("4090") || g.contains("4080") {
+            Some(175) // Pro 7 Gen 10 laptop SKUs commonly 175W class
+        } else if g.contains("5070 ti") || g.contains("5070ti") {
+            Some(140)
+        } else if g.contains("5070") || g.contains("5060") || g.contains("4050") {
+            Some(115)
+        } else if g.contains("4070 ti") || g.contains("4070ti") {
+            Some(150)
+        } else if g.contains("4070") || g.contains("4060") {
+            Some(140)
+        } else {
+            None
+        };
+    log::trace!("tgp heuristic: {gpu:?} → {tgp:?} W");
+    tgp
 }

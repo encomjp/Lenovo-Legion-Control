@@ -1,52 +1,103 @@
 //! Fan control via lenovo_wmi_other (preferred) or legion_hwmon.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::device::{self, FanCapability};
 use crate::sensors::hwmon_by_name;
 
 fn fan_hwmon() -> Option<(String, PathBuf)> {
+    static NO_BACKEND_WARNED: AtomicBool = AtomicBool::new(false);
     if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
+        log::debug!(
+            "fans::fan_hwmon: backend lenovo_wmi_other at {}",
+            hw.display()
+        );
         return Some(("lenovo_wmi_other".into(), hw));
     }
     if let Some(hw) = hwmon_by_name("legion_hwmon") {
+        log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
         return Some(("legion_hwmon".into(), hw));
+    }
+    if !NO_BACKEND_WARNED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon) — fan control unavailable"
+        );
     }
     None
 }
 
 fn fan_path(fan: u8, suffix: &str) -> Option<PathBuf> {
     let (_, hw) = fan_hwmon()?;
-    Some(hw.join(format!("fan{fan}_{suffix}")))
+    let path = hw.join(format!("fan{fan}_{suffix}"));
+    log::trace!("fans::fan_path: fan{fan}_{suffix} → {}", path.display());
+    Some(path)
+}
+
+/// Shared sysfs u32 reader behind `read_rpm`/`read_target`/`read_min`/`read_max`.
+/// Absent file → trace (routine probe, e.g. fan3 on a two-fan chassis);
+/// unparsable content → warn (degraded hardware reporting).
+fn read_fan_u32(fan: u8, caller: &str, path: &std::path::Path) -> Option<u32> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => match s.trim().parse::<u32>() {
+            Ok(v) => {
+                log::trace!("fans::{caller}: fan{fan} → {v} ({})", path.display());
+                Some(v)
+            }
+            Err(e) => {
+                log::warn!(
+                    "fans::{caller}: fan{fan} unparsable {:?} on {}: {e}",
+                    s.trim(),
+                    path.display()
+                );
+                None
+            }
+        },
+        Err(_) => {
+            log::trace!("fans::{caller}: fan{fan} unavailable ({})", path.display());
+            None
+        }
+    }
 }
 
 pub fn read_rpm(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "input")?;
-    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
+    read_fan_u32(fan, "read_rpm", &path)
 }
 
 pub fn read_target(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "target")?;
-    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
+    read_fan_u32(fan, "read_target", &path)
 }
 
 /// Lowest settable RPM for a fan channel. Reserved for the custom fan-curve
 /// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_min(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "min")?;
-    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
+    read_fan_u32(fan, "read_min", &path)
 }
 
 /// Highest settable RPM for a fan channel. Reserved for the custom fan-curve
 /// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_max(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "max")?;
-    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
+    read_fan_u32(fan, "read_max", &path)
 }
 
 /// Discovered fan channels with live min/max (falls back to model profile).
 pub fn channels() -> Vec<FanCapability> {
-    device::detect().capabilities.fans
+    let caps = device::detect().capabilities.fans;
+    for c in &caps {
+        log::debug!(
+            "fans::channels: fan {} '{}' window {}..={} rpm",
+            c.id,
+            c.title,
+            c.min_rpm,
+            c.max_rpm
+        );
+    }
+    log::debug!("fans::channels: {} channel(s) enumerated", caps.len());
+    caps
 }
 
 /// Fan ids present on this machine (e.g. `[1, 2, 4]`).
@@ -57,7 +108,7 @@ pub fn ids() -> Vec<u8> {
 /// Pure helper — the formatting contract for `target == 0` means "auto" on
 /// this WMI driver. Used by `rpm_label`; exported so tests pin the contract.
 pub fn format_rpm_label(target: u32, rpm: u32) -> String {
-    if target == 0 {
+    let label = if target == 0 {
         if rpm == 0 {
             "Auto".into()
         } else {
@@ -67,7 +118,9 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
         format!("~{target} rpm")
     } else {
         format!("{rpm} rpm")
-    }
+    };
+    log::debug!("fans::format_rpm_label(target={target}, rpm={rpm}) → '{label}'");
+    label
 }
 
 /// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
@@ -91,15 +144,28 @@ pub fn clamp_target_with(min: u32, max: u32, rpm: u32) -> u32 {
 /// 0..=20_000 bound so garbage can't reach sysfs unchanged).
 pub fn clamp_target(fan: u8, rpm: u32) -> u32 {
     let cap = channels().into_iter().find(|c| c.id == fan);
+    if cap.is_none() {
+        log::trace!("fans::clamp_target: fan{fan} unknown — fallback window 0..=20_000");
+    }
     let (mut min, mut max) = cap.map_or((0, 20_000), |c| (c.min_rpm, c.max_rpm));
     // Live sysfs bounds win when present; capability profile is the fallback.
     if let Some(v) = read_min(fan) {
         min = v;
+        log::trace!("fans::clamp_target: fan{fan} live sysfs min override {v}");
     }
     if let Some(v) = read_max(fan) {
         max = v;
+        log::trace!("fans::clamp_target: fan{fan} live sysfs max override {v}");
     }
-    clamp_target_with(min, max, rpm)
+    let actual = clamp_target_with(min, max, rpm);
+    if actual != rpm {
+        log::info!(
+            "fans::clamp_target: fan{fan} clamped requested {rpm} → {actual} (window {min}..={max})"
+        );
+    } else {
+        log::trace!("fans::clamp_target: fan{fan} requested {rpm} within window {min}..={max}");
+    }
+    actual
 }
 
 /// Set fan target RPM. 0 = auto mode. Values outside the channel's window
@@ -118,7 +184,13 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
         log::info!("fan {fan} → {rpm} RPM ({})", path.display());
     }
     match std::fs::write(&path, format!("{rpm}")) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            log::debug!(
+                "fans::set_target: sysfs write succeeded ({})",
+                path.display()
+            );
+            Ok(())
+        }
         Err(e) => {
             let ctx = format!(
                 "fans::set_target({fan},{rpm}) failed on {}: {e} (kind={:?}, raw={})",
@@ -134,14 +206,24 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
 
 /// Set all discovered fans to auto mode.
 pub fn set_auto() -> std::io::Result<()> {
+    let all_ids = ids();
+    log::info!(
+        "fans::set_auto: switching to auto on {} fan(s): {all_ids:?}",
+        all_ids.len()
+    );
     let mut last_err = None;
-    for id in ids() {
+    let mut errors = 0usize;
+    for id in all_ids {
         if let Err(e) = set_target(id, 0) {
+            errors += 1;
             last_err = Some(e);
         }
     }
     match last_err {
-        Some(e) => Err(e),
+        Some(e) => {
+            log::warn!("fans::set_auto: {errors} fan(s) failed to switch to auto");
+            Err(e)
+        }
         None => Ok(()),
     }
 }

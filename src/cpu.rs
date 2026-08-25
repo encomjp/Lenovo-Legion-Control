@@ -12,20 +12,25 @@ const SMT_ACTIVE: &str = "/sys/devices/system/cpu/smt/active";
 const CPU_BOOST: &str = "/sys/devices/system/cpu/cpufreq/boost";
 
 fn read_trim(path: &str) -> Option<String> {
-    fs::read_to_string(path)
+    let value = fs::read_to_string(path)
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty());
+    log::trace!("cpu: read {path} → {value:?}");
+    value
 }
 
 /// Whether SMT (AMD SMT / Intel HT) is currently active.
 /// Parse a sysfs knob that exposes "1"/"0" as a tri-state bool.
 fn sysfs_bool(path: &str) -> Option<bool> {
-    match read_trim(path)?.as_str() {
+    let raw = read_trim(path)?;
+    let parsed = match raw.as_str() {
         "1" => Some(true),
         "0" => Some(false),
         _ => None,
-    }
+    };
+    log::debug!("cpu: {path} = {raw:?} → {parsed:?}");
+    parsed
 }
 
 pub fn smt_active() -> Option<bool> {
@@ -34,20 +39,33 @@ pub fn smt_active() -> Option<bool> {
 
 /// Raw SMT control string (`on`, `off`, `forceoff`, `notsupported`, …).
 pub fn smt_control() -> Option<String> {
-    read_trim(SMT_CONTROL)
+    let control = read_trim(SMT_CONTROL);
+    log::debug!("cpu: smt/control → {control:?}");
+    control
 }
 
 pub fn smt_available() -> bool {
-    Path::new(SMT_CONTROL).exists()
-        && !matches!(
-            smt_control().as_deref(),
-            Some("notsupported" | "notimplemented")
-        )
+    if !Path::new(SMT_CONTROL).exists() {
+        log::debug!("cpu: smt_available → false ({SMT_CONTROL} missing)");
+        return false;
+    }
+    let control = smt_control();
+    let available = !matches!(control.as_deref(), Some("notsupported" | "notimplemented"));
+    log::debug!(
+        "cpu: smt_available → {available} (control {control:?}, token {})",
+        match control.as_deref() {
+            Some("notsupported") => "matched \"notsupported\"",
+            Some("notimplemented") => "matched \"notimplemented\"",
+            _ => "not blocklisted",
+        }
+    );
+    available
 }
 
 /// Enable (`on`) or disable (`off`) SMT. Requires root (daemon).
 pub fn set_smt(on: bool) -> Result<(), String> {
     if !smt_available() {
+        log::warn!("cpu: set_smt({on}) refused — SMT control is not available on this kernel/CPU");
         return Err("SMT control is not available on this kernel/CPU".into());
     }
     let value = if on { "on" } else { "off" };
@@ -57,11 +75,14 @@ pub fn set_smt(on: bool) -> Result<(), String> {
         log::warn!("{msg}");
         msg
     })?;
+    log::debug!("cpu: smt write ok ({SMT_CONTROL} ← {value})");
     Ok(())
 }
 
 pub fn boost_available() -> bool {
-    Path::new(CPU_BOOST).exists()
+    let available = Path::new(CPU_BOOST).exists();
+    log::debug!("cpu: boost_available → {available} ({CPU_BOOST})");
+    available
 }
 
 pub fn boost_enabled() -> Option<bool> {
@@ -71,6 +92,7 @@ pub fn boost_enabled() -> Option<bool> {
 /// Toggle CPU frequency boost (turbo). Requires root (daemon).
 pub fn set_boost(on: bool) -> Result<(), String> {
     if !boost_available() {
+        log::warn!("cpu: set_boost({on}) refused — CPU boost sysfs is not available");
         return Err("CPU boost sysfs is not available".into());
     }
     let value = if on { "1" } else { "0" };
@@ -80,12 +102,13 @@ pub fn set_boost(on: bool) -> Result<(), String> {
         log::warn!("{msg}");
         msg
     })?;
+    log::debug!("cpu: boost write ok ({CPU_BOOST} ← {value})");
     Ok(())
 }
 
 /// Rough logical CPU count (online).
 pub fn logical_cpus() -> usize {
-    fs::read_dir("/sys/devices/system/cpu")
+    let n = fs::read_dir("/sys/devices/system/cpu")
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| {
@@ -103,7 +126,12 @@ pub fn logical_cpus() -> usize {
                 })
                 .count()
         })
-        .unwrap_or(0)
+        .unwrap_or_else(|e| {
+            log::warn!("cpu: cannot list /sys/devices/system/cpu: {e}");
+            0
+        });
+    log::debug!("cpu: logical_cpus → {n}");
+    n
 }
 
 pub fn smt_summary() -> String {

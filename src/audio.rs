@@ -51,11 +51,19 @@ pub struct FixReport {
 
 /// Probe ALSA + sysfs + PipeWire for AW88399 / speaker state.
 pub fn diagnose() -> Diagnosis {
+    log::debug!("audio: diagnose: probing AW88399 amp stack, ALSA mixer, PipeWire sinks");
     let amp_acpi = aw88399_acpi_present();
     let amp_bound = aw88399_bound();
     let amp_modules = aw88399_modules_loaded();
     let firmware_ok = aw88399_firmware_present();
     let hda_card = find_alc_hda_card();
+    log::debug!(
+        "audio: probe amp stack: acpi={amp_acpi} bound={amp_bound} modules={amp_modules} firmware={firmware_ok} hda_card={hda_card:?}"
+    );
+    log::debug!(
+        "audio: probe tools: alsaucm available={}",
+        alsaucm_available()
+    );
 
     let mut speakers_muted = false;
     let mut bass_off = false;
@@ -63,9 +71,19 @@ pub fn diagnose() -> Diagnosis {
     if let Some(card) = hda_card {
         // Only treat ALSA mute/bass as a fault when there is no external sink stealing the default.
         // Users who plug in USB headsets (SteelSeries etc.) keep Master muted on purpose — that is not a bug.
-        let uses_external = pactl_default_sink().as_deref().is_some_and(|s| {
+        let default_now = pactl_default_sink();
+        let uses_external = default_now.as_deref().is_some_and(|s| {
             s.starts_with("alsa_output.usb") || s.starts_with("bluez_") || s.contains("hdmi")
         });
+        log::debug!(
+            "audio: external-sink gate: uses_external={uses_external} (default sink '{}') — {}",
+            default_now.as_deref().unwrap_or("<none>"),
+            if uses_external {
+                "onboard speakers not in play; skipping mute/bass/volume checks"
+            } else {
+                "onboard speakers in play; checking mixer state"
+            }
+        );
         if !uses_external {
             speakers_muted = mixer_muted(card, "Speaker") || mixer_muted(card, "Master");
             bass_off = mixer_switch_off(card, "Bass Speaker");
@@ -73,21 +91,43 @@ pub fn diagnose() -> Diagnosis {
                 || mixer_pct(card, "Master").map(|p| p < 40).unwrap_or(false);
         }
     }
+    log::debug!(
+        "audio: mixer state: speakers_muted={speakers_muted} bass_off={bass_off} volume_low={volume_low}"
+    );
 
     let internal_sink = find_internal_analog_sink();
     let default_sink = pactl_default_sink();
+    log::debug!("audio: sink eval: default={default_sink:?} internal_analog={internal_sink:?}");
     let wrong_default_sink = match (&default_sink, &internal_sink) {
         (Some(def), Some(internal)) => {
             let is_external = def.starts_with("bluez_")
                 || def.contains("hdmi")
                 || def.starts_with("alsa_output.usb");
+            log::debug!(
+                "audio: wrong-default check: default='{def}' internal='{internal}' external_default={is_external} → wrong={}",
+                def != internal && !is_external
+            );
             def != internal && !is_external
         }
         (Some(def), None) => {
-            def.starts_with("bluez_") || def.contains("hdmi") || def.starts_with("alsa_output.usb")
+            let is_external = def.starts_with("bluez_")
+                || def.contains("hdmi")
+                || def.starts_with("alsa_output.usb");
+            log::debug!(
+                "audio: wrong-default check: no internal analog sink; default='{def}' external={is_external}"
+            );
+            is_external
         }
-        _ => false,
+        _ => {
+            log::debug!(
+                "audio: wrong-default check: default or internal sink unknown → wrong=false"
+            );
+            false
+        }
     };
+    log::debug!(
+        "audio: soft-issue inputs: muted={speakers_muted} bass_off={bass_off} volume_low={volume_low} wrong_default_sink={wrong_default_sink}"
+    );
 
     let soft = speakers_muted || bass_off || volume_low || wrong_default_sink;
 
@@ -105,6 +145,18 @@ pub fn diagnose() -> Diagnosis {
         &default_sink,
         &internal_sink,
     );
+
+    match health {
+        Health::Ok => log::info!(
+            "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?})"
+        ),
+        Health::SoftIssue | Health::HardwareBroken => log::warn!(
+            "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?} muted={speakers_muted} bass_off={bass_off} volume_low={volume_low} wrong_sink={wrong_default_sink})"
+        ),
+        Health::NotApplicable => log::info!(
+            "audio: classify: {summary} (acpi={amp_acpi}, hda_card={hda_card:?})"
+        ),
+    }
 
     Diagnosis {
         health,
@@ -265,8 +317,20 @@ pub fn troubleshoot() -> FixReport {
     let before = diagnose();
     let mut steps = Vec::new();
     let mut errors = Vec::new();
+    log::info!(
+        "audio: troubleshoot entered — pre-health {:?} fixable={} muted={} bass_off={} volume_low={} wrong_default_sink={}",
+        before.health,
+        before.fixable,
+        before.speakers_muted,
+        before.bass_off,
+        before.volume_low,
+        before.wrong_default_sink
+    );
 
     if before.health == Health::NotApplicable && before.hda_card.is_none() {
+        log::info!(
+            "audio: troubleshoot: nothing to do — no onboard HDA card and amp not applicable"
+        );
         return FixReport {
             steps: vec!["Nothing to do — no onboard HDA card".into()],
             errors,
@@ -275,6 +339,9 @@ pub fn troubleshoot() -> FixReport {
     }
 
     if before.health == Health::HardwareBroken && !before.fixable {
+        log::warn!(
+            "audio: troubleshoot: skipping soft reset — amp driver/firmware missing (would not help)"
+        );
         steps.push("Skipped soft reset — amp driver/firmware missing (would not help)".into());
         return FixReport {
             steps,
@@ -289,16 +356,27 @@ pub fn troubleshoot() -> FixReport {
     // headset, BT, HDMI) keep their mixer levels, default sink, and running
     // services untouched instead of having them hijacked by a "fix".
     let mixer_needs_touch = before.speakers_muted || before.bass_off || before.volume_low;
+    log::debug!(
+        "audio: mixer gate: needs_touch={mixer_needs_touch} (flags are only set when no external sink is active)"
+    );
 
     if let Some(card) = before.hda_card {
         let card_s = card.to_string();
         // UCM is optional — many Legion ALC287 cards have no UCM profile.
+        log::debug!("audio: attempting alsaucm reset/reload on hw:{card} (UCM optional)");
         match run_cmd("alsaucm", &["-c", &format!("hw:{card}"), "reset"]) {
             Ok(_) => {
+                log::info!("audio: alsaucm reset hw:{card} ok");
                 steps.push(format!("alsaucm reset hw:{card}"));
                 match run_cmd("alsaucm", &["-c", &format!("hw:{card}"), "reload"]) {
-                    Ok(_) => steps.push(format!("alsaucm reload hw:{card}")),
-                    Err(e) => steps.push(format!("alsaucm reload skipped: {e}")),
+                    Ok(_) => {
+                        log::info!("audio: alsaucm reload hw:{card} ok");
+                        steps.push(format!("alsaucm reload hw:{card}"));
+                    }
+                    Err(e) => {
+                        log::debug!("audio: alsaucm reload skipped on hw:{card}: {e}");
+                        steps.push(format!("alsaucm reload skipped: {e}"));
+                    }
                 }
             }
             Err(e) => {
@@ -306,14 +384,19 @@ pub fn troubleshoot() -> FixReport {
                     || e.contains("No such device")
                     || e.contains("failed to import");
                 if soft {
+                    log::info!("audio: alsaucm skipped — no UCM profile for this card ({e})");
                     steps.push("alsaucm skipped (no UCM profile for this card)".into());
                 } else {
+                    log::warn!("audio: alsaucm reset failed: {e}");
                     errors.push(format!("alsaucm reset: {e}"));
                 }
             }
         }
 
         if mixer_needs_touch {
+            log::info!(
+                "audio: applying amixer resets on card {card_s} (Master/Speaker/Bass Speaker/Headphone)"
+            );
             for (ctl, extra) in [
                 ("Master", &["100%", "unmute"][..]),
                 ("Speaker", &["100%", "unmute"][..]),
@@ -323,15 +406,24 @@ pub fn troubleshoot() -> FixReport {
                 let mut args = vec!["sset", "-c", card_s.as_str(), ctl];
                 args.extend_from_slice(extra);
                 match run_cmd("amixer", &args) {
-                    Ok(_) => steps.push(format!("amixer {ctl} → {}", extra.join(" "))),
+                    Ok(_) => {
+                        log::info!("audio: amixer sset {ctl} → {} ok", extra.join(" "));
+                        steps.push(format!("amixer {ctl} → {}", extra.join(" ")));
+                    }
                     Err(e) => {
                         if ctl != "Bass Speaker" && ctl != "Headphone" {
+                            log::warn!("audio: amixer sset {ctl} failed: {e}");
                             errors.push(format!("amixer {ctl}: {e}"));
+                        } else {
+                            log::debug!("audio: amixer sset {ctl} failed (optional control): {e}");
                         }
                     }
                 }
             }
         } else {
+            log::info!(
+                "audio: gating amixer changes — mute/bass/volume looked fine pre-reset (external sink likely active); leaving user levels untouched"
+            );
             steps.push(
                 "skipped amixer changes — mute/bass/volume looked fine before the reset \
                  (onboard speakers not in play; leaving user levels untouched)"
@@ -341,11 +433,15 @@ pub fn troubleshoot() -> FixReport {
     }
 
     if before.health == Health::Ok {
+        log::info!(
+            "audio: gating service restart — audio stack was healthy pre-reset; skipping pipewire/wireplumber restart"
+        );
         steps.push(
             "skipped pipewire/wireplumber restart — audio stack was healthy before the reset"
                 .into(),
         );
     } else {
+        log::info!("audio: restarting pipewire, pipewire-pulse, wireplumber (user services)");
         match run_cmd(
             "systemctl",
             &[
@@ -356,28 +452,51 @@ pub fn troubleshoot() -> FixReport {
                 "wireplumber.service",
             ],
         ) {
-            Ok(_) => steps.push("restarted pipewire, pipewire-pulse, wireplumber".into()),
-            Err(e) => errors.push(format!("systemctl restart audio: {e}")),
+            Ok(_) => {
+                log::info!("audio: user audio services restarted");
+                steps.push("restarted pipewire, pipewire-pulse, wireplumber".into());
+            }
+            Err(e) => {
+                log::warn!("audio: systemctl restart of user audio services failed: {e}");
+                errors.push(format!("systemctl restart audio: {e}"));
+            }
         }
     }
 
     // PipeWire republishes sinks slowly after restart. Only steal the default
     // sink when diagnose() saw a wrong one to begin with.
     if before.wrong_default_sink {
+        log::info!(
+            "audio: default sink '{}' was wrong pre-reset — waiting up to 5s for onboard analog sink",
+            before.default_sink.as_deref().unwrap_or("?")
+        );
         let sink = wait_for_internal_sink(std::time::Duration::from_secs(5));
         if let Some(sink) = sink {
+            log::info!("audio: onboard analog sink appeared: {sink} — setting as default");
             match run_cmd("pactl", &["set-default-sink", &sink]) {
                 Ok(_) => {
+                    log::info!("audio: default sink → {sink}");
                     steps.push(format!("default sink → {sink}"));
                     let _ = run_cmd("pactl", &["set-sink-mute", &sink, "0"]);
                     let _ = run_cmd("pactl", &["set-sink-volume", &sink, "80%"]);
+                    log::debug!("audio: sink {sink} unmuted and set to 80% volume");
                 }
-                Err(e) => errors.push(format!("set-default-sink: {e}")),
+                Err(e) => {
+                    log::warn!("audio: set-default-sink {sink} failed: {e}");
+                    errors.push(format!("set-default-sink: {e}"));
+                }
             }
         } else {
+            log::warn!(
+                "audio: onboard analog PipeWire sink did not appear within 5s after restart"
+            );
             errors.push("Onboard analog PipeWire sink did not appear after restart".into());
         }
     } else {
+        log::info!(
+            "audio: gating set-default-sink — '{}' already a sane default pre-reset (external sink kept in charge)",
+            before.default_sink.as_deref().unwrap_or("current default")
+        );
         steps.push(format!(
             "skipped set-default-sink — {} was already a sane default before the reset",
             before.default_sink.as_deref().unwrap_or("current default")
@@ -386,16 +505,33 @@ pub fn troubleshoot() -> FixReport {
 
     let after = diagnose();
     match after.health {
-        Health::Ok => steps.push("Re-check: amp connected, speakers healthy".into()),
-        Health::SoftIssue => steps.push(
-            "Re-check: soft issues remain — unplug headsets or pick Speakers in sound settings"
-                .into(),
-        ),
-        Health::HardwareBroken => steps.push(
-            "Re-check: amp still broken — soft reset cannot fix missing driver/firmware".into(),
-        ),
+        Health::Ok => {
+            log::info!("audio: re-check: amp connected, speakers healthy");
+            steps.push("Re-check: amp connected, speakers healthy".into());
+        }
+        Health::SoftIssue => {
+            log::warn!(
+                "audio: re-check: soft issues remain — unplug headsets or pick Speakers in sound settings"
+            );
+            steps.push(
+                "Re-check: soft issues remain — unplug headsets or pick Speakers in sound settings"
+                    .into(),
+            );
+        }
+        Health::HardwareBroken => {
+            log::warn!(
+                "audio: re-check: amp still broken — soft reset cannot fix missing driver/firmware"
+            );
+            steps.push(
+                "Re-check: amp still broken — soft reset cannot fix missing driver/firmware".into(),
+            );
+        }
         Health::NotApplicable => {}
     }
+    log::info!(
+        "audio: troubleshoot finished — post-health {:?}",
+        after.health
+    );
 
     FixReport {
         steps,
@@ -522,8 +658,20 @@ fn find_alc_hda_card() -> Option<u32> {
 }
 
 fn find_internal_analog_sink() -> Option<String> {
-    let out = run_cmd("pactl", &["list", "short", "sinks"]).ok()?;
-    select_internal_sink(&out)
+    let out = match run_cmd("pactl", &["list", "short", "sinks"]) {
+        Ok(out) => out,
+        Err(e) => {
+            log::debug!("audio: pactl list short sinks failed: {e}");
+            return None;
+        }
+    };
+    let line_count = out.lines().count();
+    let picked = select_internal_sink(&out);
+    log::debug!(
+        "audio: pactl sinks: parsed {line_count} line(s) → internal analog candidate {}",
+        picked.as_deref().unwrap_or("<none>")
+    );
+    picked
 }
 
 fn wait_for_internal_sink(budget: std::time::Duration) -> Option<String> {
@@ -543,9 +691,19 @@ fn pactl_default_sink() -> Option<String> {
     let out = run_cmd("pactl", &["get-default-sink"]).ok()?;
     let s = out.trim();
     if s.is_empty() {
+        log::debug!("audio: pactl get-default-sink returned empty");
         None
     } else {
+        log::trace!("audio: pactl default sink: {s}");
         Some(s.to_string())
+    }
+}
+
+/// Whether the `alsaucm` binary is reachable on `$PATH` (diagnostics only).
+fn alsaucm_available() -> bool {
+    match std::env::var_os("PATH") {
+        Some(paths) => std::env::split_paths(&paths).any(|dir| dir.join("alsaucm").is_file()),
+        None => false,
     }
 }
 
@@ -626,11 +784,21 @@ pub(crate) fn select_internal_sink(pactl_output: &str) -> Option<String> {
             continue;
         };
         if let Some(score) = score_sink_name(name) {
+            log::trace!("audio: sink candidate '{name}' scored {score}");
             cands.push((score, name.to_string()));
         }
     }
     cands.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
-    cands.into_iter().map(|(_, n)| n).next()
+    // Stable sort: equal scores keep pactl listing order — first listed wins ties.
+    let winner = cands.first().cloned();
+    match &winner {
+        Some((score, name)) => log::debug!(
+            "audio: internal sink selected: '{name}' (score {score}, {} candidate(s); ties broken by pactl order)",
+            cands.len()
+        ),
+        None => log::debug!("audio: no internal analog sink among pactl entries"),
+    }
+    winner.map(|(_, n)| n)
 }
 
 fn amixer_get(card: u32, control: &str) -> Option<String> {
@@ -638,14 +806,15 @@ fn amixer_get(card: u32, control: &str) -> Option<String> {
 }
 
 fn run_cmd(bin: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(bin)
-        .args(args)
-        .output()
-        .map_err(|e| format!("{bin}: {e}"))?;
+    log::trace!("audio: exec: {bin} {}", args.join(" "));
+    let out = Command::new(bin).args(args).output().map_err(|e| {
+        log::debug!("audio: exec {bin} spawn failed: {e}");
+        format!("{bin}: {e}")
+    })?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
     if !out.status.success() {
-        return Err(if stderr.is_empty() {
+        let msg = if stderr.is_empty() {
             let t = stdout.trim().to_string();
             if t.is_empty() {
                 format!("{bin} failed")
@@ -654,8 +823,11 @@ fn run_cmd(bin: &str, args: &[&str]) -> Result<String, String> {
             }
         } else {
             stderr
-        });
+        };
+        log::debug!("audio: exec {bin} exited {:?}: {msg}", out.status.code());
+        return Err(msg);
     }
+    log::trace!("audio: exec {bin} ok");
     Ok(stdout)
 }
 

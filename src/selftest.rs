@@ -61,6 +61,7 @@ fn plaus(v: f64, lo: f64, hi: f64) -> bool {
 
 /// Run every read-only health check. Fast (<200 ms): no sampling sleeps.
 pub fn run_self_checks() -> Vec<SelfCheck> {
+    log::debug!("self-checks: running");
     let mut out = Vec::new();
 
     // Config store loads and has a sane schema version.
@@ -289,6 +290,8 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         },
     ));
 
+    let passed = out.iter().filter(|c| c.ok).count();
+    log::debug!("self-checks: done — {passed}/{} passed", out.len());
     out
 }
 
@@ -297,6 +300,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
 /// Scan for active machine anomalies. Read-only; typical cost is one
 /// `sensors::read_all()` plus a handful of fan/battery reads.
 pub fn scan_faults() -> Vec<Fault> {
+    log::debug!("fault scan: running");
     let mut out = Vec::new();
     let s = sensors::read_all();
 
@@ -546,6 +550,16 @@ pub fn scan_faults() -> Vec<Fault> {
         }
     }
 
+    let criticals = out
+        .iter()
+        .filter(|f| f.severity == Severity::Critical)
+        .count();
+    let warnings = out
+        .iter()
+        .filter(|f| f.severity == Severity::Warning)
+        .count();
+    let infos = out.iter().filter(|f| f.severity == Severity::Info).count();
+    log::debug!("fault scan: done — {criticals} critical / {warnings} warning / {infos} info");
     out
 }
 
@@ -571,22 +585,28 @@ fn config_dir() -> Option<std::path::PathBuf> {
 fn user_in_group(group: &str) -> bool {
     let cname = match std::ffi::CString::new(group) {
         Ok(c) => c,
-        Err(_) => return false,
-    };
-    let gid = unsafe {
-        let gr = libc::getgrnam(cname.as_ptr());
-        if gr.is_null() {
+        Err(_) => {
+            log::debug!("user_in_group('{group}'): not a valid group name");
             return false;
         }
-        (*gr).gr_gid
     };
+    let gr = unsafe { libc::getgrnam(cname.as_ptr()) };
+    if gr.is_null() {
+        log::debug!("user_in_group('{group}'): group not found");
+        return false;
+    }
+    let gid = unsafe { (*gr).gr_gid };
+    log::debug!("user_in_group('{group}'): found gid {gid}");
     let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
     if n <= 0 {
+        log::debug!("user_in_group('{group}'): no supplementary groups");
         return false;
     }
     let mut gids = vec![0u32; n as usize];
     let n = unsafe { libc::getgroups(n as i32, gids.as_mut_ptr() as *mut libc::gid_t) };
-    n > 0 && gids[..n as usize].contains(&gid)
+    let member = n > 0 && gids[..n as usize].contains(&gid);
+    log::debug!("user_in_group('{group}'): member={member}");
+    member
 }
 
 fn daemon_unit_enabled() -> Option<bool> {
@@ -594,26 +614,36 @@ fn daemon_unit_enabled() -> Option<bool> {
         .args(["is-enabled", "legion-control.service"])
         .output()
         .ok()?;
-    Some(String::from_utf8_lossy(&out.stdout).trim() == "enabled")
+    let state = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    log::debug!("daemon_unit_enabled: systemctl reports '{state}'");
+    Some(state == "enabled")
 }
 
 fn hidraw_spectrum_node() -> Option<(std::path::PathBuf, u32)> {
     let dir = std::fs::read_dir("/sys/class/hidraw").ok()?;
+    let mut scanned = 0usize;
     for entry in dir.flatten() {
+        scanned += 1;
         let uevent = entry.path().join("device/uevent");
         let content = std::fs::read_to_string(&uevent).unwrap_or_default();
         if content.contains("048D") && content.contains("C197") {
             let devnode = std::path::Path::new("/dev").join(entry.file_name());
             let mode = devnode.metadata().ok()?.permissions().mode();
+            log::debug!(
+                "hidraw_spectrum_node: match {} after scanning {scanned} node(s)",
+                devnode.display()
+            );
             return Some((devnode, mode & 0o777));
         }
     }
+    log::debug!("hidraw_spectrum_node: no match in {scanned} node(s)");
     None
 }
 
 /// Validate install state: user group membership, daemon unit enabled,
 /// udev rule applied, socket permissions, binary location. Read-only.
 pub fn run_deployment_checks() -> Vec<SelfCheck> {
+    log::debug!("deployment checks: running");
     let mut out = Vec::new();
 
     // User in `legion` group (socket access).
@@ -705,5 +735,7 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         },
     ));
 
+    let passed = out.iter().filter(|c| c.ok).count();
+    log::debug!("deployment checks: done — {passed}/{} passed", out.len());
     out
 }

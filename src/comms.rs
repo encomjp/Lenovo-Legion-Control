@@ -22,19 +22,36 @@ pub fn bincode_opts() -> impl Options {
 /// Sanitize a client-supplied string for single-line logs: escape control
 /// characters (prevents log forging via embedded newlines) and truncate.
 pub fn sanitize_log(s: &str) -> String {
+    let mut escaped = 0usize;
     let mut out = String::with_capacity(s.len().min(64));
     for c in s.chars().take(64) {
         match c {
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
+            '\n' => {
+                escaped += 1;
+                out.push_str("\\n");
+            }
+            '\r' => {
+                escaped += 1;
+                out.push_str("\\r");
+            }
             '\t' => out.push('\t'),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if c.is_control() => {
+                escaped += 1;
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
             c => out.push(c),
         }
     }
-    if s.chars().count() > 64 {
+    let truncated = s.chars().count() > 64;
+    if truncated {
         out.push('…');
     }
+    // Trace only: runs once per client-supplied argument in a log label.
+    log::trace!(
+        "sanitize_log: in_len={} out_chars={} escaped={escaped} truncated={truncated}",
+        s.chars().count(),
+        out.chars().count()
+    );
     out
 }
 
@@ -175,9 +192,17 @@ pub const SYSTEM_SOCKET: &str = "/run/legion-control.socket";
 /// XDG_RUNTIME_DIR is set — a predictable `/tmp` path would let any local
 /// process pre-create the socket and impersonate the daemon.
 fn user_socket() -> Option<PathBuf> {
-    std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .map(|dir| PathBuf::from(dir).join("legion-control.socket"))
+    match std::env::var("XDG_RUNTIME_DIR") {
+        Ok(dir) => {
+            let path = PathBuf::from(dir).join("legion-control.socket");
+            log::trace!("user_socket: XDG_RUNTIME_DIR → {}", path.display());
+            Some(path)
+        }
+        Err(_) => {
+            log::trace!("user_socket: XDG_RUNTIME_DIR unset — no per-user candidate");
+            None
+        }
+    }
 }
 
 /// Path the daemon should bind.
@@ -185,11 +210,21 @@ fn user_socket() -> Option<PathBuf> {
 pub fn bind_socket_path() -> Result<PathBuf, String> {
     // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
     if unsafe { libc::geteuid() } == 0 {
+        log::debug!("bind_socket_path: euid=0 → {SYSTEM_SOCKET}");
         Ok(PathBuf::from(SYSTEM_SOCKET))
     } else {
-        user_socket().ok_or_else(|| {
-            "XDG_RUNTIME_DIR is not set — cannot pick a safe per-user socket path".to_string()
-        })
+        match user_socket() {
+            Some(path) => {
+                log::debug!("bind_socket_path: unprivileged → {}", path.display());
+                Ok(path)
+            }
+            None => {
+                let msg = "XDG_RUNTIME_DIR is not set — cannot pick a safe per-user socket path"
+                    .to_string();
+                log::warn!("bind_socket_path: {msg}");
+                Err(msg)
+            }
+        }
     }
 }
 
@@ -197,6 +232,15 @@ pub fn bind_socket_path() -> Result<PathBuf, String> {
 pub fn socket_candidates() -> Vec<PathBuf> {
     let mut candidates = vec![PathBuf::from(SYSTEM_SOCKET)];
     candidates.extend(user_socket());
+    log::debug!(
+        "socket candidates({}): [{}]",
+        candidates.len(),
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     candidates
 }
 
@@ -207,54 +251,86 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
 
     const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+    let started = std::time::Instant::now();
     let label = cmd_label(&cmd);
     log::debug!("ipc → {label}");
 
     let mut last_err = String::from("No legion-control socket found");
     for path in socket_candidates() {
         let mut stream = match UnixStream::connect(&path) {
-            Ok(s) => s,
+            Ok(s) => {
+                log::debug!("ipc {label}: connected to {}", path.display());
+                s
+            }
             Err(e) => {
                 last_err = format!("{}: {}", path.display(), e);
-                log::debug!("ipc connect failed on {}: {e}", path.display());
+                match e.raw_os_error() {
+                    Some(errno) => log::debug!(
+                        "ipc {label}: connect failed on {} (errno {errno}): {e}",
+                        path.display()
+                    ),
+                    None => log::debug!("ipc {label}: connect failed on {}: {e}", path.display()),
+                }
                 continue;
             }
         };
         // Bound the wait so a wedged daemon cannot hang clients forever.
-        stream
-            .set_write_timeout(Some(IPC_TIMEOUT))
-            .map_err(|e| format!("Set write timeout: {e}"))?;
-        stream
-            .set_read_timeout(Some(IPC_TIMEOUT))
-            .map_err(|e| format!("Set read timeout: {e}"))?;
+        if let Err(e) = stream.set_write_timeout(Some(IPC_TIMEOUT)) {
+            log::warn!(
+                "ipc {label}: set write timeout failed on {}: {e}",
+                path.display()
+            );
+            return Err(format!("Set write timeout: {e}"));
+        }
+        if let Err(e) = stream.set_read_timeout(Some(IPC_TIMEOUT)) {
+            log::warn!(
+                "ipc {label}: set read timeout failed on {}: {e}",
+                path.display()
+            );
+            return Err(format!("Set read timeout: {e}"));
+        }
+        log::trace!("ipc {label}: timeouts (write={IPC_TIMEOUT:?}, read={IPC_TIMEOUT:?})");
 
-        let data = bincode_opts()
-            .serialize(&cmd)
-            .map_err(|e| format!("Serialize error: {e}"))?;
-        stream
-            .write_all(&data)
-            .map_err(|e| format!("Write error: {e}"))?;
+        let data = bincode_opts().serialize(&cmd).map_err(|e| {
+            log::warn!("ipc {label}: serialize failed: {e}");
+            format!("Serialize error: {e}")
+        })?;
+        log::trace!("ipc {label}: request frame {} B", data.len());
+
+        stream.write_all(&data).map_err(|e| {
+            log::warn!("ipc {label}: write failed after {} B: {e}", data.len());
+            format!("Write error: {e}")
+        })?;
+        log::debug!("ipc {label}: sent {} B", data.len());
         stream.shutdown(std::net::Shutdown::Write).ok();
 
         let mut buf = Vec::new();
         stream
             .take(MAX_FRAME_BYTES)
             .read_to_end(&mut buf)
-            .map_err(|e| format!("Read error: {e}"))?;
+            .map_err(|e| {
+                log::warn!("ipc {label}: read failed after {} B: {e}", buf.len());
+                format!("Read error: {e}")
+            })?;
+        log::debug!("ipc {label}: received {} B", buf.len());
 
-        let resp: DaemonResponse = bincode_opts()
-            .deserialize(&buf)
-            .map_err(|e| format!("Deserialize error: {e}"))?;
+        let resp: DaemonResponse = bincode_opts().deserialize(&buf).map_err(|e| {
+            log::warn!("ipc {label}: deserialize failed ({} B): {e}", buf.len());
+            format!("Deserialize error: {e}")
+        })?;
+        log::trace!("ipc {label}: decoded {}", response_kind(&resp));
+
+        let elapsed = started.elapsed();
         match &resp {
-            DaemonResponse::Error(e) => log::warn!("ipc ← {label} error: {e}"),
-            DaemonResponse::Ok => log::debug!("ipc ← {label} ok"),
-            _ => log::debug!("ipc ← {label} ok ({})", response_kind(&resp)),
+            DaemonResponse::Error(e) => log::warn!("ipc ← {label} error ({elapsed:?}): {e}"),
+            DaemonResponse::Ok => log::debug!("ipc ← {label} ok ({elapsed:?})"),
+            _ => log::debug!("ipc ← {label} ok ({elapsed:?}) ({})", response_kind(&resp)),
         }
         return Ok(resp);
     }
 
     let msg = format!("{last_err}. Start the daemon: sudo systemctl enable --now legion-control");
-    log::warn!("ipc ✗ {label}: {msg}");
+    log::warn!("ipc ✗ {label} after {:?}: {msg}", started.elapsed());
     Err(msg)
 }
 
@@ -262,7 +338,7 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
 /// Client-supplied strings are sanitized (control chars escaped, truncated)
 /// so a hostile client cannot forge log lines.
 pub fn cmd_label(cmd: &DaemonCommand) -> String {
-    match cmd {
+    let label = match cmd {
         DaemonCommand::GetSensors => "GetSensors".into(),
         DaemonCommand::GetProfile => "GetProfile".into(),
         DaemonCommand::SetProfile(name) => format!("SetProfile({})", sanitize_log(name)),
@@ -319,13 +395,16 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
             enabled, max_temp, ..
         } => format!("SetThermal({enabled},{max_temp})"),
         DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
-    }
+    };
+    // Per-command classifier — trace only to keep hot paths quiet.
+    log::trace!("cmd_label: {label}");
+    label
 }
 
 /// Fixed command-kind label (no client data) — safe as a bounded map key
 /// for per-command timing statistics.
 pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
-    match cmd {
+    let kind = match cmd {
         DaemonCommand::GetSensors => "GetSensors",
         DaemonCommand::GetProfile => "GetProfile",
         DaemonCommand::SetProfile(_) => "SetProfile",
@@ -363,7 +442,10 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::GetThermal => "GetThermal",
         DaemonCommand::SetThermal { .. } => "SetThermal",
         DaemonCommand::GetThermalStatus => "GetThermalStatus",
-    }
+    };
+    // Per-command classifier — trace only to keep hot paths quiet.
+    log::trace!("cmd_kind: {kind}");
+    kind
 }
 
 pub fn response_kind(resp: &DaemonResponse) -> &'static str {
@@ -397,7 +479,7 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
 
 /// True when the command mutates hardware / firmware state.
 pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
-    matches!(
+    let is_write = matches!(
         cmd,
         DaemonCommand::SetProfile(_)
             | DaemonCommand::SetFanTarget(_, _)
@@ -417,7 +499,10 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::SetCurveOptimizerPersistence { .. }
             | DaemonCommand::SetThermal { .. }
             | DaemonCommand::FixRgbPanic
-    )
+    );
+    // Per-command classifier — trace only to keep hot paths quiet.
+    log::trace!("cmd_is_write: {is_write}");
+    is_write
 }
 
 #[cfg(test)]

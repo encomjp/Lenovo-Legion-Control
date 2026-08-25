@@ -38,17 +38,33 @@ fn conservation_path() -> Option<&'static std::path::Path> {
                 "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/conservation_mode",
             );
             if known.exists() {
+                log::trace!(
+                    "battery::conservation_path — using known path {}",
+                    known.display()
+                );
                 return Some(known.to_path_buf());
             }
             // Fallback: scan platform drivers for ideapad_acpi.
-            if let Ok(entries) = std::fs::read_dir("/sys/bus/platform/drivers/ideapad_acpi") {
-                for entry in entries.flatten() {
-                    let candidate = entry.path().join("conservation_mode");
-                    if candidate.exists() {
-                        return Some(candidate);
+            match std::fs::read_dir("/sys/bus/platform/drivers/ideapad_acpi") {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let candidate = entry.path().join("conservation_mode");
+                        if candidate.exists() {
+                            log::trace!(
+                                "battery::conservation_path — discovered {} via ideapad_acpi scan",
+                                candidate.display()
+                            );
+                            return Some(candidate);
+                        }
                     }
                 }
+                Err(e) => {
+                    log::debug!(
+                        "battery::conservation_path — ideapad_acpi driver dir scan failed: {e}"
+                    );
+                }
             }
+            log::debug!("battery::conservation_path — no conservation_mode found anywhere");
             None
         })
         .as_ref()
@@ -56,89 +72,166 @@ fn conservation_path() -> Option<&'static std::path::Path> {
 }
 
 fn read(path: &str) -> Option<String> {
-    std::fs::read_to_string(Path::new(path))
-        .ok()
-        .map(|s| s.trim().to_string())
+    match std::fs::read_to_string(Path::new(path)) {
+        Ok(s) => {
+            let s = s.trim().to_string();
+            log::trace!("battery::read — fetched {path} = {s:?}");
+            Some(s)
+        }
+        Err(e) => {
+            log::trace!("battery::read — {path} read returned None: {e}");
+            None
+        }
+    }
 }
 
 pub fn capacity() -> Option<u32> {
-    read(&format!("{BAT0}/capacity"))?.parse().ok()
+    let r = read(&format!("{BAT0}/capacity")).and_then(|s| s.parse().ok());
+    log::trace!("battery::capacity — result={r:?}");
+    r
 }
 
 pub fn status() -> Option<String> {
-    read(&format!("{BAT0}/status"))
+    let r = read(&format!("{BAT0}/status"));
+    log::trace!("battery::status — result={r:?}");
+    r
 }
 
 pub fn voltage() -> Option<f64> {
-    let v: i64 = read(&format!("{BAT0}/voltage_now"))?.parse().ok()?;
-    Some(v as f64 / 1_000_000.0)
+    let mv: Option<i64> = read(&format!("{BAT0}/voltage_now")).and_then(|s| s.parse().ok());
+    let r = mv.map(|v| v as f64 / 1_000_000.0);
+    log::trace!("battery::voltage — result={r:?}");
+    r
 }
 
 pub fn cycles() -> Option<u32> {
-    read(&format!("{BAT0}/cycle_count"))?.parse().ok()
+    let r = read(&format!("{BAT0}/cycle_count")).and_then(|s| s.parse().ok());
+    log::trace!("battery::cycles — result={r:?}");
+    r
 }
 
 pub fn power_w() -> Option<f64> {
-    let v: i64 = read(&format!("{BAT0}/power_now"))?.parse().ok()?;
-    Some(v as f64 / 1_000_000.0)
+    let uw: Option<i64> = read(&format!("{BAT0}/power_now")).and_then(|s| s.parse().ok());
+    let r = uw.map(|v| v as f64 / 1_000_000.0);
+    log::trace!("battery::power_w — result={r:?}");
+    r
 }
 
 pub fn energy_now_wh() -> Option<f64> {
-    let v: i64 = read(&format!("{BAT0}/energy_now"))?.parse().ok()?;
-    Some(v as f64 / 1_000_000.0)
+    let uwh: Option<i64> = read(&format!("{BAT0}/energy_now")).and_then(|s| s.parse().ok());
+    let r = uwh.map(|v| v as f64 / 1_000_000.0);
+    log::trace!("battery::energy_now_wh — result={r:?}");
+    r
 }
 
 pub fn energy_full_wh() -> Option<f64> {
-    let v: i64 = read(&format!("{BAT0}/energy_full"))?.parse().ok()?;
-    Some(v as f64 / 1_000_000.0)
+    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full")).and_then(|s| s.parse().ok());
+    let r = uwh.map(|v| v as f64 / 1_000_000.0);
+    log::trace!("battery::energy_full_wh — result={r:?}");
+    r
 }
 
 pub fn energy_design_wh() -> Option<f64> {
-    let v: i64 = read(&format!("{BAT0}/energy_full_design"))?.parse().ok()?;
-    Some(v as f64 / 1_000_000.0)
+    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full_design")).and_then(|s| s.parse().ok());
+    let r = uwh.map(|v| v as f64 / 1_000_000.0);
+    log::trace!("battery::energy_design_wh — result={r:?}");
+    r
 }
 
 pub fn health_pct() -> Option<f64> {
+    log::trace!("battery::health_pct()");
     let full = energy_full_wh()?;
     let design = energy_design_wh()?;
-    health_from_wh(full, design)
+    let h = health_from_wh(full, design);
+    log::debug!(
+        "battery::health_pct — computed health={h:?}% (full={full:.2}Wh, design={design:.2}Wh)"
+    );
+    h
 }
 
 pub fn manufacturer() -> Option<String> {
-    read(&format!("{BAT0}/manufacturer"))
+    let r = read(&format!("{BAT0}/manufacturer"));
+    log::trace!("battery::manufacturer — result={r:?}");
+    r
 }
 
 pub fn model_name() -> Option<String> {
-    read(&format!("{BAT0}/model_name"))
+    let r = read(&format!("{BAT0}/model_name"));
+    log::trace!("battery::model_name — result={r:?}");
+    r
 }
 
 pub fn technology() -> Option<String> {
-    read(&format!("{BAT0}/technology"))
+    let r = read(&format!("{BAT0}/technology"));
+    log::trace!("battery::technology — result={r:?}");
+    r
 }
 
 pub fn charge_types() -> Option<String> {
-    read(&format!("{BAT0}/charge_types"))
+    let r = read(&format!("{BAT0}/charge_types"));
+    log::trace!("battery::charge_types — result={r:?}");
+    r
 }
 
 pub fn conservation_mode() -> Option<bool> {
-    let path = conservation_path()?;
+    log::trace!("battery::conservation_mode()");
+    let path = match conservation_path() {
+        Some(p) => p,
+        None => {
+            log::debug!("battery::conservation_mode — conservation_mode file not found");
+            return None;
+        }
+    };
     // Prefer ideapad conservation_mode when present
     if let Some(v) = read(&path.to_string_lossy()) {
-        return Some(v.trim() == "1");
+        let on = v.trim() == "1";
+        log::debug!(
+            "battery::conservation_mode — read from {}: {on}",
+            path.display()
+        );
+        return Some(on);
     }
     let types = charge_types()?;
-    Some(types.contains("[Long_Life]"))
+    let on = types.contains("[Long_Life]");
+    log::debug!("battery::conservation_mode — fallback from charge_types={types:?}: {on}");
+    Some(on)
 }
 
 fn set_conservation_file(on: bool) -> std::io::Result<()> {
-    let path = conservation_path().ok_or_else(|| {
+    log::trace!("battery::set_conservation_file(on={on})");
+    let found = conservation_path().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "conservation_mode not found")
-    })?;
-    std::fs::write(path, if on { "1" } else { "0" })
+    });
+    let path = match found {
+        Ok(p) => p,
+        Err(e) => {
+            log::debug!("battery::set_conservation_file — conservation_mode missing: {e}");
+            return Err(e);
+        }
+    };
+    let res = std::fs::write(path, if on { "1" } else { "0" });
+    match &res {
+        Ok(()) => log::debug!(
+            "battery::set_conservation_file — wrote {} to {}",
+            if on { "1" } else { "0" },
+            path.display()
+        ),
+        Err(e) => log::debug!(
+            "battery::set_conservation_file — write to {} failed: {e}",
+            path.display()
+        ),
+    }
+    res
 }
 
 fn set_charge_type(val: &str) -> std::io::Result<()> {
-    std::fs::write(format!("{BAT0}/charge_types"), val)
+    log::trace!("battery::set_charge_type(val={val})");
+    let res = std::fs::write(format!("{BAT0}/charge_types"), val);
+    match &res {
+        Ok(()) => log::debug!("battery::set_charge_type — wrote charge_types={val}"),
+        Err(e) => log::debug!("battery::set_charge_type — write failed: {e}"),
+    }
+    res
 }
 
 /// Parse the bracketed active selection out of a charge_types value
@@ -150,35 +243,51 @@ fn parse_selection(types: &str) -> Option<String> {
 }
 
 fn selected_charge_type() -> Option<String> {
-    parse_selection(&charge_types()?)
+    let r = parse_selection(&charge_types()?);
+    log::trace!("battery::selected_charge_type — result={r:?}");
+    r
 }
 
 /// Legacy boolean API — maps to ~60% conservation when on, Standard when off.
 pub fn set_conservation(on: bool) -> std::io::Result<()> {
-    if on {
+    log::trace!("battery::set_conservation(on={on})");
+    let r = if on {
         set_charge_limit_pct(60)
     } else {
         set_charge_limit_pct(100)
-    }
+    };
+    log::debug!(
+        "battery::set_conservation — delegated to set_charge_limit_pct, ok={}",
+        r.is_ok()
+    );
+    r
 }
 
 /// Current effective charge limit percentage: 80 when the firmware limiter is
 /// engaged, else 100. Legacy `conservation_mode`-only machines (no
 /// `charge_types` attr) report 60 while conservation is on.
 pub fn charge_limit_pct() -> u32 {
+    log::trace!("battery::charge_limit_pct()");
     if let Some(sel) = selected_charge_type() {
         if sel.eq_ignore_ascii_case("Long_Life") {
+            log::debug!("battery::charge_limit_pct — source=charge_types selection Long_Life → 80");
             return 80;
         }
         if sel.eq_ignore_ascii_case("Standard") || sel.eq_ignore_ascii_case("Fast") {
+            log::debug!("battery::charge_limit_pct — source=charge_types selection {sel} → 100");
             return 100;
         }
+        log::debug!(
+            "battery::charge_limit_pct — unrecognized charge_types selection {sel:?}, falling through"
+        );
     }
     if let Some(path) = conservation_path() {
         if read(&path.to_string_lossy()).as_deref() == Some("1") {
+            log::debug!("battery::charge_limit_pct — source=legacy conservation_mode → 60");
             return 60;
         }
     }
+    log::debug!("battery::charge_limit_pct — source=default → 100");
     100
 }
 
@@ -190,6 +299,7 @@ pub fn charge_limit_pct() -> u32 {
 /// self-undoing bug. Verifies the read-back selection and returns an error
 /// when the EC did not accept the mode instead of reporting silent success.
 pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
+    log::trace!("battery::set_charge_limit_pct(pct={pct})");
     let pct = discretize_limit(pct);
     let preserve = pct < 100;
     let want = if preserve { "Long_Life" } else { "Standard" };
@@ -197,20 +307,39 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
         "charge limit → {} ({want})",
         if preserve { "preserved" } else { "full" }
     );
+    log::debug!(
+        "battery::set_charge_limit_pct — request mapped to {pct} (preserve={preserve}, target={want})"
+    );
 
     DESIRED_LIMIT.store(pct, Ordering::Relaxed);
 
     // Preferred path: standardized charge_types switch.
     if charge_types().is_some() {
-        set_charge_type(want)?;
+        log::debug!("battery::set_charge_limit_pct — write path: charge_types={want}");
+        if let Err(e) = set_charge_type(want) {
+            log::debug!("battery::set_charge_limit_pct — charge_types write failed: {e}");
+            return Err(e);
+        }
         // The EC may take a few hundred ms to reflect the new selection
         // (and kernel Bug 221065 can garble the first readback after AC
         // events) — poll the readback instead of trusting a single sample.
-        for _ in 0..5 {
+        for attempt in 0..5 {
             std::thread::sleep(std::time::Duration::from_millis(100));
             match selected_charge_type() {
-                Some(t) if t.eq_ignore_ascii_case(want) => return Ok(()),
-                _ => {}
+                Some(t) if t.eq_ignore_ascii_case(want) => {
+                    log::info!(
+                        "battery::set_charge_limit_pct — verified charge_types={want} on readback {} of 5",
+                        attempt + 1
+                    );
+                    return Ok(());
+                }
+                _ => {
+                    log::debug!(
+                        "battery::set_charge_limit_pct — readback {} of 5 did not read {want} yet (attempt {})",
+                        attempt + 1,
+                        attempt
+                    );
+                }
             }
         }
         let msg = format!(
@@ -222,10 +351,23 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
     }
 
     // Legacy fallback: machines without charge_types (older models/kernels).
-    set_conservation_file(preserve)?;
+    log::debug!(
+        "battery::set_charge_limit_pct — write path: legacy conservation_mode={}",
+        if preserve { 1 } else { 0 }
+    );
+    if let Err(e) = set_conservation_file(preserve) {
+        log::debug!("battery::set_charge_limit_pct — conservation_mode write failed: {e}");
+        return Err(e);
+    }
     // Same verification contract as the charge_types path.
     match conservation_mode() {
-        Some(on) if on == preserve => Ok(()),
+        Some(on) if on == preserve => {
+            log::info!(
+                "battery::set_charge_limit_pct — verified legacy conservation_mode={} on readback",
+                if preserve { 1 } else { 0 }
+            );
+            Ok(())
+        }
         Some(on) => {
             let msg = format!(
                 "Firmware did not accept conservation_mode={} (reads {on}) — charging may be uncapped",
@@ -246,12 +388,17 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
 /// limiter is actually engaged (booted with conservation on); otherwise the
 /// watchdog stays passive until the user explicitly sets a limit.
 pub fn seed_desired_from_effective() {
+    log::trace!("battery::seed_desired_from_effective()");
     let effective = charge_limit_pct();
     if effective < 100 {
         DESIRED_LIMIT.store(effective, Ordering::Relaxed);
         log::info!(
             "charge limiter watchdog seeded from effective state ({}%)",
             effective
+        );
+    } else {
+        log::debug!(
+            "battery::seed_desired_from_effective — limiter not engaged (effective={effective}%), watchdog stays passive"
         );
     }
 }
@@ -261,12 +408,21 @@ pub fn seed_desired_from_effective() {
 /// the laptop was off/asleep" condition — the limiter bit is intact, the EC
 /// just ignored it while the OS was gone.
 pub fn above_limiter_band(limit_pct: u32, capacity_pct: u32) -> bool {
-    limit_pct < 100 && capacity_pct > 85
+    let r = limit_pct < 100 && capacity_pct > 85;
+    log::trace!(
+        "battery::above_limiter_band(limit_pct={limit_pct}, capacity_pct={capacity_pct}) — result={r}"
+    );
+    r
 }
 
 /// Live check of `above_limiter_band` against current sysfs state.
 pub fn charged_past_limiter() -> bool {
-    above_limiter_band(charge_limit_pct(), capacity().unwrap_or(0))
+    log::trace!("battery::charged_past_limiter()");
+    let limit = charge_limit_pct();
+    let cap = capacity().unwrap_or(0);
+    let r = above_limiter_band(limit, cap);
+    log::debug!("battery::charged_past_limiter — limit={limit}%, capacity={cap}% → {r}");
+    r
 }
 
 /// Re-apply the last explicitly requested limit if the EC silently dropped
@@ -274,59 +430,95 @@ pub fn charged_past_limiter() -> bool {
 /// when a repair was attempted. No-op until an explicit limit was set in
 /// this daemon's lifetime.
 pub fn reassert_configured_limit() -> std::io::Result<bool> {
+    log::trace!("battery::reassert_configured_limit()");
     let want = DESIRED_LIMIT.load(Ordering::Relaxed);
     if want == 0 {
+        log::debug!(
+            "battery::reassert_configured_limit — no explicit limit requested yet, skipping"
+        );
         return Ok(false);
     }
     let preserve = want < 100;
     let engaged = match selected_charge_type() {
-        Some(sel) => sel.eq_ignore_ascii_case("Long_Life") == preserve,
+        Some(sel) => {
+            let e = sel.eq_ignore_ascii_case("Long_Life") == preserve;
+            log::debug!(
+                "battery::reassert_configured_limit — charge_types selection {sel:?} vs want {want}%: engaged={e}"
+            );
+            e
+        }
         None => match conservation_mode() {
-            Some(on) => on == preserve,
+            Some(on) => {
+                let e = on == preserve;
+                log::debug!(
+                    "battery::reassert_configured_limit — conservation_mode={on} vs want {want}%: engaged={e}"
+                );
+                e
+            }
             // Neither interface readable — do not guess, do not spam.
-            None => return Ok(false),
+            None => {
+                log::debug!(
+                    "battery::reassert_configured_limit — neither charge_types nor conservation_mode readable, skipping"
+                );
+                return Ok(false);
+            }
         },
     };
     if engaged {
+        log::debug!(
+            "battery::reassert_configured_limit — limiter still engaged at {want}%, nothing to repair"
+        );
         return Ok(false);
     }
     log::warn!(
         "charge limiter state silently cleared by firmware — re-applying {}%",
         want
     );
-    set_charge_limit_pct(want)?;
+    if let Err(e) = set_charge_limit_pct(want) {
+        log::debug!("battery::reassert_configured_limit — re-apply failed: {e}");
+        return Err(e);
+    }
+    log::info!("battery::reassert_configured_limit — repaired limiter to {want}%");
     Ok(true)
 }
 
 pub fn charge_limit_label(pct: u32) -> &'static str {
-    match pct {
+    let label = match pct {
         // 60 only exists as the legacy conservation_mode fallback on old
         // machines; current Legion firmware's limiter is ~75–80%.
         60 => "Conservation (~55–60%)",
         80 => "Preservation (~75–80%)",
         _ => "Full charge (100%)",
-    }
+    };
+    log::trace!("battery::charge_limit_label(pct={pct}) — result={label}");
+    label
 }
 
 /// Pure helper: map any requested percentage to the firmware limiter state
 /// (< 100 ⇒ preserved, ≥ 100 ⇒ full). The single implementation behind
 /// `set_charge_limit_pct`; exported so tests pin the mapping.
 pub fn discretize_limit(pct: u32) -> u32 {
-    match pct {
+    let d = match pct {
         0..=69 => 60,
         70..=89 => 80,
         _ => 100,
-    }
+    };
+    log::trace!("battery::discretize_limit(pct={pct}) — result={d}");
+    d
 }
 
 /// Pure helper: compute health from two watt-hour readings. The single
 /// implementation behind `health_pct()`; exported so tests exercise the
 /// same math the sysfs path uses.
 pub fn health_from_wh(full: f64, design: f64) -> Option<f64> {
+    log::trace!("battery::health_from_wh(full={full}, design={design})");
     if design <= 0.0 {
+        log::debug!("battery::health_from_wh — design={design} <= 0, returning None");
         return None;
     }
-    Some((full / design) * 100.0)
+    let h = (full / design) * 100.0;
+    log::debug!("battery::health_from_wh — computed {h:.1}%");
+    Some(h)
 }
 
 #[cfg(test)]

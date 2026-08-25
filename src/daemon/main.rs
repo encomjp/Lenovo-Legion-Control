@@ -148,7 +148,10 @@ fn main() {
     // blindly delete a live socket — two daemons would fight over CPU freq.
     let pidfile_path = path.with_extension("pid");
     let _singleton = match acquire_singleton_lock(&pidfile_path) {
-        Some(f) => f,
+        Some(f) => {
+            log::debug!("singleton flock acquired on {}", pidfile_path.display());
+            f
+        }
         None => {
             log::error!(
                 "another legion-daemon appears to be running (lock held on {}) — exiting",
@@ -169,10 +172,15 @@ fn main() {
             "Running as non-root: platform profile, fans, and conservation writes will fail. \
              Install the system service: sudo systemctl enable --now legion-control"
         );
+    } else {
+        log::debug!("running as root (euid=0) — privileged hardware access available");
     }
 
     let listener = match UnixListener::bind(&path) {
-        Ok(l) => l,
+        Ok(l) => {
+            log::debug!("socket bound at {}", path.display());
+            l
+        }
         Err(e) => {
             log::error!("Cannot bind {}: {}", path.display(), e);
             std::process::exit(1);
@@ -191,8 +199,19 @@ fn main() {
                 Ok(p) => p,
                 Err(_) => std::ffi::CString::new("/run/legion-control.socket").unwrap(),
             };
-            unsafe {
-                libc::chown(cpath.as_ptr(), u32::MAX, gid);
+            // chown result is now surfaced in the journal instead of discarded.
+            let rc = unsafe { libc::chown(cpath.as_ptr(), u32::MAX, gid) };
+            if rc == 0 {
+                log::debug!(
+                    "socket {} chowned to group 'legion' (gid={gid})",
+                    path.display()
+                );
+            } else {
+                log::warn!(
+                    "chown {} → gid {gid} failed: {}",
+                    path.display(),
+                    std::io::Error::last_os_error()
+                );
             }
         }
         let mode = if legion_group_gid().is_some() {
@@ -204,8 +223,9 @@ fn main() {
             );
             0o600
         };
-        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)) {
-            log::warn!("failed to chmod socket {}: {e}", path.display());
+        match std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)) {
+            Ok(()) => log::debug!("socket {} chmod {:o} applied", path.display(), mode),
+            Err(e) => log::warn!("failed to chmod socket {}: {e}", path.display()),
         }
     }
 
@@ -214,6 +234,7 @@ fn main() {
         log::error!("Cannot set nonblocking accept: {e}");
         std::process::exit(1);
     }
+    log::debug!("listener set to nonblocking accept");
 
     log::info!("Listening on {}", path.display());
 
@@ -251,10 +272,27 @@ fn main() {
                 == "legion_hwmon"
         });
     log::info!("legion_hwmon loaded={hwmon_loaded}");
+    log::debug!(
+        "capabilities: ppt_attrs=[{}] platform_profiles=[{}] peak_gpu_w={:?}",
+        info.capabilities.ppt_attrs.join(", "),
+        info.capabilities.platform_profiles.join(", "),
+        info.capabilities.peak_gpu_w
+    );
     undervolt::start_persistence_worker();
 
     // Adopt the boot-time limiter state so the watchdog maintains it across
     // restarts (the EC persists the bit, but can silently drop it later).
+    // Surface what the watchdog adopts: a seeded value, or deliberately empty.
+    let effective_limit = battery::charge_limit_pct();
+    if effective_limit < 100 {
+        log::info!(
+            "seed_desired_from_effective: adopting effective charge limit {effective_limit}%"
+        );
+    } else {
+        log::debug!(
+            "seed_desired_from_effective: no effective limiter engaged — watchdog stays unseeded"
+        );
+    }
     battery::seed_desired_from_effective();
 
     // Documented EC behavior: the limiter is ignored while the laptop is off
@@ -276,6 +314,12 @@ fn main() {
             seeded_thermal.max_temp
         );
         seeded_thermal = ThermalConfig::default();
+    } else {
+        log::debug!(
+            "seeded thermal config valid: enabled={} max_temp={}°C",
+            seeded_thermal.enabled,
+            seeded_thermal.max_temp
+        );
     }
     let thermal_cfg = Arc::new(RwLock::new(seeded_thermal));
     THERMAL_CONFIG.set(thermal_cfg.clone()).ok();
@@ -330,10 +374,28 @@ fn main() {
         }
         match listener.accept() {
             Ok((stream, _)) => {
+                use std::os::fd::AsRawFd;
+                let fd = stream.as_raw_fd();
+                let peer = stream
+                    .peer_addr()
+                    .map(|a| {
+                        a.as_pathname()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "<unnamed>".into())
+                    })
+                    .unwrap_or_else(|_| "<unknown>".into());
+                log::debug!(
+                    "client connected (fd={fd}, peer={peer}, active_clients={}/{MAX_CLIENTS})",
+                    active_clients.load(Ordering::Relaxed)
+                );
                 // One thread per connection with a read timeout: a stalled
                 // client must never wedge the accept loop or clean shutdown.
                 if active_clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
-                    log::warn!("connection limit reached — dropping client");
+                    log::warn!(
+                        "connection limit reached — dropping client \
+                         (active={}, max={MAX_CLIENTS})",
+                        active_clients.load(Ordering::Relaxed)
+                    );
                     continue;
                 }
                 let state = client_state.clone();
@@ -343,8 +405,16 @@ fn main() {
                 if let Err(e) = std::thread::Builder::new()
                     .name("client-handler".into())
                     .spawn(move || {
+                        let tid = std::thread::current().id();
+                        log::debug!(
+                            "client handler spawned (thread={tid:?}, active_clients={})",
+                            active_inner.load(Ordering::Relaxed)
+                        );
                         handle_client(stream, &state);
-                        active_inner.fetch_sub(1, Ordering::Relaxed);
+                        let remaining = active_inner.fetch_sub(1, Ordering::Relaxed) - 1;
+                        log::debug!(
+                            "client handler exited (thread={tid:?}, active_clients={remaining})"
+                        );
                     })
                 {
                     log::error!("failed to spawn client handler: {e}");
@@ -366,6 +436,10 @@ fn main() {
 
     undervolt::clear_persistence_armed_on_clean_shutdown();
     std::fs::remove_file(&path).ok();
+    log::debug!(
+        "releasing singleton pidfile lock {}",
+        pidfile_path.display()
+    );
     log::info!("Daemon stopped");
 }
 
@@ -376,8 +450,18 @@ fn restore_hardware_on_shutdown() {
         Ok(()) => log::info!("shutdown: restored scaling_max_freq to full speed"),
         Err(e) => log::warn!("shutdown: could not restore scaling_max_freq: {e}"),
     }
+    // Name every fan being reset — `detect()` is cached, so this is free.
+    let fan_ids: Vec<String> = device::detect()
+        .capabilities
+        .fans
+        .iter()
+        .map(|f| f.id.to_string())
+        .collect();
+    log::debug!("shutdown: resetting fans [{}] to auto", fan_ids.join(", "));
     if let Err(e) = fans::set_auto() {
         log::debug!("shutdown: fans back to auto failed: {e}");
+    } else {
+        log::debug!("shutdown: fans back to auto ok");
     }
 }
 
@@ -387,6 +471,7 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
         log::debug!("client set_read_timeout failed: {e}");
         return;
     }
+    log::debug!("client read timeout set to {CLIENT_READ_TIMEOUT:?}");
 
     // Audit who connected. Kernel socket permissions (0660 root:legion)
     // already gate access; this makes abuse visible in the journal.
@@ -402,9 +487,13 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
         log::debug!("client read failed: {e}");
         return;
     }
+    log::debug!("read {} bytes from client", buf.len());
 
     let cmd: DaemonCommand = match bincode_opts().deserialize(&buf) {
-        Ok(c) => c,
+        Ok(c) => {
+            log::trace!("command deserialized ok ({} bytes)", buf.len());
+            c
+        }
         Err(e) => {
             log::warn!("client sent unparsable command ({e})");
             let _ = send_response(&mut stream, DaemonResponse::Error(format!("Parse: {}", e)));
@@ -414,6 +503,7 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
 
     let kind = cmd_kind(&cmd);
     let is_write = cmd_is_write(&cmd);
+    log::debug!("dispatching cmd kind={kind} write={is_write}");
     let t0 = Instant::now();
     let response = {
         let mut st = match state.lock() {
@@ -447,6 +537,8 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
 
     if let Err(e) = send_response(&mut stream, response) {
         log::debug!("client response write failed: {e}");
+    } else {
+        log::trace!("response sent to client ({kind})");
     }
 }
 
@@ -454,11 +546,17 @@ fn send_response(stream: &mut UnixStream, resp: DaemonResponse) -> std::io::Resu
     let data = bincode_opts()
         .serialize(&resp)
         .map_err(|e| std::io::Error::other(format!("Serialize: {}", e)))?;
+    log::trace!("response serialized ({} bytes)", data.len());
     stream.write_all(&data)
 }
 
 fn build_thermal_status() -> thermal::ThermalStatus {
     let cfg = config::get().thermal;
+    log::trace!(
+        "thermal config state read: enabled={} max_temp={}",
+        cfg.enabled,
+        cfg.max_temp
+    );
     let (cpu_temp, cpu_temp_2) = thermal::read_cpu_temps();
     let cur_max = thermal::read_cur_max().unwrap_or(0);
     let restore_temp = cfg.max_temp.saturating_sub(thermal::HYSTERESIS as u8);
@@ -753,6 +851,7 @@ fn process_command(
             // Single source of truth: the same allow-list that drives
             // discovery (profile::all_ppt_limits) gates writes here.
             if profile::is_known_fw_attr(&name) {
+                log::debug!("SetFwAttr '{name}' passed allow-list check");
                 match value.trim().parse::<u32>() {
                     Ok(v) => match profile::set_ppt(&name, v) {
                         Ok(()) => DaemonResponse::Ok,
@@ -761,6 +860,7 @@ fn process_command(
                     Err(_) => DaemonResponse::Error(format!("Invalid PPT value '{value}'")),
                 }
             } else {
+                log::warn!("SetFwAttr '{name}' rejected — not on firmware attribute allow-list");
                 DaemonResponse::Error(format!("Unsupported firmware attribute '{name}'"))
             }
         }
@@ -889,6 +989,9 @@ fn process_command(
             if let Some(shared) = THERMAL_CONFIG.get() {
                 if let Ok(mut g) = shared.write() {
                     *g = ThermalConfig { enabled, max_temp };
+                    log::debug!(
+                        "shared thermal config updated: enabled={enabled} max_temp={max_temp}"
+                    );
                 }
             }
             // Disabling a mid-throttle governor must not leave CPUs capped:
@@ -904,9 +1007,11 @@ fn process_command(
                 if let Ok(mut flag) = lock.lock() {
                     *flag = true;
                     cvar.notify_one();
+                    log::debug!("thermal governor notified (condvar signal sent)");
                 }
             }
             if enabled && !was_enabled {
+                log::debug!("invoking systemctl disable --now cpu95-throttle.service");
                 match std::process::Command::new("systemctl")
                     .args(["disable", "--now", "cpu95-throttle.service"])
                     .status()
@@ -955,6 +1060,7 @@ fn battery_watchdog(shutdown: Arc<AtomicBool>) {
     // Delay first check so boot EC settle finishes.
     for _ in 0..100 {
         if shutdown.load(Ordering::Relaxed) {
+            log::info!("battery-watchdog thread stopped");
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -963,16 +1069,18 @@ fn battery_watchdog(shutdown: Arc<AtomicBool>) {
         // 300 s in 100 ms slices so shutdown is noticed promptly.
         for _ in 0..3000 {
             if shutdown.load(Ordering::Relaxed) {
+                log::info!("battery-watchdog thread stopped");
                 return;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
         match battery::reassert_configured_limit() {
             Ok(true) => log::info!("charge limiter re-applied after firmware cleared it"),
-            Ok(false) => {}
+            Ok(false) => log::debug!("charge limiter reassert: state intact — no repair needed"),
             Err(e) => log::warn!("charge limiter re-assert failed: {e}"),
         }
     }
+    log::info!("battery-watchdog thread stopped");
 }
 
 /// Periodic Spectrum panic detection — uses kernel log + HID ioctl probe.
@@ -981,6 +1089,7 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
     // Delay first probe so boot USB settle finishes.
     for _ in 0..40 {
         if shutdown.load(Ordering::Relaxed) {
+            log::info!("rgb-watchdog thread stopped");
             return;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -988,6 +1097,7 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
     while !shutdown.load(Ordering::Relaxed) {
         for _ in 0..30 {
             if shutdown.load(Ordering::Relaxed) {
+                log::info!("rgb-watchdog thread stopped");
                 return;
             }
             std::thread::sleep(Duration::from_millis(500));
@@ -997,8 +1107,10 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
         }
         if cooldown_ticks > 0 {
             cooldown_ticks -= 1;
+            log::trace!("rgb-watchdog: cooldown tick consumed ({cooldown_ticks} remaining)");
             continue;
         }
+        log::trace!("rgb-watchdog: probing Spectrum health (diagnose)");
         let d = rgb_panic::diagnose();
         if !rgb_panic::needs_autofix(&d) {
             continue;
@@ -1007,6 +1119,7 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
         for line in &d.details {
             log::debug!("rgb: {line}");
         }
+        log::debug!("rgb-watchdog: invoking troubleshoot auto-fix sequence");
         let report = rgb_panic::troubleshoot();
         for s in &report.steps {
             log::info!("rgb-fix: {s}");
@@ -1021,5 +1134,7 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
         );
         // ~2 minutes before another autofix attempt.
         cooldown_ticks = 8;
+        log::debug!("rgb-watchdog: entering cooldown (8 ticks ≈ 2 min)");
     }
+    log::info!("rgb-watchdog thread stopped");
 }

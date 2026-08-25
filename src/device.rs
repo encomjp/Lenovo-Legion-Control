@@ -56,49 +56,114 @@ pub struct FanCapability {
 /// telemetry; live RPM comes from `fans::read_rpm`.
 pub fn detect() -> DeviceInfo {
     static DETECTED: OnceLock<DeviceInfo> = OnceLock::new();
-    DETECTED.get_or_init(detect_uncached).clone()
+    if let Some(cached) = DETECTED.get() {
+        log::debug!("device detect: cache hit");
+        return cached.clone();
+    }
+    let info = DETECTED.get_or_init(detect_uncached).clone();
+    log::debug!("device detect: cache miss — full detection ran, result now cached");
+    info
 }
 
 fn detect_uncached() -> DeviceInfo {
+    log::debug!("device detect: full probe starting");
+    // sys_vendor is informational only — read for logs, never used for decisions.
+    let dmi_vendor = read_dmi("sys_vendor").unwrap_or_default();
     let dmi_name = read_dmi("product_name").unwrap_or_default();
     let dmi_version = read_dmi("product_version").unwrap_or_default();
     let dmi_family = read_dmi("product_family").unwrap_or_default();
     let dmi_sku = read_dmi("product_sku").unwrap_or_default();
-    let bios = read_dmi("bios_version").unwrap_or_else(|| "Unknown".into());
+    let bios = read_dmi("bios_version").unwrap_or_else(|| {
+        log::debug!("device detect: dmi bios_version unreadable — using \"Unknown\"");
+        "Unknown".into()
+    });
     let bios_prefix = bios_prefix(&bios);
 
     let (machine_type, marketing) = classify_dmi(&dmi_name, &dmi_version, &dmi_family, &dmi_sku);
+    log::debug!(
+        "device detect: classify_dmi resolved machine_type={machine_type:?} marketing={marketing:?}"
+    );
 
     let profile = models::lookup(&machine_type, &marketing, &bios_prefix);
-    let gpu = crate::dgpu::smi_query("name").unwrap_or_else(|| "Unknown".into());
-    let cpu = read_cpu_model().unwrap_or_else(|| "Unknown".into());
+    log::debug!(
+        "device detect: profile {}",
+        match profile {
+            Some(p) => format!("matched: {} ({})", p.marketing, p.source),
+            None => "unmatched".to_string(),
+        }
+    );
+
+    let gpu = match crate::dgpu::smi_query("name") {
+        Some(name) => {
+            log::debug!("device detect: gpu detection via nvidia-smi → {name:?}");
+            name
+        }
+        None => {
+            log::debug!(
+                "device detect: gpu detection via nvidia-smi returned nothing — using \"Unknown\""
+            );
+            "Unknown".into()
+        }
+    };
+    let cpu = match read_cpu_model() {
+        Some(c) => {
+            log::debug!("device detect: cpu model → {c:?}");
+            c
+        }
+        None => {
+            log::debug!("device detect: cpu model unreadable — using \"Unknown\"");
+            "Unknown".into()
+        }
+    };
 
     let capabilities = probe_capabilities(profile, &gpu);
 
     let (series, gen, notes, source, matched) = match profile {
-        Some(p) => (
-            p.series.to_string(),
-            p.gen,
-            p.notes.to_string(),
-            p.source.to_string(),
-            true,
-        ),
-        None => (
-            guess_series(&marketing).to_string(),
-            0,
-            String::new(),
-            "unmatched — probed from sysfs only".into(),
-            false,
-        ),
+        Some(p) => {
+            log::debug!(
+                "device detect: gen assignment {} from profile {}",
+                p.gen,
+                p.bios_prefix
+            );
+            (
+                p.series.to_string(),
+                p.gen,
+                p.notes.to_string(),
+                p.source.to_string(),
+                true,
+            )
+        }
+        None => {
+            let guessed = guess_series(&marketing);
+            log::debug!(
+                "device detect: gen assignment 0 (no profile) — series guessed {guessed:?}"
+            );
+            (
+                guessed.to_string(),
+                0,
+                String::new(),
+                "unmatched — probed from sysfs only".into(),
+                false,
+            )
+        }
     };
 
     let display = if !marketing.is_empty() && marketing != "Unknown" {
+        log::debug!("device detect: display name ← marketing ({marketing})");
         marketing.clone()
     } else if !machine_type.is_empty() {
+        log::debug!("device detect: display name ← machine type ({machine_type})");
         machine_type.clone()
     } else {
+        log::debug!("device detect: display name — nothing usable, \"Unknown\"");
         "Unknown".into()
     };
+
+    log::info!(
+        "device detected: vendor={dmi_vendor:?} model={display:?} machine_type={machine_type:?} \
+         series={series:?} gen={gen} gpu={gpu:?} cpu={cpu:?} bios={bios} ({bios_prefix}) \
+         profile_matched={matched}"
+    );
 
     DeviceInfo {
         model: display,
@@ -128,19 +193,48 @@ fn detect_uncached() -> DeviceInfo {
 
 /// Live capability probe (fans, lighting, PPT, peak TGP).
 pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str) -> Capabilities {
+    log::debug!("capability probe starting (gpu={gpu_name:?})");
     let (fan_backend, fans) = probe_fans(profile);
+    log::debug!(
+        "capability probe: fan backend {fan_backend:?} ({} fan channels)",
+        fans.len()
+    );
     let lighting = probe_lighting();
+    log::debug!("capability probe: lighting {lighting:?}");
     let ppt_attrs = probe_ppt_attrs();
     let platform_profiles = crate::profile::choices();
     let has_custom = platform_profiles.iter().any(|p| p == "custom");
+    log::trace!("capability probe: platform profiles {platform_profiles:?} (custom={has_custom})");
 
     let (peak_gpu_w, peak_gpu_source) = match crate::dgpu::read_power_max() {
-        Some(w) => (Some(w.round() as u32), "nvidia-smi power.max_limit".into()),
-        None => match models::expected_tgp_from_gpu_name(gpu_name) {
-            Some(w) => (Some(w), "PSREF / GPU name heuristic".into()),
-            None => (None, "unavailable".into()),
-        },
+        Some(w) => {
+            log::debug!(
+                "capability probe: peak GPU limit {} W via nvidia-smi power.max_limit",
+                w.round() as u32
+            );
+            (Some(w.round() as u32), "nvidia-smi power.max_limit".into())
+        }
+        None => {
+            match models::expected_tgp_from_gpu_name(gpu_name) {
+                Some(w) => {
+                    log::debug!("capability probe: peak GPU limit {w} W via PSREF heuristic for {gpu_name:?}");
+                    (Some(w), "PSREF / GPU name heuristic".into())
+                }
+                None => {
+                    log::debug!(
+                    "capability probe: peak GPU limit unavailable (no smi limit, no heuristic hit)"
+                );
+                    (None, "unavailable".into())
+                }
+            }
+        }
     };
+
+    log::debug!(
+        "capability probe done: fans={} lighting={lighting:?} ppt_attrs={} peak_gpu_w={peak_gpu_w:?}",
+        fans.len(),
+        ppt_attrs.len()
+    );
 
     Capabilities {
         fan_backend,
@@ -158,18 +252,44 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
     if let Some(hw) = crate::sensors::hwmon_by_name("lenovo_wmi_other") {
         let fans = collect_fans_from_hwmon(&hw, profile);
         if !fans.is_empty() {
+            log::debug!(
+                "fan probe: backend lenovo_wmi_other at {} ({} fans)",
+                hw.display(),
+                fans.len()
+            );
             return ("lenovo_wmi_other".into(), fans);
         }
+        log::trace!(
+            "fan probe: lenovo_wmi_other present at {} but exposes no fan channels",
+            hw.display()
+        );
+    } else {
+        log::trace!("fan probe: no lenovo_wmi_other hwmon");
     }
     if let Some(hw) = crate::sensors::hwmon_by_name("legion_hwmon") {
         let fans = collect_fans_from_hwmon(&hw, profile);
         if !fans.is_empty() {
+            log::debug!(
+                "fan probe: backend legion_hwmon at {} ({} fans)",
+                hw.display(),
+                fans.len()
+            );
             return ("legion_hwmon".into(), fans);
         }
+        log::trace!(
+            "fan probe: legion_hwmon present at {} but exposes no fan channels",
+            hw.display()
+        );
+    } else {
+        log::trace!("fan probe: no legion_hwmon hwmon");
     }
 
     // Profile fallbacks when no hwmon yet (daemon early boot, missing module).
     if let Some(p) = profile {
+        log::debug!(
+            "fan probe: no hwmon fans — using profile fallback ranges ({})",
+            p.bios_prefix
+        );
         let fans = p
             .fan_rpm_fallback
             .iter()
@@ -184,6 +304,7 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
         return (format!("profile-fallback ({})", p.bios_prefix), fans);
     }
 
+    log::warn!("fan probe: no hwmon and no profile — using static placeholder fan ranges");
     (
         "none".into(),
         vec![
@@ -224,11 +345,20 @@ fn collect_fans_from_hwmon(
     }
     ids.sort_unstable();
     ids.dedup();
+    let disp = hw.display();
+    log::trace!("fan probe: {disp} fan channels discovered: {ids:?}");
 
     ids.into_iter()
         .filter_map(|id| {
-            let input = read_u32(hw.join(format!("fan{id}_input")))?;
+            let input = match read_u32(hw.join(format!("fan{id}_input"))) {
+                Some(v) => v,
+                None => {
+                    log::trace!("fan probe: {disp} fan{id}_input unreadable — channel skipped");
+                    return None;
+                }
+            };
             let min = read_u32(hw.join(format!("fan{id}_min"))).unwrap_or_else(|| {
+                log::trace!("fan probe: {disp} fan{id}: no _min attr — profile/default fallback");
                 profile
                     .and_then(|p| {
                         p.fan_rpm_fallback
@@ -239,6 +369,7 @@ fn collect_fans_from_hwmon(
                     .unwrap_or(0)
             });
             let max = read_u32(hw.join(format!("fan{id}_max"))).unwrap_or_else(|| {
+                log::trace!("fan probe: {disp} fan{id}: no _max attr — profile/default fallback");
                 profile
                     .and_then(|p| {
                         p.fan_rpm_fallback
@@ -248,9 +379,18 @@ fn collect_fans_from_hwmon(
                     })
                     .unwrap_or(5500)
             });
-            let title = read_file(hw.join(format!("fan{id}_label")))
-                .map(|l| pretty_fan_label(&l, id))
-                .unwrap_or_else(|| fan_title(id).into());
+            let title = match read_file(hw.join(format!("fan{id}_label"))) {
+                Some(l) => pretty_fan_label(&l, id),
+                None => {
+                    log::trace!("fan probe: {disp} fan{id}: no label attr — generic title");
+                    fan_title(id).into()
+                }
+            };
+            log::trace!(
+                "fan probe: {disp} fan{id} {title:?}: {input} rpm, range {}–{}",
+                min,
+                max.max(min + 100)
+            );
             Some(FanCapability {
                 id,
                 title,
@@ -293,15 +433,19 @@ pub fn fan_title(id: u8) -> &'static str {
 fn probe_lighting() -> String {
     let mut kinds = Vec::new();
     if usb_hid_present("048d", "c197") {
+        log::debug!("lighting probe: Spectrum RGB HID (048d:c197) present");
         kinds.push("Spectrum RGB (048d:c197)");
     }
     if usb_hid_present("048d", "c193") {
+        log::debug!("lighting probe: Lenovo Lighting HID (048d:c193) present");
         kinds.push("Lenovo Lighting (048d:c193)");
     }
     if usb_hid_present("048d", "c100") || usb_hid_present("048d", "c965") {
+        log::debug!("lighting probe: 4-zone RGB HID (048d:c100/c965) present");
         kinds.push("4-zone RGB");
     }
     if kinds.is_empty() {
+        log::debug!("lighting probe: none detected");
         "None detected".into()
     } else {
         kinds.join(" · ")
@@ -309,7 +453,7 @@ fn probe_lighting() -> String {
 }
 
 fn probe_ppt_attrs() -> Vec<String> {
-    crate::profile::all_ppt_limits()
+    let attrs: Vec<String> = crate::profile::all_ppt_limits()
         .into_iter()
         .map(|l| {
             format!(
@@ -319,13 +463,17 @@ fn probe_ppt_attrs() -> Vec<String> {
                 l.range_label()
             )
         })
-        .collect()
+        .collect();
+    log::debug!("ppt probe: {} firmware attributes visible", attrs.len());
+    log::trace!("ppt probe detail: {attrs:?}");
+    attrs
 }
 
 fn usb_hid_present(vid: &str, pid: &str) -> bool {
     let want_vid = vid.to_ascii_lowercase();
     let want_pid = pid.to_ascii_lowercase();
     let Ok(entries) = std::fs::read_dir("/sys/bus/hid/devices") else {
+        log::trace!("hid probe: /sys/bus/hid/devices unreadable");
         return false;
     };
     for entry in entries.flatten() {
@@ -336,10 +484,15 @@ fn usb_hid_present(vid: &str, pid: &str) -> bool {
             let v = parts[1];
             let p = parts[2].split('.').next().unwrap_or("");
             if v == want_vid && p == want_pid {
+                log::trace!(
+                    "hid probe: {vid}:{pid} present at {}",
+                    entry.file_name().to_string_lossy()
+                );
                 return true;
             }
         }
     }
+    log::trace!("hid probe: {vid}:{pid} absent");
     false
 }
 
@@ -354,12 +507,22 @@ fn classify_dmi(
 
     let name_is_mt = looks_like_machine_type(product_name);
     let ver_is_mt = looks_like_machine_type(product_version);
+    log::trace!(
+        "classify_dmi: name={product_name:?} (mt={name_is_mt}) version={product_version:?} \
+         (mt={ver_is_mt}) family={product_family:?} sku_mt={mt_from_sku:?}"
+    );
 
     let machine_type = if name_is_mt {
+        log::debug!("classify_dmi: machine type ← product_name ({product_name})");
         product_name.to_string()
     } else if ver_is_mt {
+        log::debug!("classify_dmi: machine type ← product_version ({product_version})");
         product_version.to_string()
     } else {
+        match &mt_from_sku {
+            Some(mt) => log::debug!("classify_dmi: machine type ← product_sku ({mt})"),
+            None => log::debug!("classify_dmi: no machine-type source matched — leaving empty"),
+        }
         mt_from_sku.unwrap_or_default()
     };
 
@@ -367,13 +530,25 @@ fn classify_dmi(
         && !looks_like_machine_type(product_family)
         && product_family.len() > 4
     {
+        log::debug!("classify_dmi: marketing ← product_family ({product_family})");
         product_family.to_string()
     } else if !product_version.is_empty() && !looks_like_machine_type(product_version) {
+        log::debug!("classify_dmi: marketing ← product_version ({product_version})");
         product_version.to_string()
     } else if !product_name.is_empty() && !looks_like_machine_type(product_name) {
+        log::debug!("classify_dmi: marketing ← product_name ({product_name})");
         product_name.to_string()
     } else {
-        marketing_from_sku(product_sku).unwrap_or_default()
+        match marketing_from_sku(product_sku) {
+            Some(m) => {
+                log::debug!("classify_dmi: marketing ← product_sku _FM_ field ({m})");
+                m
+            }
+            None => {
+                log::debug!("classify_dmi: no marketing source matched — leaving empty");
+                String::new()
+            }
+        }
     };
 
     (machine_type, marketing)
@@ -410,16 +585,18 @@ fn marketing_from_sku(sku: &str) -> Option<String> {
 
 fn bios_prefix(bios: &str) -> String {
     let b: String = bios.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    if b.len() >= 4 {
+    let prefix = if b.len() >= 4 {
         b[..4].to_ascii_uppercase()
     } else {
         b.to_ascii_uppercase()
-    }
+    };
+    log::debug!("bios prefix: {bios:?} → {prefix:?}");
+    prefix
 }
 
 fn guess_series(marketing: &str) -> &'static str {
     let m = marketing.to_ascii_lowercase();
-    if m.contains("loq") {
+    let series = if m.contains("loq") {
         "LOQ"
     } else if m.contains("ideapad") {
         "IdeaPad Gaming"
@@ -433,14 +610,21 @@ fn guess_series(marketing: &str) -> &'static str {
         "Legion"
     } else {
         "Unknown"
-    }
+    };
+    log::debug!("series guess: {marketing:?} → {series:?}");
+    series
 }
 
 fn read_dmi(field: &str) -> Option<String> {
-    std::fs::read_to_string(format!("/sys/class/dmi/id/{field}"))
+    let value = std::fs::read_to_string(format!("/sys/class/dmi/id/{field}"))
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty());
+    match &value {
+        Some(v) => log::debug!("dmi {field} = {v:?}"),
+        None => log::debug!("dmi {field}: unreadable or empty"),
+    }
+    value
 }
 
 fn read_cpu_model() -> Option<String> {

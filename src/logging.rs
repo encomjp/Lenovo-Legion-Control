@@ -23,6 +23,29 @@ const DEFAULT_RING_SIZE: usize = 500;
 const MAX_RING_SIZE: usize = 2000;
 const FILE_RETENTION_DAYS: u64 = 7;
 
+// ── internal self-diagnostics ─────────────────────────────────────────────
+// Events raised BY the logging implementation (ring pushes, file writes,
+// rotation) must NEVER go through the `log` facade: every facade call is
+// dispatched straight back into `Logger::log`, so a `log::*!` call on that
+// path would recurse until the stack blows ("logging about logging").
+// Instead, self-events are written directly to stderr and gated on the
+// global max level — trace-only visibility with zero recursion.
+
+/// Emit one logging-subsystem self-event (see block comment above).
+fn emit_self_trace(args: std::fmt::Arguments<'_>) {
+    if log::max_level() < LevelFilter::Trace {
+        return;
+    }
+    let ts = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let _ = writeln!(io::stderr(), "{ts} TRACE [legion-log] {args}");
+}
+
+macro_rules! self_trace {
+    ($($arg:tt)*) => {
+        emit_self_trace(format_args!($($arg)*))
+    };
+}
+
 /// One log line, serialisable for JSON / ring buffer / file.
 #[derive(Debug, Clone)]
 pub struct LogEntry {
@@ -42,10 +65,22 @@ struct RingBuffer {
 
 impl RingBuffer {
     fn push(&mut self, entry: LogEntry) {
-        if self.buf.len() >= self.capacity {
+        // NOTE: runs inside `Logger::log` — self_trace! only, never log::*!.
+        // (Trace-mode trade-off: the stderr write happens while the ring
+        // mutex is held; acceptable for an opt-in diagnostic level.)
+        let evicted = self.buf.len() >= self.capacity;
+        let level = entry.level.clone();
+        if evicted {
             self.buf.pop_front();
         }
         self.buf.push_back(entry);
+        let util_pct = (self.buf.len() * 100) / self.capacity.max(1);
+        self_trace!(
+            "ring push level={level} util={util_pct}% entries={}/{}{}",
+            self.buf.len(),
+            self.capacity,
+            if evicted { " (evicted oldest)" } else { "" }
+        );
     }
     fn tail(&self, n: usize) -> Vec<LogEntry> {
         self.buf
@@ -164,7 +199,12 @@ impl log::Log for Logger {
             if let Some(state) = guard.as_mut() {
                 let today = chrono::Local::now().format("%Y-%m-%d").to_string();
                 if state.date != today {
-                    let _ = rotate_file(state, &self.component);
+                    // Self-events, not log::*! — this runs inside Logger::log.
+                    self_trace!("file rotation triggered: {} → {today}", state.date);
+                    match rotate_file(state, &self.component) {
+                        Ok(()) => self_trace!("file rotated to {}", state.path.display()),
+                        Err(e) => self_trace!("file rotation failed: {e}"),
+                    }
                     state.date = today;
                 }
                 let json_line = match (&entry.file, entry.line) {
@@ -183,10 +223,18 @@ impl log::Log for Logger {
                         json_escape(&entry.message),
                     ),
                 };
-                let _ = writeln!(state.file, "{json_line}");
-                state.writes += 1;
-                if state.writes % 1000 == 0 {
-                    let _ = cleanup_old_logs(&state.path, FILE_RETENTION_DAYS);
+                match writeln!(state.file, "{json_line}") {
+                    Ok(_) => {
+                        state.writes += 1;
+                        self_trace!("file write ok");
+                        if state.writes % 1000 == 0 {
+                            self_trace!(
+                                "retention sweep triggered (>{FILE_RETENTION_DAYS}d old logs)"
+                            );
+                            let _ = cleanup_old_logs(&state.path, FILE_RETENTION_DAYS);
+                        }
+                    }
+                    Err(e) => self_trace!("file write failed: {e}"),
                 }
             }
         }
@@ -283,12 +331,17 @@ pub fn init(component: &str) {
                 writes: 0,
             }),
             Err(e) => {
-                eprintln!("legion-log: cannot open log file: {e}");
+                eprintln!("legion-log: cannot open log file {}: {e}", path.display());
                 None
             }
         }
     } else {
         None
+    };
+
+    let file_desc = match &file_state {
+        Some(s) => format!("enabled ({})", s.path.display()),
+        None => "disabled".to_string(),
     };
 
     let logger = Logger {
@@ -306,6 +359,12 @@ pub fn init(component: &str) {
     let max_level = parse_level(&env_filter);
     let _ = log::set_logger(LOGGER.get().unwrap());
     log::set_max_level(max_level);
+
+    // Bootstrap events — safe here: the sink is installed and none of these
+    // paths re-enter it.
+    log::debug!("init: LEGION_LOG={env_raw:?} → filter {max_level:?}");
+    log::debug!("init: json_mode={json_mode} ring_size={ring_size}");
+    log::debug!("init: file output {file_desc}");
 
     log::info!(
         "{component} v{} logging ready (max={max_level:?}, json={json_mode}, ring={ring_size}, file={file_enabled})",
@@ -333,8 +392,13 @@ fn parse_level(s: &str) -> LevelFilter {
 
 /// Change the global max log level at runtime (e.g. from a GUI toggle).
 pub fn set_max_level(filter: LevelFilter) {
+    let previous = log::max_level();
     log::set_max_level(filter);
-    log::info!("log level changed to {filter:?}");
+    if previous != filter {
+        log::info!("log level {previous:?} → {filter:?}");
+    } else {
+        log::debug!("log level unchanged ({filter:?})");
+    }
 }
 
 /// Return the last `n` log entries from the in-memory ring buffer.
@@ -365,9 +429,18 @@ pub fn recent_logs_text(n: usize) -> String {
 
 /// Re-read `LEGION_LOG` from the environment and apply it (call after SIGHUP).
 pub fn reload_from_env() {
-    if let Ok(val) = std::env::var("LEGION_LOG") {
-        let lvl = parse_level(&val);
-        set_max_level(lvl);
+    match std::env::var("LEGION_LOG") {
+        Ok(val) => {
+            let lvl = parse_level(&val);
+            log::debug!("reload_from_env: LEGION_LOG={val:?} → {lvl:?}");
+            set_max_level(lvl);
+        }
+        Err(std::env::VarError::NotPresent) => {
+            log::debug!("reload_from_env: LEGION_LOG not set — keeping current level");
+        }
+        Err(e) => {
+            log::warn!("reload_from_env: cannot read LEGION_LOG ({e}) — keeping current level");
+        }
     }
 }
 

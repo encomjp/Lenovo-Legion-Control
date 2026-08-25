@@ -203,19 +203,25 @@ fn main() {
     let cli = Cli::parse();
     legion_core::logging::init("legion-cli");
     log::debug!("cli command: {:?}", std::env::args().collect::<Vec<_>>());
+    log::trace!("cmd {}", cmd_label(&cli.command));
 
     match cli.command {
         Commands::Status => {
             let resp = send_command(DaemonCommand::GetSensors);
             print_sensors(resp);
         }
-        Commands::Watch => loop {
-            print!("\x1B[2J\x1B[H");
-            println!("Legion Control — live sensors (Ctrl+C to quit)\n");
-            let resp = send_command(DaemonCommand::GetSensors);
-            print_sensors(resp);
-            std::thread::sleep(std::time::Duration::from_secs(2));
-        },
+        Commands::Watch => {
+            let mut iteration = 0u64;
+            loop {
+                iteration += 1;
+                log::trace!("watch: iteration {iteration}");
+                print!("\x1B[2J\x1B[H");
+                println!("Legion Control — live sensors (Ctrl+C to quit)\n");
+                let resp = send_command(DaemonCommand::GetSensors);
+                print_sensors(resp);
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
         Commands::Profile => match send_command(DaemonCommand::GetProfile) {
             Ok(DaemonResponse::Profile(p)) => println!("{}", friendly_profile(&p)),
             Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
@@ -265,11 +271,21 @@ fn main() {
         Commands::FanAuto => {
             let mut errors: Vec<String> = Vec::new();
             for fan in [1u8, 2, 4] {
+                log::debug!("fan-auto: fan {fan} → auto (attempt)");
                 match send_command(DaemonCommand::SetFanTarget(fan, 0)) {
-                    Ok(DaemonResponse::Ok) => {}
-                    Ok(DaemonResponse::Error(e)) => errors.push(format!("fan {fan}: {e}")),
-                    Err(e) => errors.push(format!("fan {fan}: {e}")),
-                    _ => errors.push(format!("fan {fan}: unexpected response")),
+                    Ok(DaemonResponse::Ok) => log::debug!("fan-auto: fan {fan} ok"),
+                    Ok(DaemonResponse::Error(e)) => {
+                        log::warn!("fan-auto: fan {fan} refused: {e}");
+                        errors.push(format!("fan {fan}: {e}"));
+                    }
+                    Err(e) => {
+                        log::warn!("fan-auto: fan {fan} failed: {e}");
+                        errors.push(format!("fan {fan}: {e}"));
+                    }
+                    _ => {
+                        log::warn!("fan-auto: fan {fan} unexpected response");
+                        errors.push(format!("fan {fan}: unexpected response"));
+                    }
                 }
             }
             if errors.is_empty() {
@@ -317,6 +333,7 @@ fn main() {
                 legion_core::keyboard::RgbZone::All
             });
             if name.eq_ignore_ascii_case("off") {
+                log::debug!("effect: 'off' matched");
                 match legion_core::keyboard::set_rgb_effect_zone(
                     legion_core::keyboard::RgbEffect::Static,
                     0,
@@ -330,11 +347,13 @@ fn main() {
                     Err(e) => eprintln!("error: {e}"),
                 }
             } else if let Some(fx) = legion_core::keyboard::RgbEffect::from_name(&name) {
+                log::debug!("effect: '{name}' matched");
                 match legion_core::keyboard::set_rgb_effect_zone(fx, r, g, b, speed, 9, z) {
                     Ok(()) => println!("effect → {name} · {}", z.name()),
                     Err(e) => eprintln!("error: {e}"),
                 }
             } else {
+                log::debug!("effect: '{name}' not found");
                 usage_fail(format!(
                     "unknown effect '{}'. Try: {}",
                     name,
@@ -397,6 +416,7 @@ fn main() {
                 "off" | "false" | "0" => false,
                 _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
             };
+            log::debug!("conservation: state '{state}' → {on}");
             match send_command(DaemonCommand::SetConservation(on)) {
                 Ok(DaemonResponse::Ok) => {
                     println!(
@@ -564,6 +584,7 @@ fn main() {
                 "off" | "0" | "false" | "disable" => false,
                 _ => usage_fail("use on or off"),
             };
+            log::debug!("set-smt: state '{state}' → {on}");
             if !on {
                 let n = legion_core::cpu::logical_cpus().max(2);
                 let half = (n / 2).max(1);
@@ -606,6 +627,7 @@ fn main() {
                 "off" | "0" | "false" | "disable" => false,
                 _ => usage_fail("use on or off"),
             };
+            log::debug!("set-boost: state '{state}' → {on}");
             match send_command(DaemonCommand::SetBoost(on)) {
                 Ok(DaemonResponse::Ok) => {
                     println!("boost → {}", if on { "on" } else { "off" })
@@ -685,6 +707,7 @@ fn main() {
                 "off" | "false" | "0" => false,
                 _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
             };
+            log::debug!("set-logo: state '{state}' → {on}");
             match send_command(DaemonCommand::SetLogo(on)) {
                 Ok(DaemonResponse::Ok) => println!("logo → {}", if on { "on" } else { "off" }),
                 Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
@@ -815,12 +838,14 @@ fn main() {
             DiagAction::Dump => {
                 let json = serde_json::to_string_pretty(&diagnostics::collect())
                     .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
+                log::debug!("diagnose dump: {} bytes", json.len());
                 println!("{json}");
             }
             DiagAction::Selfcheck => {
                 let checks = selftest::run_self_checks();
                 let total = checks.len();
                 let passed = checks.iter().filter(|c| c.ok).count();
+                log::debug!("diagnose selfcheck: {passed}/{total} passed");
                 for c in &checks {
                     let mark = if c.ok { "✓" } else { "✗" };
                     println!("{mark} {} — {}", c.name, c.detail);
@@ -832,6 +857,21 @@ fn main() {
             }
             DiagAction::Faults => {
                 let faults = selftest::scan_faults();
+                let criticals = faults
+                    .iter()
+                    .filter(|f| f.severity == legion_core::selftest::Severity::Critical)
+                    .count();
+                let warnings = faults
+                    .iter()
+                    .filter(|f| f.severity == legion_core::selftest::Severity::Warning)
+                    .count();
+                let infos = faults
+                    .iter()
+                    .filter(|f| f.severity == legion_core::selftest::Severity::Info)
+                    .count();
+                log::debug!(
+                    "diagnose faults: {criticals} critical / {warnings} warning / {infos} info"
+                );
                 if faults.is_empty() {
                     println!("no active faults detected");
                     return;
@@ -844,15 +884,19 @@ fn main() {
                     };
                     println!("[{sev}] {} — {}", f.id, f.detail);
                 }
-                let criticals = faults
-                    .iter()
-                    .filter(|f| f.severity == legion_core::selftest::Severity::Critical)
-                    .count();
                 if criticals > 0 {
                     std::process::exit(1);
                 }
             }
             DiagAction::Send { endpoint } => {
+                log::debug!(
+                    "diagnose send: {}",
+                    if endpoint.is_some() {
+                        "override endpoint supplied"
+                    } else {
+                        "endpoint from config/default"
+                    }
+                );
                 match diagnostics::collect_and_send(endpoint.as_deref()) {
                     Ok(resp) => println!("sent ✓ {}", resp.chars().take(200).collect::<String>()),
                     Err(e) => {
@@ -875,14 +919,22 @@ fn print_curve_optimizer(status: &legion_core::undervolt::CurveOptimizerStatus) 
         }
     );
     println!("status: {}", status.reason);
+    log::debug!(
+        "curve optimizer: available={} reason='{}'",
+        status.available,
+        status.reason
+    );
     if let Some(codename) = status.codename {
         println!("ryzen_smu codename: {codename}");
+        log::debug!("curve optimizer: ryzen_smu codename {codename}");
     }
     if let Some(driver) = &status.driver_version {
         println!("driver: {driver}");
+        log::debug!("curve optimizer: driver {driver}");
     }
     if let Some(firmware) = &status.firmware_version {
         println!("smu firmware: {firmware}");
+        log::debug!("curve optimizer: smu firmware {firmware}");
     }
     if !status.current.is_empty() {
         println!(
@@ -905,11 +957,18 @@ fn print_curve_optimizer(status: &legion_core::undervolt::CurveOptimizerStatus) 
         );
         if let Some(prev) = status.previous {
             println!("previous: {prev}");
+            log::debug!("curve optimizer: previous {prev}");
         }
     }
     println!(
         "allowed temporary range: {}..={}",
         status.minimum, status.maximum
+    );
+    log::debug!(
+        "curve optimizer: {} core offset(s); allowed range {}..={}",
+        status.current.len(),
+        status.minimum,
+        status.maximum
     );
 }
 
@@ -1008,67 +1067,182 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
             };
             println!("┌─ Legion Sensors ─────────────────────────────────────┐");
             println!("│  Profile   {:<42} │", friendly_profile(&s.profile));
+            log::trace!("sensors: profile '{}'", friendly_profile(&s.profile));
             println!("├─ CPU ────────────────────────────────────────────────┤");
             println!(
                 "│  CPU {:>5.1}°C   CCD1 {:>5.1}°C   CCD2 {:>5.1}°C        │",
                 s.cpu_temp, s.cpu_temp_1, s.cpu_temp_2
             );
+            log::trace!(
+                "sensors: cpu {:.1}°C ccd1 {:.1}°C ccd2 {:.1}°C",
+                s.cpu_temp,
+                s.cpu_temp_1,
+                s.cpu_temp_2
+            );
             println!(
                 "│  EC   {:>5.1}°C                                        │",
                 s.ec_cpu
             );
+            log::trace!("sensors: ec cpu {:.1}°C", s.ec_cpu);
             if let Some(w) = cpu_power {
                 println!(
                     "│  CPU power {:>5.1} W                                  │",
                     w
                 );
+                log::trace!("sensors: cpu power {w:.1} W");
             }
             println!("├─ GPU ────────────────────────────────────────────────┤");
             println!(
                 "│  iGPU {:>5.1}°C  {:>5.2} W                               │",
                 s.igpu_edge, s.igpu_power
             );
+            log::trace!("sensors: igpu {:.1}°C {:.2} W", s.igpu_edge, s.igpu_power);
             println!(
                 "│  dGPU {:>5.1}°C  {:>5.1} W  {:>5.0} MHz                   │",
                 s.dgpu_temp, s.dgpu_power, s.dgpu_clock
+            );
+            log::trace!(
+                "sensors: dgpu {:.1}°C {:.1} W {} MHz",
+                s.dgpu_temp,
+                s.dgpu_power,
+                s.dgpu_clock
             );
             println!(
                 "│  EC   {:>5.1}°C                                        │",
                 s.ec_gpu
             );
+            log::trace!("sensors: ec gpu {:.1}°C", s.ec_gpu);
             println!("├─ Fans ───────────────────────────────────────────────┤");
             println!(
                 "│  CPU {:>5}   GPU {:>5}   Aux {:>5} rpm             │",
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
+            log::trace!(
+                "sensors: fans cpu {} gpu {} aux {} rpm",
+                s.fan1_rpm,
+                s.fan2_rpm,
+                s.fan4_rpm
+            );
             println!("├─ Storage / Memory / Net ─────────────────────────────┤");
             for (i, t) in s.ssd_composite.iter().enumerate() {
                 println!("│  SSD{i}  {t:>5.1}°C                                      │");
+                log::trace!("sensors: ssd{i} {t:.1}°C");
             }
             for (i, t) in s.ram_temps.iter().enumerate() {
                 println!("│  RAM{i}  {t:>5.1}°C                                      │");
+                log::trace!("sensors: ram{i} {t:.1}°C");
             }
             if s.wifi_temp > 0.0 {
                 println!(
                     "│  Wi‑Fi {:>5.1}°C                                      │",
                     s.wifi_temp
                 );
+                log::trace!("sensors: wifi {:.1}°C", s.wifi_temp);
             }
             if s.ethernet_temp > 0.0 {
                 println!(
                     "│  Eth   {:>5.1}°C                                      │",
                     s.ethernet_temp
                 );
+                log::trace!("sensors: ethernet {:.1}°C", s.ethernet_temp);
             }
             println!("├─ Battery ────────────────────────────────────────────┤");
             println!(
                 "│  {:>3}%  {:<12}  {:<22} │",
                 s.battery_pct, s.battery_status, s.charge_type
             );
+            log::trace!(
+                "sensors: battery {}% status '{}' type '{}'",
+                s.battery_pct,
+                s.battery_status,
+                s.charge_type
+            );
             println!("└──────────────────────────────────────────────────────┘");
         }
         Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
         Err(e) => eprintln!("error: {e}"),
         _ => eprintln!("error: unexpected response type"),
+    }
+}
+
+/// Dispatch descriptor for the event log — one entry per `Commands` match
+/// arm naming the subcommand plus its key parameters. CLI args are all
+/// user-supplied and non-secret, so they are safe to log verbatim.
+fn cmd_label(cmd: &Commands) -> String {
+    match cmd {
+        Commands::Status => "status".into(),
+        Commands::Watch => "watch".into(),
+        Commands::Profile => "profile".into(),
+        Commands::SetProfile { name } => format!("set-profile name={name}"),
+        Commands::Fan => "fan".into(),
+        Commands::SetFan { fan, rpm } => format!("set-fan fan={fan} rpm={rpm}"),
+        Commands::FanAuto => "fan-auto".into(),
+        Commands::Kbd => "kbd".into(),
+        Commands::SetKbd { level } => format!("set-kbd level={level}"),
+        Commands::Rgb { r, g, b } => format!("rgb #{r:02X}{g:02X}{b:02X}"),
+        Commands::Effect {
+            name,
+            r,
+            g,
+            b,
+            speed,
+            zone,
+        } => format!("effect name={name} rgb=#{r:02X}{g:02X}{b:02X} speed={speed} zone={zone}"),
+        Commands::Brightness { level } => format!("brightness level={level}"),
+        Commands::Battery => "battery".into(),
+        Commands::ChargeLimit { pct } => format!("charge-limit pct={pct}"),
+        Commands::Conservation { state } => format!("conservation state={state}"),
+        Commands::Info => "info".into(),
+        Commands::Camera => "camera".into(),
+        Commands::Audio => "audio".into(),
+        Commands::AudioFix => "audio-fix".into(),
+        Commands::Smt => "smt".into(),
+        Commands::SetSmt { state } => format!("set-smt state={state}"),
+        Commands::Boost => "boost".into(),
+        Commands::SetBoost { state } => format!("set-boost state={state}"),
+        Commands::RgbStatus => "rgb-status".into(),
+        Commands::RgbFix => "rgb-fix".into(),
+        Commands::Logo => "logo".into(),
+        Commands::SetLogo { state } => format!("set-logo state={state}"),
+        Commands::Logs { n } => format!("logs n={n}"),
+        Commands::SetLogLevel { level } => format!("set-log-level level={level}"),
+        Commands::Undervolt => "undervolt".into(),
+        Commands::SetUndervolt {
+            offset,
+            i_understand_instability_risk,
+        } => format!("set-undervolt offset={offset} ack={i_understand_instability_risk}"),
+        Commands::ResetUndervolt {
+            i_understand_instability_risk,
+        } => format!("reset-undervolt ack={i_understand_instability_risk}"),
+        Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
+        Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
+    }
+}
+
+/// Dispatch descriptor for `thermal` subcommands.
+fn thermal_cmd_label(cmd: &ThermalCmd) -> String {
+    match cmd {
+        ThermalCmd::Status => "status".into(),
+        ThermalCmd::Set {
+            max_temp,
+            off,
+            on,
+            acknowledge_high_temp,
+        } => {
+            format!("set max_temp={max_temp:?} off={off} on={on} ack_high={acknowledge_high_temp}")
+        }
+    }
+}
+
+/// Dispatch descriptor for `diagnose` subactions.
+fn diag_action_label(action: &DiagAction) -> String {
+    match action {
+        DiagAction::Dump => "dump".into(),
+        DiagAction::Selfcheck => "selfcheck".into(),
+        DiagAction::Faults => "faults".into(),
+        DiagAction::Send { endpoint } => format!(
+            "send override={}",
+            if endpoint.is_some() { "set" } else { "unset" }
+        ),
     }
 }
