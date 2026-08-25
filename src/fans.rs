@@ -75,8 +75,41 @@ pub fn rpm_label(fan: u8) -> String {
     format_rpm_label(read_target(fan).unwrap_or(0), read_rpm(fan).unwrap_or(0))
 }
 
-/// Set fan target RPM. 0 = auto mode.
+/// Pure: clamp a requested RPM into an explicit `min..=max` window.
+/// 0 = auto passes through untouched; an inverted window is normalised so
+/// `clamp` can never panic.
+pub fn clamp_target_with(min: u32, max: u32, rpm: u32) -> u32 {
+    if rpm == 0 {
+        return 0;
+    }
+    let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+    rpm.clamp(lo, hi)
+}
+
+/// Clamp a requested RPM into the channel's live min..max window
+/// (0 = auto passes through untouched; unknown fans fall back to a sane
+/// 0..=20_000 bound so garbage can't reach sysfs unchanged).
+pub fn clamp_target(fan: u8, rpm: u32) -> u32 {
+    let cap = channels().into_iter().find(|c| c.id == fan);
+    let (mut min, mut max) = cap.map_or((0, 20_000), |c| (c.min_rpm, c.max_rpm));
+    // Live sysfs bounds win when present; capability profile is the fallback.
+    if let Some(v) = read_min(fan) {
+        min = v;
+    }
+    if let Some(v) = read_max(fan) {
+        max = v;
+    }
+    clamp_target_with(min, max, rpm)
+}
+
+/// Set fan target RPM. 0 = auto mode. Values outside the channel's window
+/// are clamped before they reach sysfs.
 pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
+    let requested = rpm;
+    let rpm = clamp_target(fan, rpm);
+    if rpm != requested {
+        log::info!("fan {fan} requested {requested} → clamped {rpm}");
+    }
     let path = fan_path(fan, "target")
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "fan device not found"))?;
     if rpm == 0 {
@@ -123,5 +156,47 @@ mod tests {
         assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 rpm");
         assert_eq!(format_rpm_label(1500, 0), "~1500 rpm");
         assert_eq!(format_rpm_label(1500, 1400), "1400 rpm");
+    }
+
+    #[test]
+    fn clamp_within_range_passes_through() {
+        assert_eq!(clamp_target_with(1200, 5500, 3000), 3000);
+        assert_eq!(clamp_target_with(1200, 5500, 1200), 1200);
+        assert_eq!(clamp_target_with(1200, 5500, 5500), 5500);
+    }
+
+    #[test]
+    fn clamp_below_min_snaps_to_min() {
+        assert_eq!(clamp_target_with(1200, 5500, 0), 0); // 0 = auto, untouched
+        assert_eq!(clamp_target_with(1200, 5500, 1), 1200);
+        assert_eq!(clamp_target_with(1200, 5500, 1199), 1200);
+    }
+
+    #[test]
+    fn clamp_above_max_snaps_to_max() {
+        assert_eq!(clamp_target_with(1200, 5500, 5501), 5500);
+        assert_eq!(clamp_target_with(0, 20_000, u32::MAX), 20_000);
+    }
+
+    #[test]
+    fn clamp_zero_is_auto_passthrough() {
+        assert_eq!(clamp_target_with(0, 5500, 0), 0);
+        assert_eq!(clamp_target_with(1200, 5500, 0), 0);
+    }
+
+    #[test]
+    fn clamp_unknown_fan_fallback_bound() {
+        // Unknown fans resolve to the sane 0..=20_000 fallback window.
+        assert_eq!(clamp_target_with(0, 20_000, 10_000), 10_000);
+        assert_eq!(clamp_target_with(0, 20_000, 25_000), 20_000);
+        assert_eq!(clamp_target_with(0, 20_000, 5), 5);
+    }
+
+    #[test]
+    fn clamp_inverted_window_never_panics() {
+        // Defensive: min > max (bad sysfs values) must not panic `u32::clamp`.
+        assert_eq!(clamp_target_with(5500, 1200, 3000), 3000);
+        assert_eq!(clamp_target_with(5500, 1200, 100), 1200);
+        assert_eq!(clamp_target_with(5500, 1200, 9999), 5500);
     }
 }
