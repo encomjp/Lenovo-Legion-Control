@@ -216,5 +216,34 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         format!("{} ({})", info.model, info.machine_type),
     ));
 
+    // Intel-only surfaces — inert on AMD, live on Intel if detected.
+    out.push(check(
+        "intel_pstate",
+        true,
+        if crate::intel::pstate_available() {
+            "present".into()
+        } else {
+            "not present (AMD)".into()
+        },
+    ));
+    out.push(check(
+        "intel_uncore",
+        true,
+        if crate::intel::uncore_available() {
+            "present".into()
+        } else {
+            "not present (AMD)".into()
+        },
+    ));
+    out.push(check(
+        "intel_msr",
+        true,
+        if crate::intel_msr::is_available() {
+            "present".into()
+        } else {
+            "not present (AMD)".into()
+        },
+    ));
+
     out
 }

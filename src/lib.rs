@@ -14,6 +14,7 @@ pub mod device;
 pub mod dgpu;
 pub mod diagnostics;
 pub mod fans;
+pub mod intel;
 pub mod intel_msr;
 pub mod keyboard;
 pub mod logging;
