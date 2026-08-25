@@ -43,7 +43,7 @@ lenovo-legion-control/              this repo (monorepo root, branch main)
 │   ├── SHORT.md                    short findings summary
 │   ├── sensor-research-findings.md sensor-stack findings
 │   ├── sensors-full.md / sensors-raw.txt   raw sensor captures
-│   ├── ec_sensors.py / read_sensors.py     sensor probe scripts
+│   ├── RESEARCH-TOOLING.md          probe methods + reproduction commands
 │   ├── ec-mode-dumps/              256 B EC RAM mode dumps (+ summary.json)
 │   └── ui-shots/                   UX screenshots (~30 MB)
 │
