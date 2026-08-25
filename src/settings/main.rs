@@ -191,10 +191,12 @@ fn hub_initial_tab(id: &str) -> Option<&'static str> {
 
 /// Horizontal-tab hub: an AdwViewSwitcher bar on top, the sub-pages below.
 /// Each sub-page scrolls inside its own page_shell so the bar stays pinned.
+/// Returns the hub box plus the inner tab stack so callers can select a tab
+/// at runtime (e.g. the welcome dialog jumping straight to Setup).
 fn hub_page(
     children: Vec<(gtk::Box, &'static str, &'static str)>,
     initial: Option<&str>,
-) -> gtk::Box {
+) -> (gtk::Box, adw::ViewStack) {
     let tabs = adw::ViewStack::new();
     tabs.set_vexpand(true);
     for (page, id, title) in children {
@@ -218,7 +220,7 @@ fn hub_page(
     hub.set_vexpand(true);
     hub.append(&bar);
     hub.append(&tabs);
-    hub
+    (hub, tabs)
 }
 
 fn copy_daemon_fix_cmd() {
@@ -420,7 +422,7 @@ fn build_ui(app: &adw::Application) {
     }
 
     let about_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let about_hub = hub_page(
+    let (about_hub, about_tabs) = hub_page(
         vec![
             (about_setup_page, "setup", "Setup"),
             (about_hardware_page, "hardware", "Hardware"),
@@ -779,7 +781,7 @@ fn build_ui(app: &adw::Application) {
     // The CPU hub is registered here because its Power tab needs show_page
     // to jump back to the Custom-watts controls on Home.
     let cpu_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let cpu_hub = hub_page(
+    let (cpu_hub, _cpu_tabs) = hub_page(
         vec![
             (
                 build_cpu_features_page(&toast_overlay, &daemon_gate),
@@ -834,7 +836,7 @@ fn build_ui(app: &adw::Application) {
 
     let report_action = gio::SimpleAction::new("report-issue", None);
     report_action.connect_activate(|_, _| {
-        open_uri("https://github.com/encomjp/");
+        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
     });
     window.add_action(&report_action);
 
@@ -937,7 +939,7 @@ fn build_ui(app: &adw::Application) {
     legion_core::keyboard::set_logo_async(cfg.logo_on);
     legion_core::keyboard::restore_lighting_async();
 
-    show_welcome_if_needed(&window, &stack);
+    show_welcome_if_needed(&window, &stack, Some(&about_tabs));
 
     // Click the connection strip to re-check the daemon.
     let foot_click = gtk::GestureClick::new();
@@ -1077,7 +1079,7 @@ fn show_about_dialog(parent: &impl glib::object::IsA<gtk::Widget>) {
              Not affiliated with Lenovo.",
         )
         .website("https://github.com/encomjp/")
-        .issue_url("https://github.com/encomjp/")
+        .issue_url("https://github.com/encomjp/lenovo-legion-tool/issues/new")
         .license_type(gtk::License::Gpl20Only)
         .developers(["europeanpepe (encomjp)"])
         .copyright("© europeanpepe / encomjp")
@@ -1087,7 +1089,10 @@ fn show_about_dialog(parent: &impl glib::object::IsA<gtk::Widget>) {
         "Donate (PayPal)",
         "https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A",
     );
-    about.add_link("Report an issue", "https://github.com/encomjp/");
+    about.add_link(
+        "Report an issue",
+        "https://github.com/encomjp/lenovo-legion-tool/issues/new",
+    );
     about.add_link(
         "Spectrum protocol notes",
         "https://github.com/alstergee/legion-spectrum-control",
@@ -1162,7 +1167,11 @@ fn run_setup_helper(operation: &'static str, done: impl FnOnce(Result<String, St
     );
 }
 
-fn show_welcome_if_needed(parent: &impl glib::object::IsA<gtk::Widget>, stack: &adw::ViewStack) {
+fn show_welcome_if_needed(
+    parent: &impl glib::object::IsA<gtk::Widget>,
+    stack: &adw::ViewStack,
+    about_tabs: Option<&adw::ViewStack>,
+) {
     if legion_core::config::welcome_seen() {
         return;
     }
@@ -1184,12 +1193,21 @@ fn show_welcome_if_needed(parent: &impl glib::object::IsA<gtk::Widget>, stack: &
     dialog.set_default_response(Some("setup"));
     dialog.set_close_response("ok");
     let stack = stack.clone();
+    let about_tabs = about_tabs.cloned();
     dialog.connect_response(None, move |_, response| {
         legion_core::config::mark_welcome_seen();
         match response {
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
-            "issues" => open_uri("https://github.com/encomjp/"),
-            "setup" => stack.set_visible_child_name("about-setup"),
+            "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
+            "setup" => {
+                // "about-setup" is an INNER tab of the About hub, not an
+                // outer stack child — open the hub first, then select the
+                // Setup tab on its inner ViewStack.
+                stack.set_visible_child_name("about");
+                if let Some(tabs) = about_tabs.as_ref() {
+                    tabs.set_visible_child_name("setup");
+                }
+            }
             _ => {}
         }
     });
@@ -4964,20 +4982,59 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         .build();
     tip(
         &share_row,
-        "Consent switch — nothing is collected or sent while this is off",
+        "Consent switch — nothing is collected or sent while this is off · Send now requires this to be ON",
     );
     group.add(&share_row);
 
+    // Send-now row — built before the consent handler below so the switch can
+    // keep the button's sensitivity glued to the consent state (both ways).
+    let send_row = adw::ActionRow::builder()
+        .title("Send now")
+        .subtitle("Collects and uploads one anonymized report")
+        .activatable(false)
+        .build();
+    let send_btn = gtk::Button::with_label("Send now");
+    send_btn.set_valign(Align::Center);
+    send_btn.add_css_class("pill-btn");
+    tip(
+        &send_btn,
+        "Collects and sends one anonymized report immediately",
+    );
+    send_row.add_suffix(&send_btn);
+    // Initial state from config: no consent → nothing may be sent.
+    send_btn.set_sensitive(share_row.is_active());
+
     {
         let overlay = toast_overlay.clone();
+        let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+        let share_d = share_row.clone();
+        let send_gate = send_btn.clone();
         share_row.connect_active_notify(move |row| {
             let enabled = row.is_active();
-            legion_core::config::update(|c| c.diagnostics.enabled = enabled);
-            if enabled {
-                toast_ok(&overlay, "Anonymous diagnostics enabled");
-            } else {
-                toast_ok(&overlay, "Anonymous diagnostics disabled");
-            }
+            // Consent gate reacts immediately; the config write and toast are
+            // debounced so rapid toggling does one disk RMW and one toast for
+            // the FINAL state (ticket pattern, like the thermal slider).
+            send_gate.set_sensitive(enabled);
+
+            let ticket = debounce.get().wrapping_add(1);
+            debounce.set(ticket);
+            let overlay = overlay.clone();
+            let share_d = share_d.clone();
+            let send_gate = send_gate.clone();
+            let debounce_c = debounce.clone();
+            glib::timeout_add_local_once(Duration::from_millis(300), move || {
+                if debounce_c.get() != ticket {
+                    return; // superseded by a newer toggle
+                }
+                let enabled = share_d.is_active();
+                legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+                send_gate.set_sensitive(enabled);
+                if enabled {
+                    toast_ok(&overlay, "Anonymous diagnostics enabled");
+                } else {
+                    toast_ok(&overlay, "Anonymous diagnostics disabled");
+                }
+            });
         });
     }
 
@@ -5026,6 +5083,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         let results_closure = results.clone();
         run_btn_connect.connect_clicked(move |_| {
             run_btn_closure.set_sensitive(false);
+            run_btn_closure.set_label("Running…");
             let overlay = overlay.clone();
             let run_btn = run_btn_closure.clone();
             let expander = expander_closure.clone();
@@ -5039,6 +5097,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
                 "Self-check stopped without a result",
                 move |result| {
                     run_btn.set_sensitive(true);
+                    run_btn.set_label("Run");
                     match result {
                         Ok(checks) => {
                             let total = checks.len();
@@ -5068,19 +5127,8 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         });
     }
 
-    let send_row = adw::ActionRow::builder()
-        .title("Send now")
-        .subtitle("Collects and uploads one anonymized report")
-        .activatable(false)
-        .build();
-    let send_btn = gtk::Button::with_label("Send now");
-    send_btn.set_valign(Align::Center);
-    send_btn.add_css_class("pill-btn");
-    tip(
-        &send_btn,
-        "Collects and sends one anonymized report immediately",
-    );
-    send_row.add_suffix(&send_btn);
+    // Appended here so the visual order stays: disclosure → consent →
+    // self-check → results → send (the row itself is built above).
     group.add(&send_row);
 
     {
@@ -5089,6 +5137,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         let send_btn_closure = send_btn.clone();
         send_btn_connect.connect_clicked(move |_| {
             send_btn_closure.set_sensitive(false);
+            send_btn_closure.set_label("Sending…");
             let overlay = overlay.clone();
             let btn_inner = send_btn_closure.clone();
             dispatch_async(
@@ -5096,6 +5145,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
                 "Diagnostics send stopped without a result",
                 move |result| {
                     btn_inner.set_sensitive(true);
+                    btn_inner.set_label("Send now");
                     match result {
                         Ok(_) => toast_info(&overlay, "Diagnostics sent — thank you!"),
                         Err(error) => toast_error(&overlay, &error),
@@ -5270,14 +5320,14 @@ fn build_about_pages(
         .build();
     tip(
         &report_row,
-        "Opens https://github.com/encomjp/ — report bugs or request features",
+        "Opens https://github.com/encomjp/lenovo-legion-tool/issues/new — report bugs or request features",
     );
     report_row.connect_activated(|_| {
-        open_uri("https://github.com/encomjp/");
+        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
     });
     let report_open = flat_open_button("Opens GitHub in your browser");
     report_open.connect_clicked(|_| {
-        open_uri("https://github.com/encomjp/");
+        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
     });
     report_row.add_suffix(&report_open);
     help.add(&report_row);
