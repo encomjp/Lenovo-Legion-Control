@@ -642,6 +642,11 @@ fn apply_button(
 
 fn parse_hex(s: &str) -> Option<(u8, u8, u8)> {
     let t = s.trim().trim_start_matches('#');
+    // Byte-length checks don't imply char boundaries: reject non-ASCII before
+    // slicing so multibyte input (e.g. "äää", exactly 6 bytes) can't panic.
+    if !t.is_ascii() {
+        return None;
+    }
     if t.len() != 6 {
         return None;
     }
@@ -659,5 +664,41 @@ fn apply_lighting(effect: &str, r: u8, g: u8, b: u8, speed: u8, brightness: u8, 
     }
     if let Some(fx) = RgbEffect::from_name(effect) {
         legion_core::keyboard::set_rgb_effect_zone_async(fx, r, g, b, speed, brightness, zone);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_table() {
+        #[allow(clippy::type_complexity)]
+        let cases: &[(&str, Option<(u8, u8, u8)>)] = &[
+            ("#FF8000", Some((255, 128, 0))),
+            ("ff8000", Some((255, 128, 0))),
+            ("  #ff8000 ", Some((255, 128, 0))), // surrounding whitespace trimmed
+            ("", None),                          // empty
+            ("#", None),                         // hash only
+            ("FF80", None),                      // too short
+            ("FF80000", None),                   // too long
+            ("##FF8000", None),                  // double hash → length 7
+            ("GG8000", None),                    // non-hex first pair
+            ("FF80G0", None),                    // non-hex last pair
+            ("€€€", None),                       // multibyte UTF-8 — must not panic
+            ("äää", None), // multibyte UTF-8, exactly 6 bytes — must not panic
+        ];
+        for (input, expected) in cases {
+            assert_eq!(parse_hex(input), *expected, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn parse_hex_multibyte_never_panics() {
+        // Regression: any non-ASCII input must return None instead of slicing
+        // through a multi-byte char boundary.
+        for input in ["äää", "€€€", "🦀🦀", "#äää", "FF€€00"] {
+            assert!(parse_hex(input).is_none(), "input {input:?}");
+        }
     }
 }
