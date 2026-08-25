@@ -92,7 +92,7 @@ def test_oversize_body_is_413(client):
 def test_payload_never_stores_client_metadata(client):
     post(client)
     row = db.recent(1)[0]
-    assert set(row) == {"id", "ts", "distro", "model", "app_version"}
+    assert set(row) == {"id", "ts", "distro", "model", "app_version", "machine_id"}
 
 
 def test_meta_columns_extracted(client):
@@ -158,7 +158,7 @@ def test_meta_truncated_to_256_chars(tmp_path, monkeypatch):
     distro, model, app_version, sv = db._extract_meta(doc)
     assert (distro, model, app_version) == ("d" * 256, "m" * 256, "v" * 256)
     rid = db.insert(
-        "2026-08-25T00:00:00+00:00", json.dumps(doc), distro, model, app_version, sv
+        "2026-08-25T00:00:00+00:00", json.dumps(doc), "", distro, model, app_version, sv
     )
     row = db.recent(1)[0]
     assert row["id"] == rid

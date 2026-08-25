@@ -68,6 +68,9 @@ pub struct DiagnosticsReport {
     pub schema_version: u32,
     pub generated_at: String,
     pub app_version: &'static str,
+    /// Pseudonymous machine ID (UUID v4). Stable per installation; lets the
+    /// operator correlate reports from the same machine over time.
+    pub machine_id: String,
 
     pub device: device::DeviceInfo,
     pub os: OsInfo,
@@ -323,6 +326,7 @@ pub fn collect() -> DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
         generated_at,
         app_version: env!("CARGO_PKG_VERSION"),
+        machine_id: cfg.diagnostics.machine_id.clone(),
         device: device::detect(),
         os: read_os_release(),
         sensors: s,

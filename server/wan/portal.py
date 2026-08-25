@@ -199,9 +199,11 @@ by design — never expose to WAN · feeds: <a href="/reports.json">/reports.jso
 
 def _row_html(row: dict[str, Any]) -> str:
     rid = esc(row.get("id"))
+    mid = esc(str(row.get("machine_id") or "?")[:8])
     cells = (
         f'<td><a href="/reports/{rid}">#{rid}</a></td>',
         f"<td>{esc(_fmt_ts(row.get('ts')))}</td>",
+        f"<td><code>{mid}</code></td>",
         f'<td class="wrap">{esc(row.get("distro"))}</td>',
         f'<td class="wrap">{esc(row.get("model"))}</td>',
         f"<td>{esc(row.get('app_version'))}</td>",
@@ -265,8 +267,8 @@ def dashboard() -> HTMLResponse:
         f'<section class="stats">{stats_block}</section>\n'
         f"<h2>recent reports <span class=\"dim\">— latest {RECENT_LIMIT}</span></h2>\n"
         "<table>\n<thead><tr>"
-        "<th>id</th><th>received (utc)</th><th>distro</th>"
-        "<th>model</th><th>app version</th>"
+        "<th>id</th><th>received (utc)</th><th>machine</th>"
+        "<th>distro</th><th>model</th><th>app version</th>"
         "</tr></thead>\n<tbody>\n" + table_rows + "\n</tbody>\n</table>"
     )
     return _page("dashboard", body)

@@ -212,6 +212,33 @@ pub struct DiagnosticsConfig {
     /// RFC3339 timestamp of the last successful send (informational).
     #[serde(default)]
     pub last_sent: Option<String>,
+    /// Pseudonymous machine ID (UUID v4) generated at first opt-in. Lets
+    /// the operator correlate reports from the same machine over time.
+    #[serde(default)]
+    pub machine_id: String,
+}
+
+impl DiagnosticsConfig {
+    /// Generate a machine_id if one doesn't exist yet. Called when the user
+    /// opts in so the ID is stable from the first send onward.
+    pub fn ensure_machine_id(&mut self) {
+        if self.machine_id.is_empty() {
+            // 16 bytes from /dev/urandom, formatted as canonical UUID v4.
+            let mut b = [0u8; 16];
+            if let Ok(raw) = std::fs::read("/dev/urandom") {
+                for (i, byte) in raw.iter().take(16).enumerate() {
+                    b[i] = *byte;
+                }
+            }
+            b[6] = (b[6] & 0x0F) | 0x40;
+            b[8] = (b[8] & 0x3F) | 0x80;
+            self.machine_id = format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+            );
+        }
+    }
 }
 
 fn default_lighting_mode() -> String {

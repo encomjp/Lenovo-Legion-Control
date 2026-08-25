@@ -41,6 +41,7 @@ def init() -> None:
             " ts TEXT NOT NULL,"
             " received_at TEXT NOT NULL,"
             " payload TEXT NOT NULL,"
+            " machine_id TEXT,"
             " distro TEXT,"
             " model TEXT,"
             " app_version TEXT,"
@@ -75,6 +76,7 @@ def _extract_meta(doc: dict[str, Any]) -> tuple[str | None, str | None, str | No
 def insert(
     ts: str,
     payload_json: str,
+    machine_id: str | None,
     distro: str | None,
     model: str | None,
     app_version: str | None,
@@ -85,9 +87,9 @@ def insert(
     with _lock:
         assert _conn is not None
         cur = _conn.execute(
-            "INSERT INTO reports (ts, received_at, payload, distro, model, app_version,"
-            " schema_version) VALUES (?, datetime('now'), ?, ?, ?, ?, ?)",
-            (ts, payload_json, distro, model, app_version, schema_version),
+            "INSERT INTO reports (ts, received_at, payload, machine_id, distro, model,"
+            " app_version, schema_version) VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?)",
+            (ts, payload_json, machine_id, distro, model, app_version, schema_version),
         )
         _conn.commit()
         return int(cur.lastrowid)
@@ -100,11 +102,13 @@ def recent(limit: int = 50) -> list[dict[str, Any]]:
         assert _conn is not None
         rows = _conn.execute(
             "SELECT id, ts, COALESCE(distro,''), COALESCE(model,''),"
-            " COALESCE(app_version,'') FROM reports ORDER BY id DESC LIMIT ?",
+            " COALESCE(app_version,''), COALESCE(machine_id,'')"
+            " FROM reports ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [
-        {"id": r[0], "ts": r[1], "distro": r[2], "model": r[3], "app_version": r[4]}
+        {"id": r[0], "ts": r[1], "distro": r[2], "model": r[3],
+         "app_version": r[4], "machine_id": r[5]}
         for r in rows
     ]
 

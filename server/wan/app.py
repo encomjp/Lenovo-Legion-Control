@@ -174,7 +174,8 @@ def ingest(request: Request) -> dict:
 
     ts = datetime.now(timezone.utc).isoformat()
     distro, model, app_version, schema_version = db._extract_meta(doc)  # noqa: SLF001
-    report_id = db.insert(ts, text, distro, model, app_version, schema_version)
+    machine_id = doc.get("machine_id") if isinstance(doc.get("machine_id"), str) else None
+    report_id = db.insert(ts, text, machine_id, distro, model, app_version, schema_version)
     return {"ok": True, "id": report_id}
 
 
