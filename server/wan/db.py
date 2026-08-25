@@ -24,6 +24,7 @@ _conn: sqlite3.Connection | None = None
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
@@ -49,14 +50,25 @@ def init() -> None:
         _conn.commit()
 
 
+_META_MAX_CHARS = 256
+
+
+def _capped(value: Any) -> str | None:
+    """Coerce to a str or None; hard-cap length in characters (not bytes)."""
+    if not isinstance(value, str):
+        return None
+    return value[:_META_MAX_CHARS]
+
+
 def _extract_meta(doc: dict[str, Any]) -> tuple[str | None, str | None, str | None, int | None]:
     os_info = doc.get("os") if isinstance(doc.get("os"), dict) else {}
     dev = doc.get("device") if isinstance(doc.get("device"), dict) else {}
-    distro = os_info.get("distro") if isinstance(os_info.get("distro"), str) else None
-    model = dev.get("model") if isinstance(dev.get("model"), str) else None
-    app_version = doc.get("app_version") if isinstance(doc.get("app_version"), str) else None
+    distro = _capped(os_info.get("distro"))
+    model = _capped(dev.get("model"))
+    app_version = _capped(doc.get("app_version"))
     sv = doc.get("schema_version")
-    schema_version = sv if isinstance(sv, int) else None
+    # `type(...) is int` on purpose: bool is an int subclass and must not pass.
+    schema_version = sv if type(sv) is int else None
     return distro, model, app_version, schema_version
 
 

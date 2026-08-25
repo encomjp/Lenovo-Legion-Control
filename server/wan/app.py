@@ -12,10 +12,12 @@ import hmac
 import json
 import os
 import secrets
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request
 
 from . import db
@@ -43,6 +45,36 @@ app = FastAPI(docs_url=None, redoc_url=None)
 @app.on_event("startup")
 def _startup() -> None:
     db.init()
+    threading.Thread(
+        target=_prune_forever, name="telemetry-retention", daemon=True
+    ).start()
+
+
+def _prune_forever() -> None:
+    """Retention sweep: once at startup, then hourly, forever.
+
+    Runs in a daemon thread; failures must never take the ingest path down,
+    so every error is logged loudly and the loop keeps going. db's shared
+    connection is only ever touched through db.prune_older_than(), which
+    takes the module lock itself.
+    """
+    while True:
+        days = os.environ.get("LEGION_TELEMETRY_RETENTION_DAYS", "90")
+        try:
+            pruned = db.prune_older_than(int(days))
+            if pruned:
+                print(
+                    f"[legion-telemetry] retention: pruned {pruned} report(s) "
+                    f"older than {days} day(s)",
+                    flush=True,
+                )
+        except (sqlite3.Error, ValueError) as exc:
+            print(
+                "[legion-telemetry] RETENTION PRUNE FAILED "
+                f"(retention_days={days!r}): {exc!r}",
+                flush=True,
+            )
+        time.sleep(3600.0)
 
 
 def _authorized(request: Request) -> bool:
@@ -57,17 +89,54 @@ def _rate_limited(ip: str) -> bool:
         limited = len(window) >= RATE_PER_MIN
         if not limited:
             window.append(now)
-        _rate_seen[ip] = window
+        if window:
+            _rate_seen[ip] = window
+        else:
+            _rate_seen.pop(ip, None)
+        # Evict every remaining key whose window has fully expired, so the
+        # map cannot grow unbounded across distinct/spoofed client IPs
+        # (hits are chronological, so the newest one bounds the window).
+        for key in list(_rate_seen):
+            hits = _rate_seen[key]
+            if not hits or now - hits[-1] >= 60.0:
+                del _rate_seen[key]
     return limited
+
+
+_LOOPBACK_PEERS = {"127.0.0.1", "::1"}
 
 
 def _client_ip(request: Request) -> str:
     # Used ONLY for in-memory rate limiting — never persisted anywhere.
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else "unknown"
+    xff = request.headers.get("x-forwarded-for")
+    if peer in _LOOPBACK_PEERS and xff:
+        # Behind the operator's loopback TLS reverse proxy: trust only the
+        # FIRST hop of X-Forwarded-For (the proxy appends the peer it saw).
+        first_hop = xff.split(",")[0].strip()
+        if first_hop:
+            return first_hop
+    # Direct WAN exposure: the socket peer IS the real client IP.
+    return peer
+
+
+async def _read_capped_body(request: Request, cap: int) -> bytes | None:
+    """Consume the request stream on the event loop; None ⇒ body over cap."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > cap:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.post("/v1/diagnostics")
-async def ingest(request: Request) -> dict:
+def ingest(request: Request) -> dict:
+    # Deliberately a plain `def`: FastAPI runs it in its threadpool so the
+    # blocking sqlite work never stalls the event loop. The stream itself is
+    # drained via anyio.from_thread.run (this thread is anyio-spawned).
     if not _authorized(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     ip = _client_ip(request)
@@ -82,25 +151,30 @@ async def ingest(request: Request) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="bad content-length") from exc
 
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in request.stream():
-        total += len(chunk)
-        if total > MAX_BODY:
-            raise HTTPException(status_code=413, detail="payload too large")
-        chunks.append(chunk)
-    raw = b"".join(chunks)
+    raw = anyio.from_thread.run(_read_capped_body, request, MAX_BODY)
+    if raw is None:
+        raise HTTPException(status_code=413, detail="payload too large")
 
     try:
-        doc = json.loads(raw)
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Must be checked before json.loads: json.loads(bytes) auto-detects
+        # UTF-16/32 first, which turns undecodable bodies into 500s.
+        raise HTTPException(status_code=400, detail="invalid encoding") from None
+    try:
+        doc = json.loads(text)
     except (ValueError, RecursionError):
         raise HTTPException(status_code=400, detail="invalid JSON") from None
-    if not isinstance(doc, dict) or doc.get("schema_version") != 1:
+    if (
+        not isinstance(doc, dict)
+        or type(doc.get("schema_version")) is not int  # rejects True/False too
+        or doc["schema_version"] != 1
+    ):
         raise HTTPException(status_code=400, detail="unsupported report")
 
     ts = datetime.now(timezone.utc).isoformat()
     distro, model, app_version, schema_version = db._extract_meta(doc)  # noqa: SLF001
-    report_id = db.insert(ts, raw.decode("utf-8"), distro, model, app_version, schema_version)
+    report_id = db.insert(ts, text, distro, model, app_version, schema_version)
     return {"ok": True, "id": report_id}
 
 

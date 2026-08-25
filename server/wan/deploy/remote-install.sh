@@ -37,12 +37,30 @@ id -u "${TARGET_USER}" >/dev/null 2>&1 || useradd --system --home "${APP_DIR}" -
 mkdir -p "${APP_DIR}/server/wan" "${NGINX_SSL_DIR}"
 
 echo "→ venv"
-python3 -m venv "${APP_DIR}/venv" 2>/dev/null || dnf install -y python3-pip >/dev/null
+python3 -m venv "${APP_DIR}/venv"
+[[ -x "${APP_DIR}/venv/bin/pip" ]] || { echo "venv creation failed"; exit 1; }
 "${APP_DIR}/venv/bin/pip" install --quiet --upgrade pip
 "${APP_DIR}/venv/bin/pip" install --quiet fastapi "uvicorn[standard]"
 
 echo "→ SELinux: allow nginx outbound connect (reverse proxy to 127.0.0.1:${INGEST_PORT})"
 setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+
+echo "→ env file ${ENV_FILE}"
+if [[ ! -f ${ENV_FILE} ]]; then
+  {
+    echo "LEGION_TELEMETRY_KEY=${LEGION_TELEMETRY_KEY}"
+    echo "LEGION_TELEMETRY_DB=${APP_DIR}/diagnostics.db"
+    echo "LEGION_WAN_DOMAIN=${LEGION_WAN_DOMAIN}"
+    echo "LEGION_PORTAL_HOST=${PORTAL_HOST}"
+  } > "${ENV_FILE}"
+  ( umask 077 && cat /dev/null > "${ENV_FILE}.permcheck" ) 2>/dev/null || true
+  chmod 600 "${ENV_FILE}"
+else
+  echo "   existing env file preserved"
+fi
+
+echo "→ ownership ${TARGET_USER}"
+chown -R "${TARGET_USER}:${TARGET_USER}" "${APP_DIR}"
 
 cat <<EOF
 

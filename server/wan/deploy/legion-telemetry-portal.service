@@ -1,18 +1,21 @@
 [Unit]
 Description=Legion Telemetry Portal (Tailscale-only dashboard)
-After=network.target tailedscale.service
+After=network.target tailscaled.service
 Wants=tailscaled.service
 
 [Service]
 Type=simple
 User=legion-tel
 Group=legion-tel
-WorkingDirectory=/opt/legion-telemetry/server/wan
+WorkingDirectory=/opt/legion-telemetry
 EnvironmentFile=-/etc/default/legion-telemetry
-Environment=LEGION_PORTAL_HOST=127.0.0.1
+# LEGION_PORTAL_HOST (this server's real tailnet IP) is injected by the
+# installer via /etc/default/legion-telemetry; systemd expands it into
+# ExecStart below from that EnvironmentFile.
 ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.portal:app --host ${LEGION_PORTAL_HOST} --port 8788 --workers 1
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=15
 
 # Hardening — portal is auth-less BY DESIGN and must never leave the tailnet
 NoNewPrivileges=true

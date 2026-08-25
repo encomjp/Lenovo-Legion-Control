@@ -6,11 +6,12 @@ After=network.target
 Type=simple
 User=legion-tel
 Group=legion-tel
-WorkingDirectory=/opt/legion-telemetry/server/wan
+WorkingDirectory=/opt/legion-telemetry
 EnvironmentFile=-/etc/default/legion-telemetry
 ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.app:app --host 127.0.0.1 --port 8791 --workers 1
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=15
 
 # Hardening
 NoNewPrivileges=true

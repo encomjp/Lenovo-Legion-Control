@@ -11,10 +11,10 @@
 
 	# Only the ingest endpoint and health are exposed to the internet.
 	handle /v1/diagnostics {
-		reverse_proxy 127.0.0.1:8787
+		reverse_proxy 127.0.0.1:8791
 	}
 	handle /health {
-		reverse_proxy 127.0.0.1:8787
+		reverse_proxy 127.0.0.1:8791
 	}
 
 	# Everything else → explicit 404 (no path discovery).
