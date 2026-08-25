@@ -86,6 +86,16 @@ pub struct DiagnosticsReport {
     /// anonymity contract robust even if a message slips a path in.
     pub log_digest: LogDigest,
     pub self_checks: Vec<SelfCheck>,
+    /// System context for correlating reports across machines.
+    pub system_info: SystemInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SystemInfo {
+    pub uptime_secs: u64,
+    pub load_avg_1m: f64,
+    pub disk_free_mb: Option<u64>,
+    pub mem_available_mb: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -95,6 +105,43 @@ pub struct LogDigest {
     pub error_count: u32,
     /// Last ERROR-level message, home-redacted, capped at 200 chars.
     pub last_error: Option<String>,
+    /// Error count per target module (top 5 by count). Lets the operator
+    /// see WHICH subsystem is producing errors on each machine.
+    pub errors_by_target: Vec<(String, u32)>,
+}
+
+/// Aggregate log entries into a slim digest with per-module attribution.
+pub fn build_log_digest(entries: &[crate::logging::LogEntry]) -> LogDigest {
+    let mut d = LogDigest::default();
+    let mut err_targets: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for e in entries {
+        match e.level.as_str() {
+            "INFO" => d.info_count += 1,
+            "WARN" => d.warn_count += 1,
+            "ERROR" => {
+                d.error_count += 1;
+                *err_targets.entry(e.target.as_str()).or_insert(0) += 1;
+            }
+            _ => {}
+        }
+        if e.level == "ERROR" && d.last_error.is_none() {
+            // recent_logs returns oldest-first; keep overwriting so we end
+            // with the NEWEST error.
+            let redacted = redact_home_paths(&e.message);
+            let capped: String = redacted.chars().take(200).collect();
+            d.last_error = Some(capped);
+        }
+    }
+    d.errors_by_target = {
+        let mut v: Vec<(String, u32)> = err_targets
+            .into_iter()
+            .map(|(k, c)| (k.to_string(), c))
+            .collect();
+        v.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+        v.truncate(5);
+        v
+    };
+    d
 }
 
 #[derive(Debug, Serialize)]
@@ -261,25 +308,7 @@ pub fn collect() -> DiagnosticsReport {
     let generated_at = chrono::Utc::now().to_rfc3339();
 
     let entries = crate::logging::recent_logs(200);
-    let mut digest = LogDigest::default();
-    for e in &entries {
-        match e.level.as_str() {
-            "ERROR" => {
-                digest.error_count += 1;
-                digest.last_error = Some(redact_home_paths(&e.message));
-            }
-            "WARN" => digest.warn_count += 1,
-            "INFO" => digest.info_count += 1,
-            _ => {}
-        }
-    }
-    if let Some(err) = &digest.last_error {
-        let mut capped: String = err.chars().take(200).collect();
-        if capped.len() < err.len() {
-            capped.push('…');
-        }
-        digest.last_error = Some(capped);
-    }
+    let digest = build_log_digest(&entries);
 
     let faults = crate::selftest::scan_faults();
     for f in &faults {
@@ -287,6 +316,8 @@ pub fn collect() -> DiagnosticsReport {
             log::warn!("fault: {}: {}", f.id, f.detail);
         }
     }
+
+    let system_info = read_system_info();
 
     DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
@@ -311,6 +342,35 @@ pub fn collect() -> DiagnosticsReport {
         log_digest: digest,
         faults,
         self_checks: run_self_checks(),
+        system_info,
+    }
+}
+
+/// Read system context for the diagnostics report (read-only /proc + sysfs).
+fn read_system_info() -> SystemInfo {
+    let uptime_secs = std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+        .unwrap_or(0.0) as u64;
+    let load_raw = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    let load_avg_1m = load_raw
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let disk_free_mb: Option<u64> = None; // statvfs requires nix/unsafe — skip for now
+    let mem_available_mb = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| {
+        s.lines()
+            .find(|l| l.starts_with("MemAvailable:"))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok())
+            .map(|kb| kb / 1024)
+    });
+
+    SystemInfo {
+        uptime_secs,
+        load_avg_1m,
+        disk_free_mb,
+        mem_available_mb,
     }
 }
 

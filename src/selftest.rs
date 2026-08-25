@@ -467,6 +467,85 @@ pub fn scan_faults() -> Vec<Fault> {
         ));
     }
 
+    // ── iGPU temp anomaly ────────────────────────────────────────────────
+    if s.igpu_edge >= 95.0 {
+        out.push(fault(
+            "igpu_overheat",
+            Severity::Critical,
+            format!("iGPU edge temp {:.1}°C — thermal emergency", s.igpu_edge),
+        ));
+    }
+
+    // ── EC GPU temp divergence from nvidia-smi ───────────────────────────
+    if s.ec_gpu > 1.0 && s.dgpu_temp > 50.0 && (s.ec_gpu - s.dgpu_temp).abs() > 15.0 {
+        out.push(fault(
+            "ec_gpu_temp_divergence",
+            Severity::Warning,
+            format!(
+                "EC GPU {:.1}°C vs nvidia-smi {:.1}°C (>15° apart)",
+                s.ec_gpu, s.dgpu_temp
+            ),
+        ));
+    }
+
+    // ── RAM overheat (DDR5 SPD5118 throttles at 85°C) ────────────────────
+    for (i, t) in s.ram_temps.iter().enumerate() {
+        if *t >= 80.0 {
+            out.push(fault(
+                "ram_overheat",
+                Severity::Warning,
+                format!("DIMM {} at {:.0}°C — SPD throttle imminent", i, t),
+            ));
+        }
+    }
+
+    // ── dGPU clock stuck at max while cool (possible driver issue) ──────
+    if s.dgpu_clock > 2500.0 && s.dgpu_temp < 40.0 && s.dgpu_power < 10.0 {
+        out.push(fault(
+            "dgpu_clock_stuck",
+            Severity::Info,
+            format!(
+                "dGPU at {} MHz with {:.1} W draw and {:.1}°C — possible stuck clocks",
+                s.dgpu_clock, s.dgpu_power, s.dgpu_temp
+            ),
+        ));
+    }
+
+    // ── System uptime extremely long (kernel resource leak risk) ────────
+    let uptime_secs = std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    if uptime_secs > 90.0 * 24.0 * 3600.0 {
+        out.push(fault(
+            "system_uptime_extreme",
+            Severity::Info,
+            format!(
+                "system up for {:.0} days — consider rebooting to reset hardware state",
+                uptime_secs / 86400.0
+            ),
+        ));
+    }
+
+    // ── Memory pressure (available < 256 MB) ────────────────────────────
+    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        if let Some(line) = meminfo.lines().find(|l| l.starts_with("MemAvailable:")) {
+            if let Some(kb) = line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                if kb < 262_144 {
+                    out.push(fault(
+                        "memory_pressure",
+                        Severity::Warning,
+                        format!("only {} MB available", kb / 1024),
+                    ));
+                }
+            }
+        }
+    }
+
     out
 }
 
