@@ -8,8 +8,12 @@
 //! conditions that are legal states but usually indicate a problem (a fan
 //! stalling under load, the EC charging past the configured limiter,
 //! divergent temperature sources, an unwritable config directory …).
+//!
+//! [`run_deployment_checks`] validates install state: user group membership,
+//! daemon unit enabled, udev rule applied, socket permissions, binary path.
 
 use crate::{battery, comms, config, device, fans, keyboard, profile, sensors, thermal, undervolt};
+use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SelfCheck {
@@ -480,4 +484,147 @@ fn config_dir() -> Option<std::path::PathBuf> {
         });
     let dir = base.join("legion-control");
     dir.is_dir().then_some(dir)
+}
+
+// ─── Deployment / install-state checks ───────────────────────────────────
+
+/// Current user is a member of the named group (supplementary + effective).
+fn user_in_group(group: &str) -> bool {
+    let cname = match std::ffi::CString::new(group) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let gid = unsafe {
+        let gr = libc::getgrnam(cname.as_ptr());
+        if gr.is_null() {
+            return false;
+        }
+        (*gr).gr_gid
+    };
+    let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+    if n <= 0 {
+        return false;
+    }
+    let mut gids = vec![0u32; n as usize];
+    let n = unsafe { libc::getgroups(n as i32, gids.as_mut_ptr() as *mut libc::gid_t) };
+    n > 0 && gids[..n as usize].contains(&gid)
+}
+
+fn daemon_unit_enabled() -> Option<bool> {
+    let out = std::process::Command::new("systemctl")
+        .args(["is-enabled", "legion-control.service"])
+        .output()
+        .ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim() == "enabled")
+}
+
+fn hidraw_spectrum_node() -> Option<(std::path::PathBuf, u32)> {
+    let dir = std::fs::read_dir("/sys/class/hidraw").ok()?;
+    for entry in dir.flatten() {
+        let uevent = entry.path().join("device/uevent");
+        let content = std::fs::read_to_string(&uevent).unwrap_or_default();
+        if content.contains("048D") && content.contains("C197") {
+            let devnode = std::path::Path::new("/dev").join(entry.file_name());
+            let mode = devnode.metadata().ok()?.permissions().mode();
+            return Some((devnode, mode & 0o777));
+        }
+    }
+    None
+}
+
+/// Validate install state: user group membership, daemon unit enabled,
+/// udev rule applied, socket permissions, binary location. Read-only.
+pub fn run_deployment_checks() -> Vec<SelfCheck> {
+    let mut out = Vec::new();
+
+    // User in `legion` group (socket access).
+    let in_group = user_in_group("legion");
+    let is_root = unsafe { libc::geteuid() } == 0;
+    out.push(check(
+        "user_in_legion_group",
+        in_group || is_root,
+        if is_root {
+            String::from("running as root")
+        } else if in_group {
+            String::from("member of legion group")
+        } else {
+            String::from("not in legion group — sudo usermod -aG legion $USER")
+        },
+    ));
+
+    // Daemon systemd unit enabled.
+    match daemon_unit_enabled() {
+        Some(true) => out.push(check("daemon_unit_enabled", true, "enabled")),
+        Some(false) => out.push(check(
+            "daemon_unit_enabled",
+            false,
+            "not enabled — systemctl enable legion-control",
+        )),
+        None => out.push(check(
+            "daemon_unit_enabled",
+            false,
+            "systemctl unavailable".to_string(),
+        )),
+    }
+
+    // Spectrum udev rule applied.
+    match hidraw_spectrum_node() {
+        Some((node, mode)) => {
+            let accessible = mode & 0o640 == 0o640 || mode & 0o006 != 0;
+            out.push(check(
+                "spectrum_udev_rule",
+                accessible,
+                format!("{} mode {:o}", node.display(), mode),
+            ));
+        }
+        None => out.push(check(
+            "spectrum_udev_rule",
+            true,
+            "Spectrum controller absent (optional)".to_string(),
+        )),
+    }
+
+    // Socket permissions sane (not world-writable).
+    let sock = std::path::Path::new(comms::SYSTEM_SOCKET);
+    if sock.exists() {
+        let mode = sock.metadata().map(|m| m.permissions().mode()).unwrap_or(0);
+        out.push(check(
+            "socket_permissions",
+            mode & 0o006 == 0,
+            format!("mode {:o}", mode),
+        ));
+    } else {
+        out.push(check(
+            "socket_permissions",
+            true,
+            "socket absent (daemon off?)".to_string(),
+        ));
+    }
+
+    // Binary location sanity.
+    let bin_ok = std::path::Path::new("/usr/local/bin/legion-daemon").exists()
+        || std::path::Path::new("/usr/bin/legion-daemon").exists();
+    out.push(check(
+        "binary_location",
+        bin_ok,
+        if bin_ok {
+            "installed".to_string()
+        } else {
+            "legion-daemon binary not found".to_string()
+        },
+    ));
+
+    // ryzen_smu module loaded (optional but expected on supported AMD).
+    let smu = std::path::Path::new("/sys/kernel/ryzen_smu_drv").exists();
+    out.push(check(
+        "ryzen_smu_module",
+        smu,
+        if smu {
+            "loaded".to_string()
+        } else {
+            "not loaded (needed for Curve Optimizer only)".to_string()
+        },
+    ));
+
+    out
 }
