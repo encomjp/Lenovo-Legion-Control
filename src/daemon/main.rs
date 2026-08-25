@@ -3,11 +3,11 @@
 //! Listens on a Unix domain socket for commands from CLI/GUI.
 //! Reads sensors, controls fans, manages keyboard backlight.
 
-use legion_core::comms::{
-    bincode_opts, bind_socket_path, cmd_is_write, cmd_kind, cmd_label,
-    DaemonCommand, DaemonResponse, MAX_FRAME_BYTES,
-};
 use bincode::Options as _;
+use legion_core::comms::{
+    bincode_opts, bind_socket_path, cmd_is_write, cmd_kind, cmd_label, DaemonCommand,
+    DaemonResponse, MAX_FRAME_BYTES,
+};
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
     battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
@@ -253,6 +253,10 @@ fn main() {
     log::info!("legion_hwmon loaded={hwmon_loaded}");
     undervolt::start_persistence_worker();
 
+    // Adopt the boot-time limiter state so the watchdog maintains it across
+    // restarts (the EC persists the bit, but can silently drop it later).
+    battery::seed_desired_from_effective();
+
     // ── thermal governor shared state ──
     // Validate the on-disk config before the governor uses it: a hand-edited
     // or corrupt settings.json must not drive raw frequency writes.
@@ -474,9 +478,7 @@ fn thermal_governor(
         // Poison recovery: a panicked writer must not kill the governor and
         // freeze CPUs at their last throttled frequency.
         let (enabled, _max_temp) = {
-            let g = cfg
-                .read()
-                .unwrap_or_else(|p| p.into_inner());
+            let g = cfg.read().unwrap_or_else(|p| p.into_inner());
             (g.enabled, g.max_temp)
         };
 
@@ -496,11 +498,10 @@ fn thermal_governor(
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            let (mut guard, _timeout) =
-                match cvar.wait_timeout(guard, Duration::from_secs(10)) {
-                    Ok(r) => r,
-                    Err(p) => p.into_inner(),
-                };
+            let (mut guard, _timeout) = match cvar.wait_timeout(guard, Duration::from_secs(10)) {
+                Ok(r) => r,
+                Err(p) => p.into_inner(),
+            };
             // reset flag
             *guard = false;
             drop(guard);

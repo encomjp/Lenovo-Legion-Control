@@ -193,31 +193,67 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
     let pct = discretize_limit(pct);
     let preserve = pct < 100;
     let want = if preserve { "Long_Life" } else { "Standard" };
-    log::info!("charge limit → {} ({want})", if preserve { "preserved" } else { "full" });
+    log::info!(
+        "charge limit → {} ({want})",
+        if preserve { "preserved" } else { "full" }
+    );
 
     DESIRED_LIMIT.store(pct, Ordering::Relaxed);
 
     // Preferred path: standardized charge_types switch.
     if charge_types().is_some() {
         set_charge_type(want)?;
-        // Small settle time so the EC reflects the new selection before we
-        // verify (empirically <1 s; 150 ms covers observed latency).
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        return match selected_charge_type() {
-            Some(t) if t.eq_ignore_ascii_case(want) => Ok(()),
-            other => {
-                let msg = format!(
-                    "Firmware did not accept charge_types={want} (reads {:?}) — charging may be uncapped. AC plug/unplug or reboot usually clears this EC state",
-                    other.as_deref().unwrap_or("<unreadable>")
-                );
-                log::warn!("{msg}");
-                Err(std::io::Error::other(msg))
+        // The EC may take a few hundred ms to reflect the new selection
+        // (and kernel Bug 221065 can garble the first readback after AC
+        // events) — poll the readback instead of trusting a single sample.
+        for _ in 0..5 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            match selected_charge_type() {
+                Some(t) if t.eq_ignore_ascii_case(want) => return Ok(()),
+                _ => {}
             }
-        };
+        }
+        let msg = format!(
+            "Firmware did not accept charge_types={want} (reads {:?}) — charging may be uncapped. AC plug/unplug or reboot usually clears this EC state",
+            selected_charge_type().as_deref().unwrap_or("<unreadable>")
+        );
+        log::warn!("{msg}");
+        return Err(std::io::Error::other(msg));
     }
 
     // Legacy fallback: machines without charge_types (older models/kernels).
-    set_conservation_file(preserve)
+    set_conservation_file(preserve)?;
+    // Same verification contract as the charge_types path.
+    match conservation_mode() {
+        Some(on) if on == preserve => Ok(()),
+        Some(on) => {
+            let msg = format!(
+                "Firmware did not accept conservation_mode={} (reads {on}) — charging may be uncapped",
+                if preserve { 1 } else { 0 }
+            );
+            log::warn!("{msg}");
+            Err(std::io::Error::other(msg))
+        }
+        None => {
+            log::warn!("conservation_mode unreadable after write — cannot verify charge limit");
+            Ok(())
+        }
+    }
+}
+
+/// Adopt the machine's current effective limiter state as the desired state,
+/// so the watchdog maintains it across daemon restarts. Only seeds when a
+/// limiter is actually engaged (booted with conservation on); otherwise the
+/// watchdog stays passive until the user explicitly sets a limit.
+pub fn seed_desired_from_effective() {
+    let effective = charge_limit_pct();
+    if effective < 100 {
+        DESIRED_LIMIT.store(effective, Ordering::Relaxed);
+        log::info!(
+            "charge limiter watchdog seeded from effective state ({}%)",
+            effective
+        );
+    }
 }
 
 /// Re-apply the last explicitly requested limit if the EC silently dropped
@@ -232,7 +268,11 @@ pub fn reassert_configured_limit() -> std::io::Result<bool> {
     let preserve = want < 100;
     let engaged = match selected_charge_type() {
         Some(sel) => sel.eq_ignore_ascii_case("Long_Life") == preserve,
-        None => conservation_mode().unwrap_or(false) == preserve,
+        None => match conservation_mode() {
+            Some(on) => on == preserve,
+            // Neither interface readable — do not guess, do not spam.
+            None => return Ok(false),
+        },
     };
     if engaged {
         return Ok(false);
