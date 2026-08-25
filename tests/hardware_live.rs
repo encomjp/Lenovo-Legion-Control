@@ -173,11 +173,11 @@ fn f08_live_fan_rpms_and_targets_readable() {
 fn f09_read_all_temps_plausible() {
     skip_unless_hw!();
     let s = sensors::read_all();
-    for name in ["cpu_tctl", "cpu_ccd1", "cpu_ccd2"] {
+    for name in ["cpu_temp", "cpu_temp_1", "cpu_temp_2"] {
         let t = match name {
-            "cpu_tctl" => s.cpu_tctl,
-            "cpu_ccd1" => s.cpu_ccd1,
-            _ => s.cpu_ccd2,
+            "cpu_temp" => s.cpu_temp,
+            "cpu_temp_1" => s.cpu_temp_1,
+            _ => s.cpu_temp_2,
         };
         assert!(
             (TEMP_MIN_C..=TEMP_MAX_C).contains(&t),
@@ -232,9 +232,14 @@ fn f12_rapl_power_sampling_non_negative() {
 #[ignore = "live self-test"]
 fn f13_k10temp_readings_on_real_cpu() {
     skip_unless_hw!();
-    let (tctl, tccd2) = thermal::read_thermal_temps();
-    assert!(tctl.is_some() || tccd2.is_some(), "no k10temp temps at all");
-    for t in [tctl, tccd2].into_iter().flatten() {
+    // k10temp exposes the AMD Tctl (package) and Tccd2 (second CCD) sensors,
+    // reported here as the two CPU temps in milli-celsius.
+    let (cpu_temp_mc, cpu_temp_2_mc) = thermal::read_cpu_temps();
+    assert!(
+        cpu_temp_mc.is_some() || cpu_temp_2_mc.is_some(),
+        "no k10temp temps at all"
+    );
+    for t in [cpu_temp_mc, cpu_temp_2_mc].into_iter().flatten() {
         let c = t as f64 / 1000.0;
         assert!((0.0..=TEMP_MAX_C).contains(&c), "k10temp {c}°C implausible");
     }
@@ -270,7 +275,7 @@ fn f15_compute_target_exercises_with_live_values() {
     use legion_core::thermal::{compute_target, ThermalConfig};
     // Disabled config → None (governor idle path).
     let disabled = ThermalConfig::default();
-    let temp_mc = thermal::read_thermal_temps().0.unwrap_or(60_000);
+    let temp_mc = thermal::read_cpu_temps().0.unwrap_or(60_000);
     let cur = thermal::read_cur_max().unwrap_or(thermal::MAX_FULL);
     assert_eq!(compute_target(cur, temp_mc, &disabled), None);
 
@@ -472,7 +477,7 @@ fn f27_ipc_sensors_match_local_reads() {
     match expect_ipc(DaemonCommand::GetSensors) {
         DaemonResponse::Sensors(s) => {
             let local = sensors::read_all();
-            assert!((s.cpu_tctl - local.cpu_tctl).abs() < 15.0, "CPU temp skew");
+            assert!((s.cpu_temp - local.cpu_temp).abs() < 15.0, "CPU temp skew");
             assert_eq!(s.profile, local.profile);
             assert_eq!(s.fan1_rpm, local.fan1_rpm);
         }

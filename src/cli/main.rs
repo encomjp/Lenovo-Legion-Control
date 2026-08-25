@@ -837,17 +837,17 @@ fn rgb_status_local() {
 fn print_thermal_status(s: &legion_core::thermal::ThermalStatus) {
     let on_off = if s.config.enabled { "on" } else { "off" };
     let state = if s.active { "throttling" } else { "idle" };
-    let tctl = s
-        .tctl_mc
+    let cpu_temp = s
+        .cpu_temp_mc
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
-    let tccd2 = s
-        .tccd2_mc
+    let cpu_temp_2 = s
+        .cpu_temp_2_mc
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
     println!(
-        "Thermal: {} · max {}°C (restore {}°C) · cur {} kHz · Tctl {} / Tccd2 {} · {}",
-        on_off, s.config.max_temp, s.restore_temp, s.cur_max_freq, tctl, tccd2, state
+        "Thermal: {} · max {}°C (restore {}°C) · cur {} kHz · CPU {} / CPU CCD 2 {} · {}",
+        on_off, s.config.max_temp, s.restore_temp, s.cur_max_freq, cpu_temp, cpu_temp_2, state
     );
 }
 
@@ -903,8 +903,8 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
             println!("│  Profile   {:<42} │", friendly_profile(&s.profile));
             println!("├─ CPU ────────────────────────────────────────────────┤");
             println!(
-                "│  Tctl {:>5.1}°C   CCD1 {:>5.1}°C   CCD2 {:>5.1}°C       │",
-                s.cpu_tctl, s.cpu_ccd1, s.cpu_ccd2
+                "│  CPU {:>5.1}°C   CCD1 {:>5.1}°C   CCD2 {:>5.1}°C        │",
+                s.cpu_temp, s.cpu_temp_1, s.cpu_temp_2
             );
             println!(
                 "│  EC   {:>5.1}°C                                        │",

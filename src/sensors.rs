@@ -9,9 +9,12 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SensorReadings {
-    pub cpu_tctl: f64,
-    pub cpu_ccd1: f64,
-    pub cpu_ccd2: f64,
+    /// Main CPU temperature (k10temp Tctl).
+    pub cpu_temp: f64,
+    /// CPU die 1 temperature (k10temp Tccd1).
+    pub cpu_temp_1: f64,
+    /// CPU die 2 temperature (k10temp Tccd2).
+    pub cpu_temp_2: f64,
     pub ec_cpu: f64,
     pub ec_gpu: f64,
     pub igpu_edge: f64,
@@ -81,9 +84,9 @@ pub fn read_all() -> SensorReadings {
                     if let Some(val) = read_int(&input_path) {
                         let temp = val as f64 / 1000.0;
                         match label.as_str() {
-                            "Tctl" => s.cpu_tctl = temp,
-                            "Tccd1" => s.cpu_ccd1 = temp,
-                            "Tccd2" => s.cpu_ccd2 = temp,
+                            "Tctl" => s.cpu_temp = temp,
+                            "Tccd1" => s.cpu_temp_1 = temp,
+                            "Tccd2" => s.cpu_temp_2 = temp,
                             _ => {}
                         }
                     }

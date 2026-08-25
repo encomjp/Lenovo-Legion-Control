@@ -30,7 +30,11 @@ value() {
 }
 
 # Temps / powers / fans — one dump, parsed once.
-value CPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'Tctl\s+\K[0-9.]+' | head -1 || true)"
+# New CLI wording ("… cur NNNN kHz · CPU 62.5°C / CPU CCD 2 …"); fall back to
+# the pre-rename anchor for older installed legion-cli builds.
+cpu_t="$(printf '%s\n' "$status" | grep -oP 'CPU \K[0-9.]+' | head -1 || true)"
+[ -z "$cpu_t" ] && cpu_t="$(printf '%s\n' "$status" | grep -oP 'Tctl\s+\K[0-9.]+' | head -1 || true)"
+value CPU_TEMP "$cpu_t"
 value CPU_POWER "$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
 value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[0-9.]+' | head -1 || true)"
 value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[0-9.]+\s+W' | head -1 | grep -oP '[0-9.]+' || true)"

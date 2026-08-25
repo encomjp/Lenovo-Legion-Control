@@ -1604,7 +1604,7 @@ fn build_overview(
             }
 
             if let Some(s) = poll.sensors {
-                let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_tctl };
+                let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_temp };
                 cpu_v.set_text(&format!("{c:.0} °C"));
                 tint_temp(&cpu_chip_c, c);
                 cpu_d.set_text(&match poll.cpu_w {
@@ -1637,7 +1637,7 @@ fn build_overview(
                     let c = if local.ec_cpu > 0.0 {
                         local.ec_cpu
                     } else {
-                        local.cpu_tctl
+                        local.cpu_temp
                     };
                     if c > 0.0 {
                         cpu_v.set_text(&format!("{c:.0} °C"));
@@ -3319,7 +3319,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
-        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp Tctl/Tccd2).",
+        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp CPU/CCD2 temps).",
     );
 
     // Bare switch in the group header — the slider below explains itself,
@@ -3415,16 +3415,18 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .row_spacing(12)
         .build();
     chips.add_css_class("metric-grid");
-    let (tctl_chip, tctl_v, tctl_d) =
-        metric_chip_tip("Tctl", Some("k10temp Tctl — main package temp"));
-    let (tccd2_chip, tccd2_v, tccd2_d) =
-        metric_chip_tip("Tccd2", Some("k10temp Tccd2 — secondary CCD temp"));
+    let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) =
+        metric_chip_tip("CPU temp", Some("Main CPU temperature (k10temp Tctl)"));
+    let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) = metric_chip_tip(
+        "CPU CCD 2",
+        Some("Second CPU CCD temperature (k10temp Tccd2)"),
+    );
     let (freq_chip, freq_v, freq_d) = metric_chip_tip(
         "Max freq",
         Some("Current scaling_max_freq across online CPUs"),
     );
-    chips.append(&tctl_chip);
-    chips.append(&tccd2_chip);
+    chips.append(&cpu_temp_chip);
+    chips.append(&cpu_temp_2_chip);
     chips.append(&freq_chip);
     chips.set_margin_bottom(0);
     page.append(&chips);
@@ -3569,14 +3571,14 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         let last_max_c = last_max.clone();
         let last_on_c = last_on.clone();
         let acked_c = acked.clone();
-        let tctl_v_c = tctl_v.clone();
-        let tctl_d_c = tctl_d.clone();
-        let tccd2_v_c = tccd2_v.clone();
-        let tccd2_d_c = tccd2_d.clone();
+        let cpu_temp_v_c = cpu_temp_v.clone();
+        let cpu_temp_d_c = cpu_temp_d.clone();
+        let cpu_temp_2_v_c = cpu_temp_2_v.clone();
+        let cpu_temp_2_d_c = cpu_temp_2_d.clone();
         let freq_v_c = freq_v.clone();
         let freq_d_c = freq_d.clone();
-        let tctl_chip_c = tctl_chip.clone();
-        let tccd2_chip_c = tccd2_chip.clone();
+        let cpu_temp_chip_c = cpu_temp_chip.clone();
+        let cpu_temp_2_chip_c = cpu_temp_2_chip.clone();
         let freq_chip_c = freq_chip.clone();
         let apply_mute_c = apply_mute.clone();
         run_daemon_command_async(DaemonCommand::GetThermalStatus, move |result| {
@@ -3590,29 +3592,32 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     last_on_c.set(st.config.enabled);
                     acked_c.set(st.config.max_temp >= 96);
                     apply_mute_c(st.config.enabled);
-                    let tctl_c = st.tctl_mc.map(|v| v as f64 / 1000.0);
-                    let tccd2_c = st.tccd2_mc.map(|v| v as f64 / 1000.0);
-                    if let Some(c) = tctl_c {
-                        tctl_v_c.set_text(&format!("{c:.1} °C"));
-                        tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });
-                        tint_temp(&tctl_chip_c, c);
+                    let cpu_temp_c = st.cpu_temp_mc.map(|v| v as f64 / 1000.0);
+                    let cpu_temp_2_c = st.cpu_temp_2_mc.map(|v| v as f64 / 1000.0);
+                    if let Some(c) = cpu_temp_c {
+                        cpu_temp_v_c.set_text(&format!("{c:.1} °C"));
+                        cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
+                        tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        tctl_v_c.set_text("—");
-                        tctl_d_c.set_text("no sensor");
-                        tint_temp(&tctl_chip_c, 0.0);
+                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_d_c.set_text("no sensor");
+                        tint_temp(&cpu_temp_chip_c, 0.0);
                     }
-                    if let Some(c) = tccd2_c {
-                        tccd2_v_c.set_text(&format!("{c:.1} °C"));
-                        tccd2_d_c.set_text("");
-                        tint_temp(&tccd2_chip_c, c);
+                    if let Some(c) = cpu_temp_2_c {
+                        cpu_temp_2_v_c.set_text(&format!("{c:.1} °C"));
+                        cpu_temp_2_d_c.set_text("");
+                        tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        tccd2_v_c.set_text("—");
-                        tccd2_d_c.set_text("no sensor");
-                        tint_temp(&tccd2_chip_c, 0.0);
+                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_d_c.set_text("no sensor");
+                        tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
                     freq_v_c.set_text(&format!("{:.2} GHz", st.cur_max_freq as f64 / 1_000_000.0));
                     freq_d_c.set_text(if st.active { "clamped" } else { "full" });
-                    let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
+                    let tint_c = cpu_temp_c
+                        .into_iter()
+                        .chain(cpu_temp_2_c)
+                        .fold(f64::NAN, f64::max);
                     if tint_c.is_finite() {
                         tint_temp(&freq_chip_c, tint_c);
                     } else {
@@ -3620,18 +3625,18 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     }
                 }
                 Ok(DaemonResponse::Error(e)) => {
-                    tctl_v_c.set_text("—");
-                    tctl_d_c.set_text(&e);
-                    tccd2_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_d_c.set_text(&e);
+                    cpu_temp_2_v_c.set_text("—");
                     freq_v_c.set_text("—");
                 }
                 Ok(other) => {
-                    tctl_v_c.set_text("—");
-                    tctl_d_c.set_text(&format!("{other:?}"));
+                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_d_c.set_text(&format!("{other:?}"));
                 }
                 Err(e) => {
-                    tctl_v_c.set_text("—");
-                    tctl_d_c.set_text(&e);
+                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_d_c.set_text(&e);
                 }
             }
             suppress_c.set(false);
@@ -3697,14 +3702,14 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         });
     }
 
-    let tctl_v_p = tctl_v.clone();
-    let tctl_d_p = tctl_d.clone();
-    let tccd2_v_p = tccd2_v.clone();
-    let tccd2_d_p = tccd2_d.clone();
+    let cpu_temp_v_p = cpu_temp_v.clone();
+    let cpu_temp_d_p = cpu_temp_d.clone();
+    let cpu_temp_2_v_p = cpu_temp_2_v.clone();
+    let cpu_temp_2_d_p = cpu_temp_2_d.clone();
     let freq_v_p = freq_v.clone();
     let freq_d_p = freq_d.clone();
-    let tctl_chip_p = tctl_chip.clone();
-    let tccd2_chip_p = tccd2_chip.clone();
+    let cpu_temp_chip_p = cpu_temp_chip.clone();
+    let cpu_temp_2_chip_p = cpu_temp_2_chip.clone();
     let freq_chip_p = freq_chip.clone();
     let enabled_p = enabled.clone();
     let scale_p = scale.clone();
@@ -3715,14 +3720,14 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let acked_p = acked.clone();
     let apply_mute_p = apply_mute.clone();
     glib::timeout_add_local(Duration::from_secs(2), move || {
-        let tctl_v_c = tctl_v_p.clone();
-        let tctl_d_c = tctl_d_p.clone();
-        let tccd2_v_c = tccd2_v_p.clone();
-        let tccd2_d_c = tccd2_d_p.clone();
+        let cpu_temp_v_c = cpu_temp_v_p.clone();
+        let cpu_temp_d_c = cpu_temp_d_p.clone();
+        let cpu_temp_2_v_c = cpu_temp_2_v_p.clone();
+        let cpu_temp_2_d_c = cpu_temp_2_d_p.clone();
         let freq_v_c = freq_v_p.clone();
         let freq_d_c = freq_d_p.clone();
-        let tctl_chip_c = tctl_chip_p.clone();
-        let tccd2_chip_c = tccd2_chip_p.clone();
+        let cpu_temp_chip_c = cpu_temp_chip_p.clone();
+        let cpu_temp_2_chip_c = cpu_temp_2_chip_p.clone();
         let freq_chip_c = freq_chip_p.clone();
         let enabled_c = enabled_p.clone();
         let scale_c = scale_p.clone();
@@ -3736,29 +3741,32 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             DaemonCommand::GetThermalStatus,
             move |result| match result {
                 Ok(DaemonResponse::ThermalStatus(st)) => {
-                    let tctl_c = st.tctl_mc.map(|v| v as f64 / 1000.0);
-                    let tccd2_c = st.tccd2_mc.map(|v| v as f64 / 1000.0);
-                    if let Some(c) = tctl_c {
-                        tctl_v_c.set_text(&format!("{c:.1} °C"));
-                        tctl_d_c.set_text(if st.active { "throttling" } else { "idle" });
-                        tint_temp(&tctl_chip_c, c);
+                    let cpu_temp_c = st.cpu_temp_mc.map(|v| v as f64 / 1000.0);
+                    let cpu_temp_2_c = st.cpu_temp_2_mc.map(|v| v as f64 / 1000.0);
+                    if let Some(c) = cpu_temp_c {
+                        cpu_temp_v_c.set_text(&format!("{c:.1} °C"));
+                        cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
+                        tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        tctl_v_c.set_text("—");
-                        tctl_d_c.set_text("no sensor");
-                        tint_temp(&tctl_chip_c, 0.0);
+                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_d_c.set_text("no sensor");
+                        tint_temp(&cpu_temp_chip_c, 0.0);
                     }
-                    if let Some(c) = tccd2_c {
-                        tccd2_v_c.set_text(&format!("{c:.1} °C"));
-                        tccd2_d_c.set_text("");
-                        tint_temp(&tccd2_chip_c, c);
+                    if let Some(c) = cpu_temp_2_c {
+                        cpu_temp_2_v_c.set_text(&format!("{c:.1} °C"));
+                        cpu_temp_2_d_c.set_text("");
+                        tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        tccd2_v_c.set_text("—");
-                        tccd2_d_c.set_text("no sensor");
-                        tint_temp(&tccd2_chip_c, 0.0);
+                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_d_c.set_text("no sensor");
+                        tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
                     freq_v_c.set_text(&format!("{:.2} GHz", st.cur_max_freq as f64 / 1_000_000.0));
                     freq_d_c.set_text(if st.active { "clamped" } else { "full" });
-                    let tint_c = tctl_c.into_iter().chain(tccd2_c).fold(f64::NAN, f64::max);
+                    let tint_c = cpu_temp_c
+                        .into_iter()
+                        .chain(cpu_temp_2_c)
+                        .fold(f64::NAN, f64::max);
                     if tint_c.is_finite() {
                         tint_temp(&freq_chip_c, tint_c);
                     } else {
@@ -3782,8 +3790,8 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         last_on_c.set(st.config.enabled);
                     }
                 }
-                Ok(DaemonResponse::Error(e)) => tctl_d_c.set_text(&e),
-                Err(e) => tctl_d_c.set_text(&e),
+                Ok(DaemonResponse::Error(e)) => cpu_temp_d_c.set_text(&e),
+                Err(e) => cpu_temp_d_c.set_text(&e),
                 _ => {}
             },
         );

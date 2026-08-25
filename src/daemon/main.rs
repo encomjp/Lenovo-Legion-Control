@@ -33,7 +33,7 @@ static THERMAL_NOTIFY: OnceLock<Arc<(Mutex<bool>, Condvar)>> = OnceLock::new();
 /// Snapshot of last-seen sensor values for throttled logging.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct SensorSnapshot {
-    cpu_tctl: f64,
+    cpu_temp: f64,
     dgpu_temp: f64,
     fan1_rpm: u32,
     fan2_rpm: u32,
@@ -459,15 +459,15 @@ fn send_response(stream: &mut UnixStream, resp: DaemonResponse) -> std::io::Resu
 
 fn build_thermal_status() -> thermal::ThermalStatus {
     let cfg = config::get().thermal;
-    let (tctl, tccd2) = thermal::read_thermal_temps();
+    let (cpu_temp, cpu_temp_2) = thermal::read_cpu_temps();
     let cur_max = thermal::read_cur_max().unwrap_or(0);
     let restore_temp = cfg.max_temp.saturating_sub(thermal::HYSTERESIS as u8);
     let active = cfg.enabled && cur_max != 0 && cur_max < thermal::MAX_FULL;
     thermal::ThermalStatus {
         config: cfg,
         cur_max_freq: cur_max,
-        tctl_mc: tctl,
-        tccd2_mc: tccd2,
+        cpu_temp_mc: cpu_temp,
+        cpu_temp_2_mc: cpu_temp_2,
         active,
         restore_temp,
     }
@@ -482,7 +482,7 @@ fn thermal_governor(
     // Sensor-spike smoothing carried across ticks (α=½ EMA, urgent bypass).
     let mut temp_filter = thermal::TempFilter::default();
     while !shutdown.load(Ordering::Relaxed) {
-        let (tctl, tccd2) = thermal::read_thermal_temps();
+        let (cpu_temp, cpu_temp_2) = thermal::read_cpu_temps();
         let cur_max_opt = thermal::read_cur_max();
         // Poison recovery: a panicked writer must not kill the governor and
         // freeze CPUs at their last throttled frequency.
@@ -491,12 +491,12 @@ fn thermal_governor(
             (g.enabled, g.max_temp)
         };
 
-        if tctl.is_none() && tccd2.is_none() && !warned_missing {
+        if cpu_temp.is_none() && cpu_temp_2.is_none() && !warned_missing {
             log::warn!(
                 "thermal governor: k10temp not found — status will show None temps, no freq writes"
             );
             warned_missing = true;
-        } else if tctl.is_some() || tccd2.is_some() {
+        } else if cpu_temp.is_some() || cpu_temp_2.is_some() {
             warned_missing = false;
         }
 
@@ -521,7 +521,7 @@ fn thermal_governor(
         }
 
         // Enabled but no temps: cannot compute, sleep 1s
-        if tctl.is_none() && tccd2.is_none() {
+        if cpu_temp.is_none() && cpu_temp_2.is_none() {
             // respect shutdown with short sleeps
             for _ in 0..10 {
                 if shutdown.load(Ordering::Relaxed) {
@@ -535,7 +535,7 @@ fn thermal_governor(
             continue;
         }
 
-        let temp_mc = match (tctl, tccd2) {
+        let temp_mc = match (cpu_temp, cpu_temp_2) {
             (Some(a), Some(b)) => a.max(b),
             (Some(a), None) => a,
             (None, Some(b)) => b,
@@ -623,7 +623,7 @@ fn process_command(
                 Some(t) => now >= t + Duration::from_secs(10),
                 None => true,
             };
-            let changed = snapshot.cpu_tctl != s.cpu_tctl
+            let changed = snapshot.cpu_temp != s.cpu_temp
                 || snapshot.dgpu_temp != s.dgpu_temp
                 || snapshot.fan1_rpm != s.fan1_rpm
                 || snapshot.fan2_rpm != s.fan2_rpm
@@ -632,7 +632,7 @@ fn process_command(
             if due || changed {
                 *last_sensors = Some(now);
                 *snapshot = SensorSnapshot {
-                    cpu_tctl: s.cpu_tctl,
+                    cpu_temp: s.cpu_temp,
                     dgpu_temp: s.dgpu_temp,
                     fan1_rpm: s.fan1_rpm,
                     fan2_rpm: s.fan2_rpm,
@@ -641,7 +641,7 @@ fn process_command(
                 };
                 log::info!(
                     "sensors: CPU={:.1}°C dGPU={:.1}°C fans=[{}, {}, {}] profile={}",
-                    s.cpu_tctl,
+                    s.cpu_temp,
                     s.dgpu_temp,
                     s.fan1_rpm,
                     s.fan2_rpm,

@@ -37,8 +37,8 @@ impl Default for ThermalConfig {
 pub struct ThermalStatus {
     pub config: ThermalConfig,
     pub cur_max_freq: u32,
-    pub tctl_mc: Option<i32>,
-    pub tccd2_mc: Option<i32>,
+    pub cpu_temp_mc: Option<i32>,
+    pub cpu_temp_2_mc: Option<i32>,
     pub active: bool,
     pub restore_temp: u8,
 }
@@ -112,7 +112,10 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
     }
 }
 
-pub fn read_thermal_temps() -> (Option<i32>, Option<i32>) {
+/// Reads the main CPU temperature (the AMD Tctl sensor, hwmon `temp1_input`)
+/// and a per-CCD temperature (AMD Tccd1/Tccd2 sensors, hwmon `temp4_input`
+/// with fallback to `temp3_input`).
+pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
     let base = Path::new("/sys/class/hwmon");
     if let Ok(entries) = fs::read_dir(base) {
         for entry in entries.flatten() {
@@ -120,10 +123,10 @@ pub fn read_thermal_temps() -> (Option<i32>, Option<i32>) {
             if let Ok(name) = fs::read_to_string(&name_path) {
                 if name.trim() == "k10temp" {
                     let hw = entry.path();
-                    let tctl = fs::read_to_string(hw.join("temp1_input"))
+                    let cpu_temp = fs::read_to_string(hw.join("temp1_input"))
                         .ok()
                         .and_then(|s| s.trim().parse::<i32>().ok());
-                    let tccd2 = fs::read_to_string(hw.join("temp4_input"))
+                    let cpu_temp_2 = fs::read_to_string(hw.join("temp4_input"))
                         .ok()
                         .and_then(|s| s.trim().parse::<i32>().ok())
                         .or_else(|| {
@@ -131,7 +134,7 @@ pub fn read_thermal_temps() -> (Option<i32>, Option<i32>) {
                                 .ok()
                                 .and_then(|s| s.trim().parse::<i32>().ok())
                         });
-                    return (tctl, tccd2);
+                    return (cpu_temp, cpu_temp_2);
                 }
             }
         }
