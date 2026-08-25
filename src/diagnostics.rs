@@ -78,6 +78,9 @@ pub struct DiagnosticsReport {
     pub profiles: ProfilesDigest,
     pub curve_optimizer: undervolt::CurveOptimizerStatus,
     pub settings: SettingsDigest,
+    /// Active machine anomalies (fan stalled, NVMe hot, limiter bypassed,
+    /// config unwritable …). Empty = clean bill of health this pass.
+    pub faults: Vec<crate::selftest::Fault>,
     /// Slimmed log summary — counts plus the last error (redacted). Raw log
     /// lines never leave the machine; this keeps reports small and the
     /// anonymity contract robust even if a message slips a path in.
@@ -278,6 +281,13 @@ pub fn collect() -> DiagnosticsReport {
         digest.last_error = Some(capped);
     }
 
+    let faults = crate::selftest::scan_faults();
+    for f in &faults {
+        if f.severity == crate::selftest::Severity::Critical {
+            log::warn!("fault: {}: {}", f.id, f.detail);
+        }
+    }
+
     DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
         generated_at,
@@ -299,6 +309,7 @@ pub fn collect() -> DiagnosticsReport {
             restore_on_launch: cfg.restore_on_launch,
         },
         log_digest: digest,
+        faults,
         self_checks: run_self_checks(),
     }
 }

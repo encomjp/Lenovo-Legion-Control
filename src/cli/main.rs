@@ -167,6 +167,9 @@ enum DiagAction {
     Dump,
     /// Run read-only self-health checks and print a pass/fail table
     Selfcheck,
+    /// Scan for active machine anomalies (fan stalls, hot NVMe, limiter
+    /// bypass, config unwritable …). Exit 1 on any CRITICAL fault.
+    Faults,
     /// Collect and POST to the configured collector endpoint
     Send {
         /// Override collector URL (else Settings/default)
@@ -824,6 +827,28 @@ fn main() {
                 }
                 println!("{passed}/{total} passed");
                 if passed != total {
+                    std::process::exit(1);
+                }
+            }
+            DiagAction::Faults => {
+                let faults = selftest::scan_faults();
+                if faults.is_empty() {
+                    println!("no active faults detected");
+                    return;
+                }
+                for f in &faults {
+                    let sev = match f.severity {
+                        legion_core::selftest::Severity::Critical => "CRIT",
+                        legion_core::selftest::Severity::Warning => "WARN",
+                        legion_core::selftest::Severity::Info => "INFO",
+                    };
+                    println!("[{sev}] {} — {}", f.id, f.detail);
+                }
+                let criticals = faults
+                    .iter()
+                    .filter(|f| f.severity == legion_core::selftest::Severity::Critical)
+                    .count();
+                if criticals > 0 {
                     std::process::exit(1);
                 }
             }

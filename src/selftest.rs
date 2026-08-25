@@ -3,6 +3,11 @@
 //! Every check is strictly READ-ONLY and safe to run on a production laptop.
 //! Used by the GUI "Run self-check" button, `legion-cli diagnose selfcheck`,
 //! and the anonymous diagnostics report.
+//!
+//! [`scan_faults`] complements the pass/fail checks with *anomaly detection*:
+//! conditions that are legal states but usually indicate a problem (a fan
+//! stalling under load, the EC charging past the configured limiter,
+//! divergent temperature sources, an unwritable config directory …).
 
 use crate::{battery, comms, config, device, fans, keyboard, profile, sensors, thermal, undervolt};
 
@@ -11,6 +16,31 @@ pub struct SelfCheck {
     pub name: &'static str,
     pub ok: bool,
     pub detail: String,
+}
+
+/// An active machine anomaly. `Critical` = hardware risk / broken core flow;
+/// `Warning` = degraded or suspicious; `Info` = notable but expected in some
+/// configurations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum Severity {
+    Critical,
+    Warning,
+    Info,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Fault {
+    pub id: &'static str,
+    pub severity: Severity,
+    pub detail: String,
+}
+
+fn fault(id: &'static str, severity: Severity, detail: impl Into<String>) -> Fault {
+    Fault {
+        id,
+        severity,
+        detail: detail.into(),
+    }
 }
 
 fn check(name: &'static str, ok: bool, detail: impl Into<String>) -> SelfCheck {
@@ -60,10 +90,17 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         },
     ));
     let limit = battery::charge_limit_pct();
+    let source = if battery::charge_types().is_some() {
+        "charge_types"
+    } else if battery::conservation_mode().is_some() {
+        "conservation_mode"
+    } else {
+        "unreachable"
+    };
     out.push(check(
         "charge_limit_state",
-        [60, 80, 100].contains(&limit),
-        format!("{limit}%"),
+        source != "unreachable",
+        format!("{limit}% via {source}"),
     ));
 
     // Fans.
@@ -157,13 +194,16 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
 
     // Curve optimizer (root-only probe degrades gracefully off-daemon).
     let co = undervolt::status();
+    let is_root = unsafe { libc::geteuid() } == 0;
     out.push(check(
         "curve_optimizer",
-        !co.reason.is_empty(),
+        co.available || !is_root,
         if co.available {
             format!("available ({})", co.reason)
+        } else if is_root {
+            format!("root probe failed: {}", co.reason)
         } else {
-            co.reason.clone()
+            format!("unavailable without root (expected): {}", co.reason)
         },
     ));
 
@@ -246,4 +286,198 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     ));
 
     out
+}
+
+// ═══ Machine fault detection (anomalies, distinct from pass/fail) ═════════
+
+/// Scan for active machine anomalies. Read-only; typical cost is one
+/// `sensors::read_all()` plus a handful of fan/battery reads.
+pub fn scan_faults() -> Vec<Fault> {
+    let mut out = Vec::new();
+    let s = sensors::read_all();
+
+    // ── Fans: mechanical failure under an active target ────────────────
+    for f in fans::channels() {
+        let (Some(target), Some(rpm)) = (fans::read_target(f.id), fans::read_rpm(f.id)) else {
+            continue;
+        };
+        if target >= f.min_rpm && rpm + 200 < f.min_rpm {
+            out.push(fault(
+                "fan_stalled_under_target",
+                Severity::Critical,
+                format!(
+                    "fan {} told to spin {} rpm but reads {} (min {})",
+                    f.id, target, rpm, f.min_rpm
+                ),
+            ));
+        }
+    }
+
+    // ── Hot package with zero airflow ────────────────────────────────────
+    let hottest = s.cpu_temp.max(s.dgpu_temp.max(-1.0));
+    let any_airflow = fans::ids()
+        .iter()
+        .any(|id| fans::read_rpm(*id).unwrap_or(0) > 0);
+    if hottest >= 80.0 && !any_airflow {
+        out.push(fault(
+            "fans_off_while_hot",
+            Severity::Warning,
+            format!("package at {hottest:.0}°C with all fans reading 0 rpm"),
+        ));
+    }
+
+    // ── NVMe thermals ───────────────────────────────────────────────────
+    for t in &s.ssd_composite {
+        if *t >= 84.0 {
+            out.push(fault(
+                "nvme_overheat",
+                Severity::Critical,
+                format!("NVMe at {t:.0}°C — approaching throttle/limit"),
+            ));
+        } else if *t >= 70.0 {
+            out.push(fault(
+                "nvme_hot",
+                Severity::Warning,
+                format!("NVMe at {t:.0}°C"),
+            ));
+        }
+    }
+
+    // ── Battery degradation ─────────────────────────────────────────────
+    if let Some(h) = battery::health_pct() {
+        if h < 40.0 {
+            out.push(fault(
+                "battery_degraded",
+                Severity::Critical,
+                format!("battery health {h:.0}%"),
+            ));
+        } else if h < 60.0 {
+            out.push(fault(
+                "battery_worn",
+                Severity::Warning,
+                format!("battery health {h:.0}%"),
+            ));
+        }
+    }
+
+    // ── EC charging past the configured limiter ─────────────────────────
+    let limit = battery::charge_limit_pct();
+    if limit < 100 {
+        if let (Some(pct), Some(status)) = (battery::capacity(), battery::status()) {
+            if status == "Charging" && pct as i32 >= limit as i32 - 2 && pct < 100 {
+                out.push(fault(
+                    "charging_past_limiter",
+                    Severity::Warning,
+                    format!("charging at {pct}% with limiter set to {limit}%"),
+                ));
+            }
+        }
+    }
+
+    // ── Limiter interfaces disagree (legacy bit vs charge_types) ────────
+    if let (Some(cons), Some(types)) = (battery::conservation_mode(), battery::charge_types()) {
+        let long_life = types.contains("[Long_Life]");
+        if cons != long_life {
+            out.push(fault(
+                "limiter_interfaces_disagree",
+                Severity::Warning,
+                format!(
+                    "conservation_mode={} but charge_types selection is [{}]",
+                    u8::from(cons),
+                    types.split('[').nth(1).unwrap_or("?").trim_end_matches(']')
+                ),
+            ));
+        }
+    }
+
+    // ── EC CPU temp diverging from k10temp while under load ─────────────
+    // ec_cpu == 0.0 on machines without an EC hwmon backend = no data.
+    if s.ec_cpu > 1.0 && s.cpu_temp > 50.0 && (s.ec_cpu - s.cpu_temp).abs() > 12.0 {
+        out.push(fault(
+            "ec_cpu_temp_divergence",
+            Severity::Warning,
+            format!(
+                "EC reports {:.1}°C vs k10temp {:.1}°C (>12° apart under load)",
+                s.ec_cpu, s.cpu_temp
+            ),
+        ));
+    }
+
+    // ── dGPU telemetry partially degraded ───────────────────────────────
+    if s.dgpu_clock > 500.0 && s.dgpu_power == -1.0 {
+        out.push(fault(
+            "dgpu_telemetry_partial",
+            Severity::Info,
+            "dGPU reports clocks but no power draw".to_string(),
+        ));
+    }
+
+    // ── Config directory must be writable (persistence precursor) ───────
+    if let Some(dir) = config_dir() {
+        let probe = dir.join(".fault-probe");
+        match std::fs::write(&probe, b"ok") {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&probe);
+            }
+            Err(e) => out.push(fault(
+                "config_dir_unwritable",
+                Severity::Critical,
+                format!("cannot write {}: {e}", dir.display()),
+            )),
+        }
+    } else {
+        out.push(fault(
+            "config_dir_missing",
+            Severity::Warning,
+            "config directory does not exist yet".to_string(),
+        ));
+    }
+
+    // ── Frequency capped without thermal cause ─────────────────────────
+    let cfg = config::get().thermal;
+    if cfg.enabled {
+        if let Some(cur) = thermal::read_cur_max() {
+            let restore_mc = (cfg.max_temp as i32 - 7) * 1000;
+            if cur < thermal::MAX_FULL.saturating_sub(100_000) && temp_mc(&s) < restore_mc - 3_000 {
+                out.push(fault(
+                    "throttled_without_heat",
+                    Severity::Warning,
+                    format!(
+                        "capped at {cur} kHz while CPU is {:.1}°C (< max {}°C)",
+                        temp_mc(&s) as f64 / 1000.0,
+                        cfg.max_temp
+                    ),
+                ));
+            }
+        }
+    }
+
+    // ── Error burst in the recent log window ────────────────────────────
+    let entries = crate::logging::recent_logs(200);
+    let errors = entries.iter().filter(|e| e.level == "ERROR").count();
+    if errors >= 10 {
+        out.push(fault(
+            "log_error_burst",
+            Severity::Warning,
+            format!("{errors} errors in the last 200 log lines"),
+        ));
+    }
+
+    out
+}
+
+fn temp_mc(s: &sensors::SensorReadings) -> i32 {
+    (s.cpu_temp * 1000.0) as i32
+}
+
+fn config_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let mut h = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+            h.push(".config");
+            h
+        });
+    let dir = base.join("legion-control");
+    dir.is_dir().then_some(dir)
 }
