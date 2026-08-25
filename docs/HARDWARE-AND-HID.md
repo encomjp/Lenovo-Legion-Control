@@ -47,7 +47,7 @@ The source documents these transport facts for the Spectrum path:
 
 The complete field-level report layout is intentionally **not** documented here. The repository source establishes the report size, report ID, device matching, and access behavior, but does not establish a complete packet-field or checksum specification suitable for a general hardware guide. Do not infer that layout from these transport facts.
 
-The HID lighting flow is available as [SVG](assets/hid-lighting-flow.svg), [PNG](assets/hid-lighting-flow.png), and [DOT source](assets/hid-lighting-flow.dot); it shows the direct path to `hidraw`. The udev rule matches `048d:c193` and `048d:c197`, assigning mode `0666` and the `uaccess` tag. This enables the project’s direct non-root RGB path, while also making matching device nodes broadly accessible; treat the rule as a deliberate local security trade-off.
+The HID lighting flow is available as [SVG](assets/hid-lighting-flow.svg), [PNG](assets/hid-lighting-flow.png), and [DOT source](assets/hid-lighting-flow.dot); it shows the direct path to `hidraw`. The udev rule matches `048d:c193` and `048d:c197`, assigning mode `0660` and the `uaccess` tag. This enables the project’s direct non-root RGB path by giving the active local session an ACL through udev/logind, without making the matching device nodes world-writable.
 
 ## 5. What `hidraw` means
 

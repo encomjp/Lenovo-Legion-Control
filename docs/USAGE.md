@@ -27,7 +27,7 @@ The service unit is defined in [`data/systemd/legion-control.system.service`](..
 
 For a per-user, non-root daemon, the repository also contains [`data/systemd/legion-control.service`](../data/systemd/legion-control.service), which starts `/usr/bin/legion-daemon` as the logged-in user. A non-root daemon can provide read access where available, but the daemon warns that platform-profile, fan, and conservation writes will fail.
 
-The daemon listens on a Unix socket. A root daemon binds `/run/legion-control.socket`; a non-root process uses `$XDG_RUNTIME_DIR/legion-control.socket` when that variable is set, otherwise it falls back to `/tmp/legion-control.socket`. An empty `XDG_RUNTIME_DIR` value is still treated as a configured directory and can produce a relative socket path; unset it rather than setting it empty if you need the `/tmp` fallback. Clients try the system socket first and then the per-user socket. This behavior is implemented in [`src/comms.rs`](../src/comms.rs).
+The daemon listens on a Unix socket. A root daemon binds `/run/legion-control.socket`; a non-root process requires `XDG_RUNTIME_DIR` and uses `$XDG_RUNTIME_DIR/legion-control.socket`. There is deliberately no predictable `/tmp` fallback, because another local process could pre-create that path and impersonate the daemon. Clients try the system socket first and then the per-user socket when `XDG_RUNTIME_DIR` is available. This behavior is implemented in [`src/comms.rs`](../src/comms.rs).
 
 If a client cannot connect, it reports the socket error and suggests:
 
