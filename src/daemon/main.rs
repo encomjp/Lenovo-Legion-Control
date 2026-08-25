@@ -257,6 +257,15 @@ fn main() {
     // restarts (the EC persists the bit, but can silently drop it later).
     battery::seed_desired_from_effective();
 
+    // Documented EC behavior: the limiter is ignored while the laptop is off
+    // or asleep, so the pack can charge far past the threshold overnight.
+    // Surface it at boot instead of leaving a confusing 98% unexplained.
+    if battery::charged_past_limiter() {
+        log::warn!(
+            "battery is above the charge limiter threshold — it likely charged past the limit while the laptop was off/asleep (EC behavior). It will settle to ~80% with use; unplug AC when off to prevent this"
+        );
+    }
+
     // ── thermal governor shared state ──
     // Validate the on-disk config before the governor uses it: a hand-edited
     // or corrupt settings.json must not drive raw frequency writes.

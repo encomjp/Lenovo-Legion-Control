@@ -256,6 +256,19 @@ pub fn seed_desired_from_effective() {
     }
 }
 
+/// Pure predicate: the firmware limiter is engaged AND the battery sits far
+/// above its nominal band (~75–80%). This is the documented "EC charged while
+/// the laptop was off/asleep" condition — the limiter bit is intact, the EC
+/// just ignored it while the OS was gone.
+pub fn above_limiter_band(limit_pct: u32, capacity_pct: u32) -> bool {
+    limit_pct < 100 && capacity_pct > 85
+}
+
+/// Live check of `above_limiter_band` against current sysfs state.
+pub fn charged_past_limiter() -> bool {
+    above_limiter_band(charge_limit_pct(), capacity().unwrap_or(0))
+}
+
 /// Re-apply the last explicitly requested limit if the EC silently dropped
 /// it (documented Gen-10 flakiness; kernel Bug 221065). Returns Ok(true)
 /// when a repair was attempted. No-op until an explicit limit was set in
@@ -360,6 +373,21 @@ mod tests {
         assert_eq!(parse_selection(""), None);
         // Unterminated bracket must not panic.
         assert_eq!(parse_selection("Fast [Standard"), None);
+    }
+
+    #[test]
+    fn above_limiter_band_detects_off_charging() {
+        // Limiter engaged, battery far above the ~75–80% band → the EC
+        // charged while the laptop was off/asleep.
+        assert!(above_limiter_band(80, 98));
+        assert!(above_limiter_band(60, 86));
+        // Inside or below the band → normal.
+        assert!(!above_limiter_band(80, 80));
+        assert!(!above_limiter_band(80, 85));
+        assert!(!above_limiter_band(80, 40));
+        // Limiter off → never flagged, whatever the capacity.
+        assert!(!above_limiter_band(100, 98));
+        assert!(!above_limiter_band(100, 100));
     }
 
     #[test]

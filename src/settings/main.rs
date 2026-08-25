@@ -104,6 +104,15 @@ fn toast_error(overlay: &adw::ToastOverlay, msg: &str) {
     overlay.add_toast(t);
 }
 
+/// Neutral informational toast (no success/error styling, longer timeout for
+/// multi-sentence explanations).
+fn toast_info(overlay: &adw::ToastOverlay, msg: &str) {
+    log::info!("ui: {msg}");
+    let t = adw::Toast::new(msg);
+    t.set_timeout(6);
+    overlay.add_toast(t);
+}
+
 fn toast_with_button(
     overlay: &adw::ToastOverlay,
     msg: &str,
@@ -4265,9 +4274,21 @@ fn build_battery_pages(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> 
         }
         std::thread::sleep(Duration::from_secs(3));
     });
+    let overlay = toast_overlay.clone();
+    // One-time-per-session hint: the EC charges past the limiter while the
+    // laptop is off/asleep (documented behavior) — explain the surprise
+    // instead of leaving a confusing 98% unexplained.
+    let off_charge_hint: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     glib::timeout_add_local(Duration::from_millis(300), move || {
         match snap_rx.try_recv() {
             Ok(s) => {
+                if !off_charge_hint.get() && s.limit < 100 && s.pct.is_some_and(|p| p > 85) {
+                    off_charge_hint.set(true);
+                    toast_info(
+                        &overlay,
+                        "Battery charged past the limit while the laptop was off — EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.",
+                    );
+                }
                 if let Some(pct) = s.pct {
                     pct_row.set_subtitle(&format!("{pct}%"));
                     cap_v_c.set_text(&format!("{pct}%"));
