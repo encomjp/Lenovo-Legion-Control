@@ -16,12 +16,15 @@ This guide is organized as **symptom → evidence → remedy**. Run read-only di
 
 **Evidence**
 
-The client tries `/run/legion-control.socket`, then `$XDG_RUNTIME_DIR/legion-control.socket` (or `/tmp/legion-control.socket`). A root daemon binds the first path. Check both the service and socket:
+The client tries `/run/legion-control.socket`, then `$XDG_RUNTIME_DIR/legion-control.socket` when `XDG_RUNTIME_DIR` is available. There is intentionally no `/tmp` fallback. A root daemon binds the first path. Check both the service and socket:
 
 ```bash
 systemctl status legion-control
 systemctl is-active legion-control
-ls -l /run/legion-control.socket "${XDG_RUNTIME_DIR:-/tmp}/legion-control.socket" 2>/dev/null
+ls -l /run/legion-control.socket 2>/dev/null
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+    ls -l "$XDG_RUNTIME_DIR/legion-control.socket" 2>/dev/null
+fi
 journalctl -u legion-control -n 50 --no-pager
 ```
 
@@ -35,6 +38,8 @@ sudo systemctl restart legion-control
 ```
 
 If the service starts and then stops, inspect the journal for the bind or hardware error. The daemon is intended to run as root; a non-root daemon warns that profile, fan, and conservation writes will fail. A manually launched non-root daemon uses a user socket and is not a substitute for the system service.
+
+For a manually launched non-root daemon, ensure `XDG_RUNTIME_DIR` is a non-empty absolute path. The implementation treats an explicitly empty value as present and can otherwise resolve the socket as a relative `legion-control.socket` path.
 
 ### Symptom: the daemon is active, but writes fail
 
@@ -104,7 +109,7 @@ ls -l /dev/hidraw*
 udevadm info --query=property --name=/dev/hidraw0 2>/dev/null | grep -E 'ID_VENDOR_ID|ID_MODEL_ID|ID_SERIAL'
 ```
 
-`data/udev/99-legion.rules` grants `0666` and `uaccess` to `048d:c193` and `048d:c197`. The Spectrum implementation searches `/sys/class/hidraw` for `048d:c197` and opens the matching `/dev/hidrawN` device.
+`data/udev/99-legion.rules` sets `0660` and `uaccess` on `048d:c193` and `048d:c197`. The `uaccess` tag lets the active local session receive access through udev/logind ACLs. The Spectrum implementation searches `/sys/class/hidraw` for `048d:c197` and opens the matching `/dev/hidrawN` device.
 
 **Remedy**
 
@@ -249,7 +254,7 @@ done
 legion-cli battery
 ```
 
-The 60% mode uses a discovered `conservation_mode` path (known Legion path first, then the `ideapad_acpi` driver); 80% uses `[Long_Life]` in `charge_types`; 100% uses `Standard` with conservation cleared.
+All limits below 100% map to one firmware limiter: a single write of `Long_Life` to `charge_types` (the daemon verifies the read-back selection and reports an error when the EC rejects it). 100% writes `Standard`. The actual threshold is firmware-fixed per model — ~75–80% on Legion Pro 7 per Lenovo's manual — and cannot be changed from Linux. Machines without a `charge_types` attribute fall back to the legacy `conservation_mode` toggle (reported as 60%). A daemon watchdog re-applies the last requested limit every 5 minutes because some ECs silently clear the state across AC plug events or suspend.
 
 **Remedy**
 

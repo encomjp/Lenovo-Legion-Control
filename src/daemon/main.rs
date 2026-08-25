@@ -280,6 +280,19 @@ fn main() {
         log::info!("rgb-watchdog thread started");
     }
 
+    // Charge-limiter watchdog: the Gen-10 EC can silently clear the limiter
+    // across AC plug events / suspend (kernel Bug 221065, community reports).
+    // Re-apply the last explicitly requested limit every 5 minutes.
+    let shutdown_b = shutdown.clone();
+    if let Err(e) = std::thread::Builder::new()
+        .name("battery-watchdog".into())
+        .spawn(move || battery_watchdog(shutdown_b))
+    {
+        log::error!("failed to start battery-watchdog thread: {e}");
+    } else {
+        log::info!("battery-watchdog thread started");
+    }
+
     // Thermal governor thread (alongside rgb-watchdog)
     let shutdown_t = shutdown.clone();
     let thermal_cfg_t = thermal_cfg.clone();
@@ -921,6 +934,32 @@ fn rgb_health_str(h: rgb_panic::Health) -> &'static str {
         rgb_panic::Health::SoftIssue => "soft-issue",
         rgb_panic::Health::HardwareBroken => "broken",
         rgb_panic::Health::NotApplicable => "n/a",
+    }
+}
+
+/// Periodically re-apply the user's charge limit when the EC silently
+/// cleared it. One sysfs read per interval until a repair is needed.
+fn battery_watchdog(shutdown: Arc<AtomicBool>) {
+    // Delay first check so boot EC settle finishes.
+    for _ in 0..100 {
+        if shutdown.load(Ordering::Relaxed) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    while !shutdown.load(Ordering::Relaxed) {
+        // 300 s in 100 ms slices so shutdown is noticed promptly.
+        for _ in 0..3000 {
+            if shutdown.load(Ordering::Relaxed) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        match battery::reassert_configured_limit() {
+            Ok(true) => log::info!("charge limiter re-applied after firmware cleared it"),
+            Ok(false) => {}
+            Err(e) => log::warn!("charge limiter re-assert failed: {e}"),
+        }
     }
 }
 

@@ -1,12 +1,28 @@
 //! Battery info + charge limit modes for Lenovo Legion.
 //!
-//! Hardware only supports discrete limits (not arbitrary %):
-//! - 100% → charge_types = Standard, conservation_mode = 0
-//! -  80% → charge_types = Long_Life (firmware preservation)
-//! -  60% → ideapad conservation_mode = 1
+//! Legion firmware exposes ONE charge limiter (ACPI GBMD bit 5) behind two
+//! aliased interfaces: legacy `conservation_mode` and standardized
+//! `charge_types` (kernel ≥6.14). They are not independent — either write
+//! flips the same bit. We therefore write ONLY `charge_types` (single write,
+//! then verify read-back) and treat `conservation_mode` as a read-only
+//! fallback on machines lacking `charge_types`.
+//!
+//! The firmware threshold is fixed per generation (Legion Pro 7: ~75–80%
+//! per Lenovo's manual; older IdeaPads: 55–60%) and cannot be changed from
+//! Linux — "60%" and "80%" requests collapse onto the same limiter.
+//!
+//! Known failure mode (documented by Gen-10 owners and kernel Bug 221065):
+//! the EC can silently drop or garble the state across AC plug events /
+//! suspend. `reassert_configured_limit()` lets the daemon detect and repair
+//! that.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
+
+/// Charge limit requested through this process (discretized). 0 = unknown —
+/// before any explicit request the watchdog must not touch anything.
+static DESIRED_LIMIT: AtomicU32 = AtomicU32::new(0);
 
 const BAT0: &str = "/sys/class/power_supply/BAT0";
 
@@ -85,10 +101,7 @@ pub fn energy_design_wh() -> Option<f64> {
 pub fn health_pct() -> Option<f64> {
     let full = energy_full_wh()?;
     let design = energy_design_wh()?;
-    if design <= 0.0 {
-        return None;
-    }
-    Some((full / design) * 100.0)
+    health_from_wh(full, design)
 }
 
 pub fn manufacturer() -> Option<String> {
@@ -128,6 +141,18 @@ fn set_charge_type(val: &str) -> std::io::Result<()> {
     std::fs::write(format!("{BAT0}/charge_types"), val)
 }
 
+/// Parse the bracketed active selection out of a charge_types value
+/// ("Fast [Standard] Long_Life" → "Standard"). Pure helper; exported for tests.
+fn parse_selection(types: &str) -> Option<String> {
+    let open = types.find('[')?;
+    let close = types[open + 1..].find(']')? + open + 1;
+    Some(types[open + 1..close].to_string())
+}
+
+fn selected_charge_type() -> Option<String> {
+    parse_selection(&charge_types()?)
+}
+
 /// Legacy boolean API — maps to ~60% conservation when on, Standard when off.
 pub fn set_conservation(on: bool) -> std::io::Result<()> {
     if on {
@@ -137,70 +162,102 @@ pub fn set_conservation(on: bool) -> std::io::Result<()> {
     }
 }
 
-/// Current effective charge limit percentage: 60, 80, or 100.
+/// Current effective charge limit percentage: 80 when the firmware limiter is
+/// engaged, else 100. Legacy `conservation_mode`-only machines (no
+/// `charge_types` attr) report 60 while conservation is on.
 pub fn charge_limit_pct() -> u32 {
+    if let Some(sel) = selected_charge_type() {
+        if sel.eq_ignore_ascii_case("Long_Life") {
+            return 80;
+        }
+        if sel.eq_ignore_ascii_case("Standard") || sel.eq_ignore_ascii_case("Fast") {
+            return 100;
+        }
+    }
     if let Some(path) = conservation_path() {
         if read(&path.to_string_lossy()).as_deref() == Some("1") {
             return 60;
         }
     }
-    if let Some(types) = charge_types() {
-        if types.contains("[Long_Life]") {
-            return 80;
-        }
-    }
     100
 }
 
-/// Set charge limit. Only 60 / 80 / 100 are valid on Legion firmware.
+/// Set charge limit. Any value < 100 engages the firmware limiter (one
+/// feature: ~75–80% on current Legion firmware); ≥ 100 charges to full.
+///
+/// Writes the standardized `charge_types` switch only — `conservation_mode`
+/// aliases the same firmware bit, and writing both in sequence was the old
+/// self-undoing bug. Verifies the read-back selection and returns an error
+/// when the EC did not accept the mode instead of reporting silent success.
 pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
-    let pct = match pct {
-        0..=69 => 60,
-        70..=89 => 80,
-        _ => 100,
-    };
-    log::info!("charge limit → {pct}%");
-    let result = match pct {
-        60 => {
-            // Classic conservation (~55–60%): set charge_type first, then
-            // conservation. If conservation_mode is unavailable, the charge_type
-            // alone still limits charging on some firmware.
-            if let Err(e) = set_charge_type("Standard") {
-                log::debug!("set_charge_type(Standard) for 60% mode: {e}");
+    let pct = discretize_limit(pct);
+    let preserve = pct < 100;
+    let want = if preserve { "Long_Life" } else { "Standard" };
+    log::info!("charge limit → {} ({want})", if preserve { "preserved" } else { "full" });
+
+    DESIRED_LIMIT.store(pct, Ordering::Relaxed);
+
+    // Preferred path: standardized charge_types switch.
+    if charge_types().is_some() {
+        set_charge_type(want)?;
+        // Small settle time so the EC reflects the new selection before we
+        // verify (empirically <1 s; 150 ms covers observed latency).
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        return match selected_charge_type() {
+            Some(t) if t.eq_ignore_ascii_case(want) => Ok(()),
+            other => {
+                let msg = format!(
+                    "Firmware did not accept charge_types={want} (reads {:?}) — charging may be uncapped. AC plug/unplug or reboot usually clears this EC state",
+                    other.as_deref().unwrap_or("<unreadable>")
+                );
+                log::warn!("{msg}");
+                Err(std::io::Error::other(msg))
             }
-            set_conservation_file(true)
-        }
-        80 => {
-            if let Err(e) = set_conservation_file(false) {
-                log::debug!("clearing conservation for 80% mode: {e}");
-            }
-            set_charge_type("Long_Life")
-        }
-        _ => {
-            if let Err(e) = set_conservation_file(false) {
-                log::debug!("clearing conservation for 100% mode: {e}");
-            }
-            set_charge_type("Standard")
-        }
-    };
-    if let Err(ref e) = result {
-        log::warn!("charge limit {pct}% failed: {e}");
+        };
     }
-    result
+
+    // Legacy fallback: machines without charge_types (older models/kernels).
+    set_conservation_file(preserve)
+}
+
+/// Re-apply the last explicitly requested limit if the EC silently dropped
+/// it (documented Gen-10 flakiness; kernel Bug 221065). Returns Ok(true)
+/// when a repair was attempted. No-op until an explicit limit was set in
+/// this daemon's lifetime.
+pub fn reassert_configured_limit() -> std::io::Result<bool> {
+    let want = DESIRED_LIMIT.load(Ordering::Relaxed);
+    if want == 0 {
+        return Ok(false);
+    }
+    let preserve = want < 100;
+    let engaged = match selected_charge_type() {
+        Some(sel) => sel.eq_ignore_ascii_case("Long_Life") == preserve,
+        None => conservation_mode().unwrap_or(false) == preserve,
+    };
+    if engaged {
+        return Ok(false);
+    }
+    log::warn!(
+        "charge limiter state silently cleared by firmware — re-applying {}%",
+        want
+    );
+    set_charge_limit_pct(want)?;
+    Ok(true)
 }
 
 pub fn charge_limit_label(pct: u32) -> &'static str {
     match pct {
-        60 => "Conservation (~60%)",
-        80 => "Preservation (~80%)",
+        // 60 only exists as the legacy conservation_mode fallback on old
+        // machines; current Legion firmware's limiter is ~75–80%.
+        60 => "Conservation (~55–60%)",
+        80 => "Preservation (~75–80%)",
         _ => "Full charge (100%)",
     }
 }
 
-/// Pure helper: map any requested percentage to the nearest supported
-/// firmware limit (60 / 80 / 100). Exported for tests; the write path
-/// `set_charge_limit_pct` applies the same mapping before sysfs writes.
-#[allow(dead_code)]
+/// Pure helper: map any requested percentage to the firmware limiter state
+/// (< 100 ⇒ preserved, ≥ 100 ⇒ full). The single implementation behind
+/// `set_charge_limit_pct`; exported so tests pin the mapping.
 pub fn discretize_limit(pct: u32) -> u32 {
     match pct {
         0..=69 => 60,
@@ -209,9 +266,9 @@ pub fn discretize_limit(pct: u32) -> u32 {
     }
 }
 
-/// Pure helper: compute health from two watt-hour readings. Mirrors
-/// `health_pct()` without touching sysfs.
-#[allow(dead_code)]
+/// Pure helper: compute health from two watt-hour readings. The single
+/// implementation behind `health_pct()`; exported so tests exercise the
+/// same math the sysfs path uses.
 pub fn health_from_wh(full: f64, design: f64) -> Option<f64> {
     if design <= 0.0 {
         return None;
@@ -247,9 +304,22 @@ mod tests {
                 "unexpected label {label:?} for {d}"
             );
         }
-        assert_eq!(charge_limit_label(60), "Conservation (~60%)");
-        assert_eq!(charge_limit_label(80), "Preservation (~80%)");
+        assert_eq!(charge_limit_label(60), "Conservation (~55–60%)");
+        assert_eq!(charge_limit_label(80), "Preservation (~75–80%)");
         assert_eq!(charge_limit_label(100), "Full charge (100%)");
+    }
+
+    #[test]
+    fn selection_parser_extracts_bracketed_type() {
+        assert_eq!(
+            parse_selection("Fast [Standard] Long_Life").as_deref(),
+            Some("Standard")
+        );
+        assert_eq!(parse_selection("[Long_Life]").as_deref(), Some("Long_Life"));
+        assert_eq!(parse_selection("Fast Standard Long_Life"), None);
+        assert_eq!(parse_selection(""), None);
+        // Unterminated bracket must not panic.
+        assert_eq!(parse_selection("Fast [Standard"), None);
     }
 
     #[test]
