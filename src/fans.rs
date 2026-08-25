@@ -30,11 +30,15 @@ pub fn read_target(fan: u8) -> Option<u32> {
     std::fs::read_to_string(&path).ok()?.trim().parse().ok()
 }
 
+/// Lowest settable RPM for a fan channel. Reserved for the custom fan-curve
+/// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_min(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "min")?;
     std::fs::read_to_string(&path).ok()?.trim().parse().ok()
 }
 
+/// Highest settable RPM for a fan channel. Reserved for the custom fan-curve
+/// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_max(fan: u8) -> Option<u32> {
     let path = fan_path(fan, "max")?;
     std::fs::read_to_string(&path).ok()?.trim().parse().ok()

@@ -88,15 +88,6 @@ pub fn read_power_max() -> Option<f64> {
     smi_query("power.max_limit")?.parse().ok()
 }
 
-/// NVIDIA driver default / base power limit (W).
-pub fn read_power_default() -> Option<f64> {
-    smi_query("power.default_limit")?.parse().ok()
-}
-
-pub fn is_available() -> bool {
-    smi_run(&["-L"]).is_some()
-}
-
 /// Pure helper: parse a single nvidia-smi CSV value. Trimmed whitespace,
 /// empty string → None, parse failure → None. Extracted for tests.
 #[allow(dead_code)]

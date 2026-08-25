@@ -605,13 +605,6 @@ pub fn set_ui_color(r: u8, g: u8, b: u8) {
     });
 }
 
-pub fn set_lighting_mode(mode: &str) {
-    update(|cfg| {
-        cfg.lighting_mode = mode.into();
-        cfg.last_session.lighting_mode = mode.into();
-    });
-}
-
 pub fn set_keyboard_layout(layout: &str) {
     update(|cfg| {
         cfg.keyboard_layout = layout.into();

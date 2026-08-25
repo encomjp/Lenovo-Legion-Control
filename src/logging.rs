@@ -17,7 +17,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 const DEFAULT_RING_SIZE: usize = 500;
 const MAX_RING_SIZE: usize = 2000;
@@ -80,7 +80,6 @@ struct Logger {
     json: AtomicBool,
     ring: Mutex<RingBuffer>,
     file: Mutex<Option<FileState>>,
-    start: Instant,
     component: String,
 }
 
@@ -299,7 +298,6 @@ pub fn init(component: &str) {
             capacity: ring_size,
         }),
         file: Mutex::new(file_state),
-        start: Instant::now(),
         component: component.to_string(),
     };
 
@@ -339,11 +337,6 @@ pub fn set_max_level(filter: LevelFilter) {
     log::info!("log level changed to {filter:?}");
 }
 
-/// Retrieve the original `LEGION_LOG` string so it can be restored later.
-pub fn original_filter() -> Option<&'static str> {
-    ORIGINAL_FILTER.get().map(|s| s.as_str())
-}
-
 /// Return the last `n` log entries from the in-memory ring buffer.
 pub fn recent_logs(n: usize) -> Vec<LogEntry> {
     LOGGER
@@ -376,23 +369,6 @@ pub fn reload_from_env() {
         let lvl = parse_level(&val);
         set_max_level(lvl);
     }
-}
-
-/// Number of log entries currently in the ring buffer.
-pub fn ring_len() -> usize {
-    LOGGER
-        .get()
-        .map(|l| l.ring.lock().unwrap().buf.len())
-        .unwrap_or(0)
-}
-
-/// Uptime since logger init, as a human-readable string.
-pub fn uptime() -> String {
-    let secs = LOGGER
-        .get()
-        .map(|l| l.start.elapsed().as_secs())
-        .unwrap_or(0);
-    format!("{}m {}s", secs / 60, secs % 60)
 }
 
 #[cfg(test)]

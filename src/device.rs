@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{self, FanLayout, ModelProfile};
+use crate::models::{self, ModelProfile};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -453,33 +453,6 @@ fn read_file(path: impl AsRef<std::path::Path>) -> Option<String> {
 
 fn read_u32(path: impl AsRef<std::path::Path>) -> Option<u32> {
     read_file(path)?.parse().ok()
-}
-
-/// Check if the current machine looks like Lenovo Legion / LOQ / IdeaPad Gaming.
-pub fn is_legion() -> bool {
-    let vendor = read_dmi("sys_vendor").unwrap_or_default();
-    if !vendor.to_ascii_uppercase().contains("LENOVO") {
-        return false;
-    }
-    let name = read_dmi("product_name").unwrap_or_default();
-    let version = read_dmi("product_version").unwrap_or_default();
-    let family = read_dmi("product_family").unwrap_or_default();
-    let sku = read_dmi("product_sku").unwrap_or_default();
-    let blob = format!("{name} {version} {family} {sku}").to_ascii_lowercase();
-    if blob.contains("legion") || blob.contains("loq") || blob.contains("ideapad gaming") {
-        return true;
-    }
-    let (mt, marketing) = classify_dmi(&name, &version, &family, &sku);
-    let bios = bios_prefix(&read_dmi("bios_version").unwrap_or_default());
-    models::lookup(&mt, &marketing, &bios).is_some()
-}
-
-/// Expected fan layout from matched profile (for UI hints).
-pub fn profile_fan_layout() -> FanLayout {
-    let info = detect();
-    models::lookup(&info.machine_type, &info.marketing_name, &info.bios_prefix)
-        .map(|p| p.fans)
-        .unwrap_or(FanLayout::Unknown)
 }
 
 #[cfg(test)]

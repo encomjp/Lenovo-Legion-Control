@@ -26,7 +26,6 @@ const OP_GET_EFFECT: u8 = 0xCC;
 const OP_GET_BRIGHTNESS: u8 = 0xCD;
 const OP_BRIGHTNESS: u8 = 0xCE;
 const OP_GET_PROFILE: u8 = 0xCA;
-const OP_PROFILE_CHANGE: u8 = 0xC8;
 const OP_GET_LOGO: u8 = 0xA5;
 const OP_LOGO: u8 = 0xA6;
 
@@ -329,10 +328,6 @@ pub fn layout_keycodes(layout: KeyboardLayout) -> &'static [(&'static str, u16)]
         KeyboardLayout::De => DE_KEYCODES,
         KeyboardLayout::Us => US_KEYCODES,
     }
-}
-
-pub fn de_key_names() -> impl Iterator<Item = &'static str> {
-    DE_KEYCODES.iter().map(|(n, _)| *n)
 }
 
 /// Stable map key for per-key colour storage (layout-independent).
@@ -697,10 +692,6 @@ fn get_profile_raw(dev: &SpectrumDevice) -> Result<u8, String> {
     Ok(dev.get_feature()?[4].min(6))
 }
 
-fn set_profile_raw(dev: &SpectrumDevice, profile: u8) -> Result<(), String> {
-    dev.request(OP_PROFILE_CHANGE, &[profile.min(6)])
-}
-
 fn get_brightness_raw(dev: &SpectrumDevice) -> Result<u8, String> {
     dev.request(OP_GET_BRIGHTNESS, &[])?;
     Ok(dev.get_feature()?[4])
@@ -708,21 +699,6 @@ fn get_brightness_raw(dev: &SpectrumDevice) -> Result<u8, String> {
 
 fn set_brightness_raw(dev: &SpectrumDevice, level: u8) -> Result<(), String> {
     dev.request(OP_BRIGHTNESS, &[level.min(9)])
-}
-
-/// Active Spectrum lighting profile (0–6).
-pub fn rgb_profile() -> Option<u8> {
-    let _guard = hid_lock().lock().ok()?;
-    let dev = SpectrumDevice::open().ok()?;
-    get_profile_raw(&dev).ok()
-}
-
-pub fn set_rgb_profile(profile: u8) -> Result<(), String> {
-    let _guard = hid_lock()
-        .lock()
-        .map_err(|_| "Spectrum HID lock poisoned".to_string())?;
-    let dev = SpectrumDevice::open()?;
-    set_profile_raw(&dev, profile)
 }
 
 fn send_effects(dev: &SpectrumDevice, profile: u8, effects: &[Vec<u8>]) -> Result<(), String> {
@@ -1096,12 +1072,6 @@ pub fn restore_lighting() -> Result<(), String> {
     enqueue(SpectrumJob::Restore { done: None }, true)
 }
 
-/// Paint one DE-layout key and refresh the full layer set (keeps bars/logo).
-pub fn paint_key_async(key: &str, r: u8, g: u8, b: u8) {
-    crate::config::set_per_key_color(key, r, g, b);
-    restore_lighting_async();
-}
-
 pub fn clear_per_key_async() {
     crate::config::clear_per_key();
     restore_lighting_async();
@@ -1138,10 +1108,6 @@ pub fn set_rgb_static_async(r: u8, g: u8, b: u8) {
 /// Turn Spectrum lighting off (brightness 0).
 pub fn set_rgb_off() -> Result<(), String> {
     set_rgb_brightness(0)
-}
-
-pub fn set_rgb_off_async() {
-    set_rgb_brightness_async(0);
 }
 
 /// Spectrum brightness 0–9 (reads still hit the device directly; rare/fast).
@@ -1232,10 +1198,6 @@ pub fn set_brightness(level: u8) -> IoResult<()> {
 
 pub fn max_brightness() -> Option<u8> {
     kbd_led_value("max_brightness")
-}
-
-pub fn has_white_backlight() -> bool {
-    find_kbd_led().is_some()
 }
 
 /// Camera privacy kill-switch (ideapad).
