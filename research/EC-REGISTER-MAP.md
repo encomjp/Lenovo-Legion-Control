@@ -150,10 +150,9 @@ GRUB_CMDLINE_LINUX_DEFAULT="... iomem=relaxed"
 Then `sudo grub-mkconfig -o /boot/grub/grub.cfg && reboot`.
 
 After reboot, `/dev/mem` can read `0xFE00D400 + offset`:
-```python
-fd = os.open('/dev/mem', os.O_RDONLY)
-os.lseek(fd, 0xFE00D400 + 0xC580, os.SEEK_SET)  # CPU temp
-cpu_temp = struct.unpack('B', os.read(fd, 1))[0]
+```bash
+# Extended RAM CPU temp at 0xFE00D400 + 0xC580:
+sudo dd if=/dev/mem bs=1 skip=$((0xFE00D520)) count=16 2>/dev/null | xxd
 ```
 
 ### Option B: LegionFanControl/WinRing0 port I/O (Windows method)
