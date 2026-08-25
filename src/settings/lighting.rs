@@ -682,7 +682,7 @@ mod tests {
             ("#", None),                         // hash only
             ("FF80", None),                      // too short
             ("FF80000", None),                   // too long
-            ("##FF8000", None),                  // double hash → length 7
+            ("##FF8000", Some((255, 128, 0))), // all leading hashes trimmed
             ("GG8000", None),                    // non-hex first pair
             ("FF80G0", None),                    // non-hex last pair
             ("€€€", None),                       // multibyte UTF-8 — must not panic
