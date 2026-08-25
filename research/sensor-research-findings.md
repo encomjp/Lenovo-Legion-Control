@@ -1,5 +1,7 @@
 # Legion Pro 7 16AFR10H (83RU) — Sensor Research
 
+> Related: [sensors-full.md](sensors-full.md) · [EC-RESEARCH.md](EC-RESEARCH.md) · [SHORT.md](SHORT.md)
+
 ## System Identity
 - Model: Lenovo Legion Pro 7 16AFR10H (83RU)
 - BIOS: SMCN20WW

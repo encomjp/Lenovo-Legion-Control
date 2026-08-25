@@ -1,5 +1,7 @@
 # Lenovo Legion EC Register Map — Complete Reference
 
+> Related: [EC-RESEARCH.md](EC-RESEARCH.md) · [RESEARCH-TOOLING.md](RESEARCH-TOOLING.md)
+
 ## Model: Legion Pro 7 16AFR10H (83RU) | SMCN20WW | ITE IT5508 (0x5508)
 
 ---
@@ -15,14 +17,13 @@ xxd -l 256 /sys/kernel/debug/ec/ec0/io
 - Already loaded
 
 ### Method B: /dev/port (raw I/O, no module at all)
-```python
-fd = os.open("/dev/port", os.O_RDWR)
-# Send 0x80 to port 0x66, addr to port 0x62, read port 0x62
+```bash
+# Handshake: 0x80 → port 0x66, addr → port 0x62, result ← port 0x62
 ```
 - 256 bytes (0x00-0xFF), bypasses kernel locking
 
 ### Method C: Super I/O config (ITE chip ID, LDN discovery)
-```python
+```bash
 # Ports 0x4E/0x4F: enter config (0x87, 0x87), read registers, exit (0xAA)
 # Chip ID: register 0x20=0x55, 0x21=0x08 → IT5508
 # Active LDNs: 0x05 (KBC), 0x06 (EC ACPI), 0x0F (SMFI)

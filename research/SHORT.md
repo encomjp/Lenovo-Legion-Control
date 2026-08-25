@@ -9,7 +9,7 @@
 - Ethernet + WiFi temps
 - 3x Fan RPM + writable Fan Targets — lenovo_wmi_other
 - Battery (V, capacity, conservation mode)
-- Platform profiles (quiet/balanced/performance/custom) — lenovo_wmi_gamezone
+- Platform profiles (low-power/balanced/performance/max-power/custom) — lenovo_wmi_gamezone
 
 ## What's missing:
 - **EC CPU temp** — different from k10temp, used by fan controller

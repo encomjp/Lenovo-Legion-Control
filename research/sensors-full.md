@@ -1,9 +1,11 @@
 # Lenovo Legion 83RU — Sensor Map (Full)
 
+> Related: [sensor-research-findings.md](sensor-research-findings.md) · [RESEARCH-TOOLING.md](RESEARCH-TOOLING.md)
+
 ## System
-- Model: Lenovo 83RU (Legion series)
-- BIOS: LNVNB161216
-- Kernel: 7.1.4-1-cachyos-bore
+- Model: Lenovo 83RU (Legion Pro 7 series)
+- BIOS: SMCN20WW
+- Kernel: 7.1.4-1-cachyos-bore *(snapshot — hwmon indices below are boot-specific examples)*
 - OS: CachyOS (Arch-based)
 
 ---
