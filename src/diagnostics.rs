@@ -7,22 +7,35 @@
 //! user strings. Included: hardware model/type/BIOS/CPU/GPU/EC identity,
 //! distro+kernel, sensor readings, battery health stats (no serial), fan
 //! states, thermal/CO configuration, a small settings digest, the daemon log
-//! tail (already sanitized at write time) and the self-check results.
+//! tail (sanitized at write time and *additionally* passed through a
+//! home-path redactor here — see `redact_home_paths`) and the self-check
+//! results.
 //!
 //! Transport shells out to `curl` (present on every supported distro) to
-//! avoid adding an HTTPS dependency; the payload goes through a 0600 temp
-//! file that is removed immediately afterwards.
+//! avoid adding an HTTPS dependency; the payload goes through a brand-new
+//! 0600 temp file (`create_new` — refuses pre-existing paths and symlinks)
+//! that is removed on every code path, and stale leftovers older than an
+//! hour are swept at the start of [`collect`].
 
 use crate::selftest::{run_self_checks, SelfCheck};
 use crate::{battery, config, device, fans, profile, sensors, thermal, undervolt};
 use serde::Serialize;
 use std::io::Write;
+use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 /// Default collector (IONOS VPS, Tailscale-internal during alpha).
 /// Public rollout: front it with nginx + TLS and change this constant.
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
 
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Response-body echo cap for error strings (diagnosable, never verbatim-huge).
+const MAX_ERR_BODY_CHARS: usize = 300;
+/// Stderr echo cap for error strings.
+const MAX_ERR_STDERR_CHARS: usize = 200;
+/// Age at which a leftover temp payload counts as stale.
+const PAYLOAD_STALE_AFTER: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
@@ -118,8 +131,63 @@ fn read_os_release() -> OsInfo {
     }
 }
 
-/// Collect the full anonymous report. Read-only, <200 ms typical.
+/// PRIVACY (defence in depth): scrub home-directory paths from free-form
+/// log text before it is embedded in the report. Warn sites like config.rs
+/// embed `path.display()`, so a failed config write leaks `$HOME` into the
+/// ring buffer. Collapses to `~`: the literal HOME dir of this process,
+/// any `/home/<user>` prefix (other users included) and any
+/// `/run/user/<uid>` prefix. Applied to the daemon log tail only — every
+/// other field is anonymous by construction.
+fn redact_home_paths(text: &str) -> String {
+    let mut out = text.to_string();
+    // Most specific first: this process's actual HOME.
+    if let Ok(home) = std::env::var("HOME") {
+        let home = home.trim_end_matches('/');
+        if home.len() > 1 {
+            out = out.replace(home, "~");
+        }
+    }
+    // Generic prefixes last: cover foreign homes and XDG runtime dirs.
+    let out = rewrite_prefix_to_tilde(&out, "/run/user/");
+    rewrite_prefix_to_tilde(&out, "/home/")
+}
+
+/// True when the character terminates a home-path token.
+fn is_path_boundary(c: char) -> bool {
+    c.is_whitespace() || matches!(c, ':' | ';' | ',' | '"' | '\'' | ')' | ']' | '}')
+}
+
+/// Length of the leading single path component of `s`
+/// (`"4242/legion.sock"` → 4, `"alice x"` → 5).
+fn single_component_len(s: &str) -> usize {
+    s.char_indices()
+        .find(|(_, c)| *c == '/' || is_path_boundary(*c))
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
+
+/// Replace every occurrence of `prefix` + one path component with `~`,
+/// keeping any remainder (`"/run/user/4242/x.sock"` → `"~/x.sock"`, bare
+/// trailing `"/home/"` → `"~"`). Collapsing even the empty case guarantees
+/// the invariant "no /home/ substring ever reaches the report".
+fn rewrite_prefix_to_tilde(text: &str, prefix: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find(prefix) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + prefix.len()..];
+        out.push('~');
+        rest = &after[single_component_len(after)..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Collect the full anonymous report. Read-only on the system; runtime is
+/// typically <1 s, worst case ~15 s (subprocess timeouts inside the
+/// self-checks). Also sweeps stale temp payloads — see [`sweep_stale_temp`].
 pub fn collect() -> DiagnosticsReport {
+    sweep_stale_temp();
     let s = sensors::read_all();
     let cfg = config::get();
 
@@ -171,16 +239,19 @@ pub fn collect() -> DiagnosticsReport {
             keyboard_layout: cfg.keyboard_layout.clone(),
             restore_on_launch: cfg.restore_on_launch,
         },
-        daemon_log_tail: crate::logging::recent_logs_text(200),
+        daemon_log_tail: redact_home_paths(&crate::logging::recent_logs_text(200)),
         self_checks: run_self_checks(),
     }
 }
 
 /// Endpoint resolution: explicit override > configured endpoint > default.
+/// Both override and configured value are trimmed first; a whitespace-only
+/// string is treated as unset.
 pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> String {
+    let override_url = override_url.map(str::trim).filter(|s| !s.is_empty());
+    let cfg_endpoint = cfg_endpoint.trim();
     override_url
         .map(str::to_string)
-        .filter(|s| !s.is_empty())
         .or_else(|| {
             if cfg_endpoint.is_empty() {
                 None
@@ -191,74 +262,189 @@ pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> Strin
         .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string())
 }
 
-/// POST the serialized report via curl. Returns the server response body
-/// with the HTTP status prefixed on non-2xx.
+/// Bound a string to `max_chars` characters (UTF-8 safe, no suffix marker
+/// so the cap is exact). Used for error-string echoes only.
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        s.chars().take(max_chars).collect()
+    }
+}
+
+/// Write the JSON payload to a brand-new 0600 temp file. `create_new` fails
+/// on pre-existing files *and* on symlinks (O_EXCL semantics), so a planted
+/// link can never be followed; the mode is applied at creation (no
+/// world-readable window) and re-applied afterwards as a guard against
+/// exotic umasks stripping owner bits. The file is removed again here on
+/// every failure, so the caller only sees a path when it exists.
+fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    // pid alone could collide between daemon/CLI/GUI sending concurrently.
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("legion-diag-{}-{nanos}.json", std::process::id()));
+
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .map_err(|e| format!("temp file {}: {e}", tmp.display()))?;
+    if let Err(e) = f.set_permissions(std::fs::Permissions::from_mode(0o600)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("temp chmod {}: {e}", tmp.display()));
+    }
+    if let Err(e) = f.write_all(json.as_bytes()) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("temp write: {e}"));
+    }
+    Ok(tmp)
+}
+
+/// POST the serialized report via curl. Returns the server response body on
+/// 2xx. Every error carries its evidence: HTTP status (parsed numerically),
+/// a response-body echo capped at `MAX_ERR_BODY_CHARS`, plus the curl exit
+/// code and a trimmed stderr snippet (≤ `MAX_ERR_STDERR_CHARS`) whenever
+/// curl itself failed — so transport problems are diagnosable from the
+/// message alone. The temp payload is removed on every path.
 pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String> {
     let json = serde_json::to_string(report).map_err(|e| format!("serialize: {e}"))?;
+    let tmp = create_temp_payload(&json)?;
 
-    let tmp = std::env::temp_dir().join(format!("legion-diag-{}.json", std::process::id()));
-    {
-        // 0600 so nobody on a multi-user box reads the payload mid-flight.
-        let mut f = std::fs::File::create(&tmp)
-            .and_then(|f| {
-                use std::os::unix::fs::PermissionsExt;
-                f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-                Ok(f)
-            })
-            .map_err(|e| format!("temp file: {e}"))?;
-        f.write_all(json.as_bytes())
-            .map_err(|e| format!("temp write: {e}"))?;
-    }
+    let outcome = (|| -> Result<String, String> {
+        let out = std::process::Command::new("curl")
+            .args([
+                "-sS",
+                "--max-time",
+                "15",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "--data-binary",
+                format!("@{}", tmp.display()).as_str(),
+                "-w",
+                "\n%{http_code}",
+                endpoint,
+            ])
+            .output()
+            .map_err(|e| {
+                format!(
+                    "curl unavailable or failed to run ({e}) — install curl, \
+                     or inspect locally with `legion-cli diagnose dump`"
+                )
+            })?;
 
-    let result = std::process::Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "15",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "--data-binary",
-            format!("@{}", tmp.display()).as_str(),
-            "-w",
-            "\n%{http_code}",
-            endpoint,
-        ])
-        .output();
+        let exit_code = out.status.code().unwrap_or(-1);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let (body_raw, code_raw) = match stdout.rsplit_once('\n') {
+            Some((b, c)) => (b.to_string(), c.trim().to_string()),
+            None => (stdout.to_string(), String::new()),
+        };
+        // %{http_code} parsed numerically: unparsable output means curl died
+        // before completing an HTTP round-trip (DNS, TLS, timeout, signal…).
+        let http_code = code_raw.parse::<u16>().ok();
+        let stderr_snip = truncate_chars(
+            String::from_utf8_lossy(&out.stderr).trim(),
+            MAX_ERR_STDERR_CHARS,
+        );
 
-    let _ = std::fs::remove_file(&tmp);
-
-    match result {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let (body, code) = match text.rsplit_once('\n') {
-                Some((b, c)) => (b.to_string(), c.trim().to_string()),
-                None => (
-                    text.to_string(),
-                    format!("curl_exit_{}", out.status.code().unwrap_or(-1)),
-                ),
-            };
-            if out.status.success() && code.starts_with('2') {
-                Ok(body)
+        let transport_note = if out.status.success() {
+            String::new()
+        } else {
+            let snip: &str = if stderr_snip.is_empty() {
+                "<empty>"
             } else {
+                stderr_snip.as_str()
+            };
+            format!(" [curl exit {exit_code}; stderr: {snip}]")
+        };
+
+        match (http_code, out.status.success()) {
+            // Strict success: parsed 2xx AND clean curl exit (a timeout can
+            // still emit a 2xx %{http_code} with a truncated body).
+            (Some(code), true) if (200..300).contains(&code) => Ok(body_raw),
+            _ => {
+                let code_disp = match http_code {
+                    Some(c) => c.to_string(),
+                    None if code_raw.is_empty() => format!("curl_exit_{exit_code}"),
+                    None => code_raw.clone(),
+                };
+                let body = body_raw.trim();
                 Err(format!(
-                    "HTTP {code}: {}",
+                    "HTTP {code_disp}: {}{transport_note}",
                     if body.is_empty() {
-                        "no response body"
+                        "no response body".to_string()
                     } else {
-                        &*body
+                        truncate_chars(body, MAX_ERR_BODY_CHARS)
                     }
                 ))
             }
         }
-        Err(e) => Err(format!(
-            "curl unavailable or failed ({e}) — install curl or send the dump manually"
-        )),
+    })();
+
+    // Removed on EVERY path — success, HTTP error, curl failure.
+    let _ = std::fs::remove_file(&tmp);
+    outcome
+}
+
+/// Best-effort cleanup of `legion-diag-*.json` payload files older than one
+/// hour in the system temp dir — leftovers from processes killed between
+/// payload creation and the always-run removal in [`send`]. Called at the
+/// top of [`collect`]; safe to call from anywhere, ignores all IO errors.
+pub fn sweep_stale_temp() {
+    sweep_older_than(
+        &std::env::temp_dir(),
+        SystemTime::now() - PAYLOAD_STALE_AFTER,
+    );
+}
+
+fn sweep_older_than(dir: &Path, cutoff: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let is_payload = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with("legion-diag-") && n.ends_with(".json"));
+        if !is_payload {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let stale = meta.modified().map(|m| m <= cutoff).unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 
-/// Convenience used by CLI/GUI: collect + send with config-resolved endpoint.
+/// Opt-in state for diagnostics collection. GUI/background callers must
+/// check this before sending anything autonomously; explicit sends go
+/// through [`collect_and_send`], which treats the call itself as consent.
+pub fn is_opted_in() -> bool {
+    config::get().diagnostics.enabled
+}
+
+/// Convenience used by CLI/GUI: collect + send with the config-resolved
+/// endpoint.
+///
+/// # Consent contract
+///
+/// Calling this function IS the consent. It deliberately does **not** gate
+/// on [`is_opted_in`]: an explicit user action (button click, `legion-cli
+/// diagnose send`) constitutes opt-in for that single send. Callers own the
+/// consent decision — use [`is_opted_in`] only to decide whether automatic
+/// or background sending may happen at all.
 pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     let cfg = config::get().diagnostics;
     let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
@@ -279,6 +465,17 @@ mod tests {
     /// in the serialized report.
     #[test]
     fn collected_report_is_anonymous() {
+        // Idempotent bootstrap (OnceLock no-ops when already initialised);
+        // init returns (), so a bare call is all we need.
+        crate::logging::init("test");
+        // Inject a config.rs-style warning that embeds $HOME plus generic
+        // home/uid paths — exactly what a failed config write produces.
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/tester".to_string());
+        log::warn!(
+            "config save failed for {home}: fallback dump /home/redact-me/legion.conf \
+             (socket /run/user/4242/legion.sock)"
+        );
+
         let report = collect();
         let json = serde_json::to_string(&report).expect("serializable");
 
@@ -310,8 +507,20 @@ mod tests {
             }
         }
 
-        // Home directory paths must not leak.
+        // Home directory paths and XDG runtime dirs must not leak — the
+        // injected warn line above is the canary riding in the log tail.
         assert!(!json.contains("/home/"), "home path leaked");
+        assert!(!json.contains("/run/user/"), "XDG runtime dir leaked");
+        if home.len() > 1 {
+            assert!(!json.contains(&home), "raw HOME value leaked");
+        }
+        // The tail really made it through, redacted — not silently dropped.
+        assert!(
+            report.daemon_log_tail.contains("~/legion.conf")
+                && report.daemon_log_tail.contains("~/legion.sock"),
+            "injected markers missing/redacted wrongly: {:?}",
+            report.daemon_log_tail
+        );
     }
 
     #[test]
@@ -320,5 +529,93 @@ mod tests {
         assert_eq!(resolve_endpoint(None, "http://y"), "http://y");
         assert_eq!(resolve_endpoint(None, ""), DEFAULT_ENDPOINT);
         assert_eq!(resolve_endpoint(Some(""), "http://y"), "http://y");
+    }
+
+    /// Edge: a whitespace-only override is treated as unset (falls through
+    /// to configured endpoint / default), and surrounding whitespace is
+    /// trimmed off meaningful overrides.
+    #[test]
+    fn endpoint_resolution_whitespace_only_override_is_unset() {
+        assert_eq!(resolve_endpoint(Some("   "), ""), DEFAULT_ENDPOINT);
+        assert_eq!(resolve_endpoint(Some("\t\n "), "http://y"), "http://y");
+        assert_eq!(resolve_endpoint(Some("  http://x  "), ""), "http://x");
+        assert_eq!(
+            resolve_endpoint(Some("  http://x  "), "http://y"),
+            "http://x"
+        );
+    }
+
+    /// Unit coverage for the log-tail redactor: literal $HOME, foreign
+    /// `/home/<user>`, `/run/user/<uid>` and the bare-prefix case.
+    #[test]
+    fn redact_home_paths_scrubs_literal_home_user_and_uid_paths() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut input = String::from(
+            "sock=/run/user/4242/legion.sock foreign=/home/alice/x bare=/home/ mid:\"/home/bob/y\"",
+        );
+        if home.len() > 1 {
+            input.push_str(&format!(" own={}/cfg.toml", home.trim_end_matches('/')));
+        }
+
+        let out = redact_home_paths(&input);
+
+        assert!(
+            out.contains("sock=~/legion.sock"),
+            "uid path not squashed: {out}"
+        );
+        assert!(
+            out.contains("foreign=~/x"),
+            "foreign home not squashed: {out}"
+        );
+        assert!(
+            out.contains("mid:\"~/y\""),
+            "quoted path not squashed: {out}"
+        );
+        assert!(out.contains("bare=~"), "bare prefix not collapsed: {out}");
+        if home.len() > 1 {
+            assert!(out.contains("own=~/cfg.toml"), "$HOME not squashed: {out}");
+            assert!(!out.contains(&home), "raw HOME leaked: {out}");
+        }
+        assert!(!out.contains("/home/"), "/home/ survived: {out}");
+        assert!(!out.contains("/run/user/"), "/run/user/ survived: {out}");
+    }
+
+    /// Error-echo caps: char-count bound, UTF-8 safe, passthrough below cap.
+    #[test]
+    fn truncate_chars_bounds_length_and_respects_utf8() {
+        assert_eq!(truncate_chars("", 5), "");
+        assert_eq!(truncate_chars("abc", 5), "abc");
+        assert_eq!(truncate_chars("abcdef", 5).chars().count(), 5);
+        let umlauts = "äöüäöü";
+        assert_eq!(truncate_chars(umlauts, 3), "äöü");
+        assert_eq!(truncate_chars(umlauts, 99), umlauts);
+    }
+
+    /// Sweeper removes only matching payload files past the cutoff; fresh
+    /// files and non-.json bystanders survive.
+    #[test]
+    fn sweep_stale_temp_removes_only_old_payload_files() {
+        let dir = std::env::temp_dir();
+        let tag = std::process::id();
+        let old = dir.join(format!("legion-diag-{tag}-sweep-old.json"));
+        let fresh = dir.join(format!("legion-diag-{tag}-sweep-new.json"));
+        let bystander = dir.join(format!("legion-diag-{tag}-sweep.txt"));
+        std::fs::write(&old, "{}").unwrap();
+        std::fs::write(&fresh, "{}").unwrap();
+        std::fs::write(&bystander, "{}").unwrap();
+
+        let now = SystemTime::now();
+        // Cutoff an hour back → nothing is stale yet.
+        sweep_older_than(&dir, now - Duration::from_secs(3600));
+        assert!(old.exists(), "swept a fresh payload file");
+        assert!(fresh.exists(), "swept a fresh payload file");
+
+        // Cutoff in the future → every matching .json payload goes.
+        sweep_older_than(&dir, now + Duration::from_secs(3600));
+        assert!(!old.exists(), "stale payload survived sweep");
+        assert!(!fresh.exists(), "future-cutoff sweep kept payload");
+        assert!(bystander.exists(), "swept non-.json bystander");
+
+        let _ = std::fs::remove_file(&bystander);
     }
 }
