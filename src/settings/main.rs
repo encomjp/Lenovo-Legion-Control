@@ -281,24 +281,26 @@ fn sync_daemon_ui(
     gate.set_online(online);
 }
 
-/// Sync charge-limit write — only safe on worker threads.
-fn apply_charge_limit_blocking(pct: u32) -> Result<(), String> {
-    match send_command(DaemonCommand::SetChargeLimit(pct)) {
-        Ok(DaemonResponse::Ok) => Ok(()),
-        Ok(DaemonResponse::Error(e)) => Err(e),
-        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
-            Err("Service outdated — reinstall to update".into())
-        }
-        _ => legion_core::battery::set_charge_limit_pct(pct)
-            .map_err(|_| "Service outdated — reinstall to update".into()),
-    }
+/// True when an IPC transport error means daemon/GUI ABI skew (bincode
+/// rejected the frame) rather than a hardware or connection failure.
+/// Each caller maps this to its own user-facing recovery message.
+fn is_version_skew_error(e: &str) -> bool {
+    e.contains("variant index") || e.contains("Parse:")
 }
 
-/// Charge-limit write without blocking GTK's main loop.
-fn apply_charge_limit(pct: u32, done: impl FnOnce(Result<(), String>) + 'static) {
+/// Shared worker-thread dispatch used by every async wrapper here: run
+/// `work` on a background thread and deliver its result to `done` on the
+/// GTK main loop via a 100 ms poll. Nothing in `work` may touch widgets.
+/// If the worker dies before sending (panic), `done` receives
+/// `Err(stopped_msg)`.
+fn dispatch_async<T, F>(work: F, stopped_msg: &'static str, done: impl FnOnce(Result<T, String>) + 'static)
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(apply_charge_limit_blocking(pct));
+        let _ = sender.send(work());
     });
     let callback = Rc::new(RefCell::new(Some(done)));
     glib::timeout_add_local(Duration::from_millis(100), move || {
@@ -312,12 +314,34 @@ fn apply_charge_limit(pct: u32, done: impl FnOnce(Result<(), String>) + 'static)
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => {
                 if let Some(done) = callback.borrow_mut().take() {
-                    done(Err("Charge-limit request stopped without a result".into()));
+                    done(Err(stopped_msg.to_string()));
                 }
                 glib::ControlFlow::Break
             }
         }
     });
+}
+
+/// Sync charge-limit write — only safe on worker threads.
+fn apply_charge_limit_blocking(pct: u32) -> Result<(), String> {
+    match send_command(DaemonCommand::SetChargeLimit(pct)) {
+        Ok(DaemonResponse::Ok) => Ok(()),
+        Ok(DaemonResponse::Error(e)) => Err(e),
+        Err(e) if is_version_skew_error(&e) => {
+            Err("Service outdated — reinstall to update".into())
+        }
+        _ => legion_core::battery::set_charge_limit_pct(pct)
+            .map_err(|_| "Service outdated — reinstall to update".into()),
+    }
+}
+
+/// Charge-limit write without blocking GTK's main loop.
+fn apply_charge_limit(pct: u32, done: impl FnOnce(Result<(), String>) + 'static) {
+    dispatch_async(
+        move || apply_charge_limit_blocking(pct),
+        "Charge-limit request stopped without a result",
+        done,
+    );
 }
 
 fn daemon_ok() -> bool {
@@ -1079,28 +1103,11 @@ fn run_daemon_command_async(
     command: DaemonCommand,
     done: impl FnOnce(Result<DaemonResponse, String>) + 'static,
 ) {
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(send_command(command));
-    });
-    let callback = Rc::new(RefCell::new(Some(done)));
-    glib::timeout_add_local(Duration::from_millis(100), move || {
-        match receiver.try_recv() {
-            Ok(result) => {
-                if let Some(done) = callback.borrow_mut().take() {
-                    done(result);
-                }
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(done) = callback.borrow_mut().take() {
-                    done(Err("Daemon request stopped without a result".into()));
-                }
-                glib::ControlFlow::Break
-            }
-        }
-    });
+    dispatch_async(
+        move || send_command(command),
+        "Daemon request stopped without a result",
+        done,
+    );
 }
 
 /// Run one fixed PolicyKit setup operation without blocking GTK's main loop.
@@ -1114,45 +1121,30 @@ fn run_setup_helper(operation: &'static str, done: impl FnOnce(Result<String, St
             return;
         }
     };
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        let result = std::process::Command::new("pkexec")
-            .arg(helper)
-            .arg(operation)
-            .output()
-            .map_err(|error| format!("Cannot start PolicyKit setup: {error}"))
-            .and_then(|output| {
-                if output.status.success() {
-                    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-                } else {
-                    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    Err(if error.is_empty() {
-                        format!("Setup was cancelled or failed ({})", output.status)
+    dispatch_async(
+        move || {
+            let result = std::process::Command::new("pkexec")
+                .arg(helper)
+                .arg(operation)
+                .output()
+                .map_err(|error| format!("Cannot start PolicyKit setup: {error}"))
+                .and_then(|output| {
+                    if output.status.success() {
+                        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
                     } else {
-                        error
-                    })
-                }
-            });
-        let _ = sender.send(result);
-    });
-    let callback = Rc::new(RefCell::new(Some(done)));
-    glib::timeout_add_local(Duration::from_millis(100), move || {
-        match receiver.try_recv() {
-            Ok(result) => {
-                if let Some(done) = callback.borrow_mut().take() {
-                    done(result);
-                }
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(done) = callback.borrow_mut().take() {
-                    done(Err("Setup helper stopped without a result".into()));
-                }
-                glib::ControlFlow::Break
-            }
-        }
-    });
+                        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        Err(if error.is_empty() {
+                            format!("Setup was cancelled or failed ({})", output.status)
+                        } else {
+                            error
+                        })
+                    }
+                });
+            result
+        },
+        "Setup helper stopped without a result",
+        done,
+    );
 }
 
 fn show_welcome_if_needed(parent: &impl glib::object::IsA<gtk::Widget>, stack: &adw::ViewStack) {
@@ -3179,7 +3171,7 @@ fn apply_smt(overlay: &adw::ToastOverlay, row: &adw::SwitchRow, on: bool, guard:
             );
         }
         Ok(DaemonResponse::Error(e)) => revert(&overlay, &e),
-        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+        Err(e) if is_version_skew_error(&e) => {
             revert(
                 &overlay,
                 "Update the control service for SMT (reinstall daemon)",
@@ -3219,7 +3211,7 @@ fn apply_boost(
             toast_ok(&overlay, if on { "CPU boost on" } else { "CPU boost off" });
         }
         Ok(DaemonResponse::Error(e)) => revert(&overlay, &e),
-        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+        Err(e) if is_version_skew_error(&e) => {
             revert(
                 &overlay,
                 "Update the control service for boost (reinstall daemon)",
@@ -4512,7 +4504,7 @@ fn build_lighting_reset_section(
                     Ok((steps, errors, health, summary))
                 }
                 Ok(DaemonResponse::Error(e)) => Err(e),
-                Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+                Err(e) if is_version_skew_error(&e) => {
                     let r = rgb_panic::troubleshoot();
                     Ok((r.steps, r.errors, r.after.health, r.after.summary))
                 }

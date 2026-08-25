@@ -13,26 +13,24 @@ const LEGACY_PROFILE: &str = "/sys/firmware/acpi/platform_profile";
 const LEGACY_CHOICES: &str = "/sys/firmware/acpi/platform_profile_choices";
 const CLASS_DIR: &str = "/sys/class/platform-profile";
 
-fn handler_profile_path() -> Option<PathBuf> {
+/// First platform-profile handler exposing `file` ("profile"/"choices").
+fn handler_attr_path(file: &str) -> Option<PathBuf> {
     let dir = fs::read_dir(CLASS_DIR).ok()?;
     for entry in dir.flatten() {
-        let profile = entry.path().join("profile");
-        if profile.is_file() {
-            return Some(profile);
+        let attr = entry.path().join(file);
+        if attr.is_file() {
+            return Some(attr);
         }
     }
     None
 }
 
+fn handler_profile_path() -> Option<PathBuf> {
+    handler_attr_path("profile")
+}
+
 fn handler_choices_path() -> Option<PathBuf> {
-    let dir = fs::read_dir(CLASS_DIR).ok()?;
-    for entry in dir.flatten() {
-        let choices = entry.path().join("choices");
-        if choices.is_file() {
-            return Some(choices);
-        }
-    }
-    None
+    handler_attr_path("choices")
 }
 
 pub fn current() -> String {

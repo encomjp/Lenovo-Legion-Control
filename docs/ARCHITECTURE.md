@@ -88,17 +88,17 @@ The crate-level documentation states the intended hardware split: sensors use sy
 2. Register SIGINT/SIGTERM shutdown flags and a SIGHUP log-reload flag.
 3. Select and bind the socket, removing an existing path first.
 4. Warn when not running as root because profile, fan, and conservation writes are expected to fail.
-5. Set the socket mode to `0666`.
+5. For a root daemon, restrict the socket to the `legion` group (`0660`) or root only (`0600`) when that group is unavailable.
 6. Make the listener nonblocking and detect/log hardware capabilities.
 7. Start the Curve Optimizer persistence worker.
 8. Start the RGB watchdog thread.
 9. Start the thermal governor thread (alongside the RGB watchdog).
-10. Accept clients and process each connection synchronously.
+10. Accept clients on bounded per-connection handler threads, with a five-second read timeout and a 32-client cap.
 11. On clean shutdown, clear the persistence armed marker and remove the socket.
 
 The command dispatcher is `process_command` in `src/daemon/main.rs`. It maps `DaemonCommand` variants to the relevant core module and returns a `DaemonResponse`. `cmd_is_write` in `src/comms.rs` is used for logging and timing; it is not an authorization mechanism. The thermal surface is `GetThermal` → `Thermal(ThermalConfig)`, `SetThermal { enabled, max_temp, acknowledge }` → `ThermalStatus` (with `validate` `70..=98` and ack for `96–98`), and `GetThermalStatus` → `ThermalStatus`; first successful `SetThermal(enabled=true)` best-effort `systemctl disable --now cpu95-throttle.service` (warn-only) to avoid double-clamping the deprecated external service.
 
-The accept loop handles one client at a time (`src/daemon/main.rs`). A slow hardware operation therefore occupies the daemon’s command-processing path until it returns. NVIDIA calls have a three-second response timeout, but the implementation does not retain a child-process handle to terminate a timed-out subprocess (`src/dgpu.rs`).
+The accept loop itself is nonblocking and hands each accepted stream to a client-handler thread (`src/daemon/main.rs`). This prevents a client that stalls while sending its frame from blocking new accepts or daemon shutdown. Command dispatch is still serialized by the shared `ClientState` mutex around `process_command`, so a slow hardware operation occupies the command-processing path until it returns. NVIDIA calls have a three-second response timeout, but the implementation does not retain a child-process handle to terminate a timed-out subprocess (`src/dgpu.rs`).
 
 ### CLI
 
@@ -184,9 +184,9 @@ The existing command and response variant order is explicitly marked as a frozen
 
 ### Socket paths
 
-For a root daemon, `bind_socket_path()` returns `/run/legion-control.socket`. For a non-root daemon, it returns `$XDG_RUNTIME_DIR/legion-control.socket` when `XDG_RUNTIME_DIR` is set, or `/tmp/legion-control.socket` when it is unset. An empty variable is not the same as unset here: it can produce a relative socket path. Clients try the system socket first and then the per-user candidate (`src/comms.rs`).
+For a root daemon, `bind_socket_path()` returns `/run/legion-control.socket`. For a non-root daemon, it requires `XDG_RUNTIME_DIR` to be present and returns `$XDG_RUNTIME_DIR/legion-control.socket`; there is deliberately no predictable `/tmp` fallback because another local process could pre-create that path and impersonate the daemon. The current implementation checks only whether the variable exists, so an explicitly empty value can produce a relative `legion-control.socket` path; normal deployments should provide a non-empty absolute runtime directory. Clients try the system socket first and then the per-user candidate when `XDG_RUNTIME_DIR` is available (`src/comms.rs`).
 
-The daemon removes an existing path, binds the selected socket, and explicitly sets mode `0666` (`src/daemon/main.rs`). The repository does not implement peer-credential checks, PolicyKit checks, authentication, or command-level authorization in the socket server.
+The daemon removes an existing path and binds the selected socket. A root daemon looks up the `legion` system group, attempts to assign the socket to that group, and sets mode `0660`; if the group does not exist it falls back to `0600` and logs a warning. Install/package scripts create the `legion` group and add the invoking user when possible. The server also reads Linux `SO_PEERCRED` and logs the connecting UID for audit visibility, but it does not use those credentials for per-command authorization. PolicyKit is not consulted for ordinary socket commands; access is gated by Unix socket permissions (`src/daemon/main.rs`).
 
 ## Hardware data flow
 
@@ -240,7 +240,7 @@ The implementation writes the relevant `conservation_mode` and/or `charge_types`
 
 `src/keyboard.rs` scans `/sys/class/hidraw`, follows each device link, matches vendor `048d` and product `c197`, and checks the report descriptor for the Spectrum usage when available. It then opens `/dev/hidrawN` read/write and sends HID feature reports through ioctl. A process-local mutex serializes Spectrum access.
 
-The implementation supports zone effects, whole-keyboard effects, per-key maps, brightness, logo controls, and RGB panic diagnosis/recovery. The udev rule `data/udev/99-legion.rules` grants mode `0666` plus `uaccess` to matching `048d:c193` and `048d:c197` hidraw devices. This enables non-root direct RGB access, but it also makes those device nodes broadly accessible.
+The implementation supports zone effects, whole-keyboard effects, per-key maps, brightness, logo controls, and RGB panic diagnosis/recovery. The udev rule `data/udev/99-legion.rules` sets mode `0660` plus `uaccess` on matching `048d:c193` and `048d:c197` hidraw devices. The `uaccess` tag lets the active local session receive device access without making the node world-writable.
 
 RGB panic recovery (`src/rgb_panic.rs`) can inspect HID/kernel state, change sysfs permissions, reset USB, and unbind/rebind the HID driver. The daemon starts a watchdog thread in `src/daemon/main.rs`; its detailed loop and cooldown behavior are implemented there.
 
@@ -317,15 +317,15 @@ Consequently, service hardening and the installed executable path depend on the 
 
 ### Socket boundary
 
-The root daemon’s `/run/legion-control.socket` is explicitly mode `0666`. Because the server does not inspect peer credentials or invoke PolicyKit for ordinary commands, a local process able to connect can submit the daemon’s serialized command surface, including hardware writes. `cmd_is_write` only labels/logs mutating commands. This is the most important security property of the current IPC implementation: root execution is not paired with per-client authorization.
+The root daemon’s `/run/legion-control.socket` is restricted to `0660` with the `legion` group, or `0600` when that group is unavailable. The kernel therefore gates ordinary daemon access by filesystem credentials before a command is read. The daemon additionally records the connecting UID through `SO_PEERCRED`, but does not perform per-command authorization or PolicyKit checks after connection. A process that can connect can submit the daemon’s serialized command surface, including hardware writes; `cmd_is_write` only labels/logs mutating commands.
 
 ### HID boundary
 
-`data/udev/99-legion.rules` also uses `MODE="0666"` for the supported Lenovo HID products, with `TAG+="uaccess"`. This is consistent with the direct non-root RGB path, but it allows any local user with access to the node to attempt HID operations directly.
+`data/udev/99-legion.rules` uses `MODE="0660"` for the supported Lenovo HID products together with `TAG+="uaccess"`. This supports the direct non-root RGB path by granting the active local session access through udev/logind ACLs without making the hidraw node world-writable.
 
 ### PolicyKit boundary
 
-PolicyKit applies to the setup helper actions in `data/polkit/com.encomjp.legion-control.policy`, not to ordinary daemon commands. The helper narrows its own interface to three fixed operation names and fixed paths. It does not make the world-writable daemon socket safe or add authorization to hardware IPC.
+PolicyKit applies to the setup helper actions in `data/polkit/com.encomjp.legion-control.policy`, not to ordinary daemon commands. The helper narrows its own interface to three fixed operation names and fixed paths. Ordinary hardware IPC instead relies on the daemon socket’s Unix permission boundary; there is no additional command-level PolicyKit authorization after a client connects.
 
 ## Installation and operational commands
 
@@ -424,9 +424,9 @@ legion-cli rgb-status
 
 The following points are visible in the source and should be considered when operating or extending the project:
 
-1. The system socket is world-writable (`0666`) and has no peer authorization.
-2. Supported hidraw nodes are also configured as `0666`, intentionally enabling direct RGB but broadening device access.
-3. The manual and packaged systemd units differ in executable path and hardening directives.
+1. The system socket is limited to the `legion` group (`0660`) or root (`0600`), but clients that pass that filesystem boundary can issue the full daemon command surface; `SO_PEERCRED` is currently used for audit logging rather than command-level authorization.
+2. Supported hidraw nodes use `0660` plus `uaccess`; direct RGB therefore depends on the active-session ACL applied by udev/logind rather than world-writable device nodes.
+3. The manual and packaged systemd units differ only in the daemon's executable path (`/usr/local/bin` vs `/usr/bin`); their hardening directives are kept identical.
 4. The non-root socket path exists, but the daemon warns that the principal profile/fan/conservation writes will fail when not root.
 5. Ordinary GUI settings are user-scoped, while Curve Optimizer persistence is system-wide; the source does not show the daemon consuming the ordinary GUI JSON.
 6. Some RGB operations bypass the daemon, so behavior and permissions differ between CLI/GUI direct HID paths and daemon-mediated paths.
@@ -466,5 +466,3 @@ These are implementation observations rather than proposed behavior changes. Har
 - `kde-widget/package/`
 - `README.md`
 - `install.sh`
-
-

@@ -493,30 +493,7 @@ fn find_alc_hda_card() -> Option<u32> {
 
 fn find_internal_analog_sink() -> Option<String> {
     let out = run_cmd("pactl", &["list", "short", "sinks"]).ok()?;
-    let mut candidates: Vec<(i32, String)> = Vec::new();
-    for line in out.lines() {
-        // A malformed line must not abort sink discovery — skip it.
-        let Some(name) = line.split_whitespace().nth(1) else {
-            continue;
-        };
-        let lname = name.to_lowercase();
-        if lname.contains("hdmi") || lname.starts_with("bluez_") {
-            continue;
-        }
-        if lname.contains("usb-") || lname.contains("dock") {
-            continue;
-        }
-        let score = if lname.contains("analog-stereo") && lname.contains("pci-") {
-            100
-        } else if lname.contains("analog") && !lname.contains("usb") {
-            50
-        } else {
-            continue;
-        };
-        candidates.push((score, name.to_string()));
-    }
-    candidates.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    candidates.into_iter().map(|(_, n)| n).next()
+    select_internal_sink(&out)
 }
 
 fn wait_for_internal_sink(budget: std::time::Duration) -> Option<String> {
@@ -590,8 +567,9 @@ fn mixer_pct(card: u32, control: &str) -> Option<u32> {
     None
 }
 
-/// Pure helper extracted for tests — the scoring in `find_internal_analog_sink`.
-#[allow(dead_code)]
+/// Pure helper — the scoring in `find_internal_analog_sink`. The single
+/// implementation behind the pactl path; exported so tests exercise the
+/// same ranking production uses.
 pub(crate) fn score_sink_name(name: &str) -> Option<i32> {
     let lname = name.to_lowercase();
     if lname.contains("hdmi") || lname.starts_with("bluez_") {
@@ -609,8 +587,8 @@ pub(crate) fn score_sink_name(name: &str) -> Option<i32> {
     }
 }
 
-/// Pure helper: pick best sink from a mocked `pactl list short sinks` output.
-#[allow(dead_code)]
+/// Pure helper: pick best sink from a `pactl list short sinks` output —
+/// used by production (`find_internal_analog_sink`) and tests alike.
 pub(crate) fn select_internal_sink(pactl_output: &str) -> Option<String> {
     let mut cands: Vec<(i32, String)> = Vec::new();
     for line in pactl_output.lines() {

@@ -1208,13 +1208,18 @@ fn find_kbd_led() -> Option<PathBuf> {
     None
 }
 
-pub fn brightness() -> Option<u8> {
+/// Read one LED sysfs attribute ("brightness"/"max_brightness") as u8.
+fn kbd_led_value(attr: &str) -> Option<u8> {
     let led = find_kbd_led()?;
-    std::fs::read_to_string(led.join("brightness"))
+    std::fs::read_to_string(led.join(attr))
         .ok()?
         .trim()
         .parse()
         .ok()
+}
+
+pub fn brightness() -> Option<u8> {
+    kbd_led_value("brightness")
 }
 
 pub fn set_brightness(level: u8) -> IoResult<()> {
@@ -1229,12 +1234,7 @@ pub fn set_brightness(level: u8) -> IoResult<()> {
 }
 
 pub fn max_brightness() -> Option<u8> {
-    let led = find_kbd_led()?;
-    std::fs::read_to_string(led.join("max_brightness"))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    kbd_led_value("max_brightness")
 }
 
 pub fn has_white_backlight() -> bool {

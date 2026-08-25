@@ -51,8 +51,7 @@ pub fn ids() -> Vec<u8> {
 }
 
 /// Pure helper — the formatting contract for `target == 0` means "auto" on
-/// this WMI driver. Extracted for tests; `rpm_label` is the sysfs-calling wrapper.
-#[allow(dead_code)]
+/// this WMI driver. Used by `rpm_label`; exported so tests pin the contract.
 pub fn format_rpm_label(target: u32, rpm: u32) -> String {
     if target == 0 {
         if rpm == 0 {

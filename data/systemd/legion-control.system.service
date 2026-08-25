@@ -1,5 +1,5 @@
 [Unit]
-Description=Legion Control Daemon (fan/profile/RGB)
+Description=Lenovo Legion Control Daemon (fan/profile/RGB)
 After=sysinit.target
 
 [Service]
@@ -8,6 +8,17 @@ Environment=LEGION_LOG=info
 ExecStart=/usr/local/bin/legion-daemon
 Restart=on-failure
 RestartSec=5
+
+# Hardware access — kept identical to packaging/common/legion-control.service;
+# the units must differ only in the ExecStart prefix.
+DeviceAllow=/dev/hidraw* rw
+DeviceAllow=/dev/input/* rw
+DeviceAllow=/dev/bus/usb/* rw
+DeviceAllow=char-usb_device rw
+ProtectSystem=false
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

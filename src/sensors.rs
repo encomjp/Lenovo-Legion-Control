@@ -253,12 +253,7 @@ pub fn sample_cpu_power_w() -> f64 {
         return 0.0;
     };
     let watts = if let Some((e0, t0)) = *prev {
-        let dt = now.duration_since(t0).as_secs_f64();
-        if dt >= 0.2 && energy >= e0 {
-            (energy - e0) as f64 / dt / 1_000_000.0
-        } else {
-            0.0
-        }
+        compute_cpu_power(e0, t0, energy, now)
     } else {
         0.0
     };
@@ -289,13 +284,7 @@ pub fn sample_cpu_usage_pct() -> f64 {
         return 0.0;
     };
     let pct = if let Some((p_idle, p_total)) = *prev {
-        let d_total = total.saturating_sub(p_total);
-        let d_idle = idle.saturating_sub(p_idle);
-        if d_total > 0 {
-            (1.0 - d_idle as f64 / d_total as f64) * 100.0
-        } else {
-            0.0
-        }
+        compute_cpu_usage(p_idle, p_total, idle, total)
     } else {
         0.0
     };
@@ -308,9 +297,9 @@ pub fn sample_gpu_usage_pct() -> f64 {
     crate::dgpu::read_util().unwrap_or(0.0).clamp(0.0, 100.0)
 }
 
-/// Pure helper: compute CPU usage from two snapshots. Mirrors the math
-/// in `sample_cpu_usage_pct` without touching /proc.
-#[allow(dead_code)]
+/// Pure helper: compute CPU usage from two snapshots. The single
+/// implementation behind `sample_cpu_usage_pct`; exported so tests exercise
+/// the same math the /proc path uses.
 pub(crate) fn compute_cpu_usage(p_idle: u64, p_total: u64, c_idle: u64, c_total: u64) -> f64 {
     let d_total = c_total.saturating_sub(p_total);
     let d_idle = c_idle.saturating_sub(p_idle);
@@ -322,8 +311,7 @@ pub(crate) fn compute_cpu_usage(p_idle: u64, p_total: u64, c_idle: u64, c_total:
 }
 
 /// Pure helper: compute watts from two RAPL energy samples (microjoules +
-/// instants). Mirrors `sample_cpu_power_w`.
-#[allow(dead_code)]
+/// instants). The single implementation behind `sample_cpu_power_w`.
 pub(crate) fn compute_cpu_power(e0: u64, t0: std::time::Instant, e1: u64, t1: std::time::Instant) -> f64 {
     let dt = t1.duration_since(t0).as_secs_f64();
     if dt >= 0.2 && e1 >= e0 {

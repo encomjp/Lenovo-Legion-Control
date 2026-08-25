@@ -1955,3 +1955,34 @@ fn rounded_rect(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     );
     cr.close_path();
 }
+
+#[cfg(test)]
+mod layout_consistency_tests {
+    use super::*;
+
+    /// The painter geometry tables restate every Spectrum LED code that
+    /// `legion_core::keyboard`'s protocol tables define. Nothing links the
+    /// two at compile time, so this test is the drift guard: if a keycode
+    /// changes in either place, the painter would silently paint keys the
+    /// writer never sends (or vice versa).
+    #[test]
+    fn painter_layouts_cover_exactly_the_protocol_keycodes() {
+        for (layout, geom) in [(KeyboardLayout::De, LAYOUT_DE), (KeyboardLayout::Us, LAYOUT_US)] {
+            let mut painted: Vec<u16> = geom.iter().map(|k| k.code).collect();
+            painted.sort_unstable();
+            painted.dedup();
+
+            let mut protocol: Vec<u16> = legion_core::keyboard::layout_keycodes(layout)
+                .iter()
+                .map(|(_, code)| *code)
+                .collect();
+            protocol.sort_unstable();
+            protocol.dedup();
+
+            assert_eq!(
+                painted, protocol,
+                "{layout:?}: painter geometry and protocol keycode table drifted apart"
+            );
+        }
+    }
+}

@@ -19,12 +19,17 @@ fn read_trim(path: &str) -> Option<String> {
 }
 
 /// Whether SMT (AMD SMT / Intel HT) is currently active.
-pub fn smt_active() -> Option<bool> {
-    match read_trim(SMT_ACTIVE)?.as_str() {
+/// Parse a sysfs knob that exposes "1"/"0" as a tri-state bool.
+fn sysfs_bool(path: &str) -> Option<bool> {
+    match read_trim(path)?.as_str() {
         "1" => Some(true),
         "0" => Some(false),
         _ => None,
     }
+}
+
+pub fn smt_active() -> Option<bool> {
+    sysfs_bool(SMT_ACTIVE)
 }
 
 /// Raw SMT control string (`on`, `off`, `forceoff`, `notsupported`, …).
@@ -60,11 +65,7 @@ pub fn boost_available() -> bool {
 }
 
 pub fn boost_enabled() -> Option<bool> {
-    match read_trim(CPU_BOOST)?.as_str() {
-        "1" => Some(true),
-        "0" => Some(false),
-        _ => None,
-    }
+    sysfs_bool(CPU_BOOST)
 }
 
 /// Toggle CPU frequency boost (turbo). Requires root (daemon).
