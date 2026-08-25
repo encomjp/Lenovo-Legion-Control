@@ -13,7 +13,10 @@
 //!
 //! Endpoints — one resolution chain over two defaults
 //! ([`resolve_endpoint`]): explicit override > configured endpoint >
-//! [`DEFAULT_WAN_ENDPOINT`].
+//! [`DEFAULT_WAN_ENDPOINT`]. Every candidate must carry an explicit
+//! `http(s)://` scheme (case-insensitive); anything else is rejected and
+//! the next precedence level applies, so curl can never be handed an
+//! option-shaped value (`--proxy …`) or a non-HTTP scheme.
 //!
 //! * WAN alpha default ([`DEFAULT_WAN_ENDPOINT`]): HTTPS; TLS is terminated
 //!   at the operator's reverse proxy, which additionally enforces an
@@ -24,10 +27,14 @@
 //!   override or configured endpoint for development.
 //!
 //! Transport shells out to `curl` (present on every supported distro) to
-//! avoid adding an HTTPS dependency; the payload goes through a brand-new
-//! 0600 temp file (`create_new` — refuses pre-existing paths and symlinks)
-//! that is removed on every code path, and stale leftovers older than an
-//! hour are swept at the start of [`collect`].
+//! avoid adding an HTTPS dependency; the payload — and, when
+//! `LEGION_TELEMETRY_KEY` is set, the secret header line — go through
+//! brand-new 0600 temp files (`create_new` — refuses pre-existing paths and
+//! symlinks) that are removed on every code path. The secret is delivered
+//! to curl as `-H @<header-file>` precisely so it never appears in the
+//! argument vector, which is world-readable via `/proc/<pid>/cmdline` while
+//! curl runs. Stale payload leftovers older than an hour are swept at the
+//! start of [`collect`].
 
 use crate::selftest::{run_self_checks, SelfCheck};
 use crate::{battery, config, device, fans, profile, sensors, thermal, undervolt};
@@ -296,23 +303,38 @@ pub fn collect() -> DiagnosticsReport {
     }
 }
 
+/// True when `candidate` starts with an explicit `http://` or `https://`
+/// scheme (case-insensitive). Anything else — bare hosts, `--proxy …`,
+/// `-o …`, config-file style values, or non-HTTP schemes like
+/// `ftp:`/`file:` — is rejected, so a hostile override/config/env value can
+/// never be parsed by curl as an option.
+fn has_http_scheme(candidate: &str) -> bool {
+    let lower = candidate.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
 /// Endpoint resolution: explicit override > configured endpoint > WAN
 /// default ([`DEFAULT_WAN_ENDPOINT`]). Both override and configured value
-/// are trimmed first; a whitespace-only string is treated as unset. The
-/// legacy Tailscale listener remains reachable by pointing the override or
-/// configured endpoint at [`DEFAULT_TAILSCALE_ENDPOINT`].
+/// are trimmed first; a whitespace-only string is treated as unset. Any
+/// candidate whose scheme is not `http(s)://` (case-insensitive) is
+/// REJECTED the same way and falls through to the next level — see
+/// [`has_http_scheme`] for the injection this closes. The legacy Tailscale
+/// listener remains reachable by pointing the override or configured
+/// endpoint at [`DEFAULT_TAILSCALE_ENDPOINT`].
 pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> String {
     let from_env = std::env::var("LEGION_TELEMETRY_URL")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let override_url = override_url.map(str::trim).filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty() && has_http_scheme(s));
+    let override_url = override_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && has_http_scheme(s));
     let cfg_endpoint = cfg_endpoint.trim();
     override_url
         .map(str::to_string)
         .or(from_env)
         .or_else(|| {
-            if cfg_endpoint.is_empty() {
+            if cfg_endpoint.is_empty() || !has_http_scheme(cfg_endpoint) {
                 None
             } else {
                 Some(cfg_endpoint.to_string())
@@ -331,21 +353,28 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
     }
 }
 
-/// Write the JSON payload to a brand-new 0600 temp file. `create_new` fails
-/// on pre-existing files *and* on symlinks (O_EXCL semantics), so a planted
-/// link can never be followed; the mode is applied at creation (no
-/// world-readable window) and re-applied afterwards as a guard against
-/// exotic umasks stripping owner bits. The file is removed again here on
-/// every failure, so the caller only sees a path when it exists.
-fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-    // pid alone could collide between daemon/CLI/GUI sending concurrently.
+/// Collision-resistant temp name in the system temp dir:
+/// `<stem>-<pid>-<subsec-nanos>.<ext>`. The pid alone could collide between
+/// daemon/CLI/GUI sending concurrently, hence the extra nanos.
+fn temp_name(stem: &str, ext: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let tmp = std::env::temp_dir().join(format!("legion-diag-{}-{nanos}.json", std::process::id()));
+    format!("{stem}-{}-{nanos}.{ext}", std::process::id())
+}
+
+/// Write `contents` to a brand-new 0600 temp file with the exact given
+/// name in the system temp dir. `create_new` fails on pre-existing files
+/// *and* on symlinks (O_EXCL semantics), so a planted link can never be
+/// followed; the mode is applied at creation (no world-readable window) and
+/// re-applied afterwards as a guard against exotic umasks stripping owner
+/// bits. The file is removed again here on every failure, so the caller
+/// only sees a path when it exists.
+fn create_private_temp(contents: &str, file_name: &str) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let tmp = std::env::temp_dir().join(file_name);
 
     let mut f = std::fs::OpenOptions::new()
         .write(true)
@@ -357,29 +386,60 @@ fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("temp chmod {}: {e}", tmp.display()));
     }
-    if let Err(e) = f.write_all(json.as_bytes()) {
+    if let Err(e) = f.write_all(contents.as_bytes()) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("temp write: {e}"));
     }
     Ok(tmp)
 }
 
+/// Serialized-report variant of [`create_private_temp`] — see there for the
+/// security properties.
+fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
+    create_private_temp(json, &temp_name("legion-diag", "json"))
+}
+
+/// Shared-secret header variant of [`create_private_temp`]: contains
+/// exactly one header line, `X-Legion-Telemetry-Key: <key>\n`, which curl
+/// consumes via `-H @<path>` — keeping the key out of the argument vector,
+/// which is world-readable via `/proc/<pid>/cmdline` while curl runs. The
+/// key must never be logged, and neither must this file's contents; callers
+/// only handle the returned path.
+fn create_header_temp(key: &str) -> Result<std::path::PathBuf, String> {
+    create_private_temp(
+        &format!("X-Legion-Telemetry-Key: {key}\n"),
+        &temp_name("legion-diag-hdr", "txt"),
+    )
+}
+
 /// Optional shared secret for the WAN collector, read per-send from the
 /// environment (`LEGION_TELEMETRY_KEY`). `None` when unset or empty. The
-/// value must never appear in logs or error strings — callers pass it only
-/// into [`build_curl_args`], which embeds it in a single header argument.
+/// value must never appear in logs or error strings — [`send`] writes it to
+/// a private 0600 header temp file ([`create_header_temp`]) instead of the
+/// argument vector and passes curl `-H @<path>` ([`build_curl_args`]).
 fn telemetry_key_from_env() -> Option<String> {
     std::env::var("LEGION_TELEMETRY_KEY")
         .ok()
         .filter(|k| !k.is_empty())
 }
 
+/// Trim a candidate telemetry key and drop blank results, so no empty or
+/// whitespace-only header file/flag is ever produced. Pure — unit-tested.
+fn normalize_key(key: Option<&str>) -> Option<&str> {
+    key.map(str::trim).filter(|k| !k.is_empty())
+}
+
 /// Pure builder for the curl argument list used by [`send`]; factored out so
-/// it is unit-testable (spawning curl itself is not). `key`, when present
-/// and non-empty after trimming, contributes exactly one `-H
-/// X-Legion-Telemetry-Key: …` pair; without a key the pair is omitted and no
-/// blank header is ever sent. The key appears only in that one argument.
-fn build_curl_args(endpoint: &str, tmp_path: &str, key: Option<&str>) -> Vec<String> {
+/// it is unit-testable (spawning curl itself is not). `header_path`, when
+/// present, contributes exactly one `-H @<header_path>` pair: curl reads
+/// the header lines — including the shared secret — from that private 0600
+/// file ([`create_header_temp`]), so the key itself NEVER appears anywhere
+/// in the argument vector (argv is world-readable via `/proc/<pid>/cmdline`
+/// while curl runs). Without a header path no secret header is sent at all.
+/// `--` immediately precedes the endpoint as defence in depth: even if a
+/// future regression reintroduced a dash-prefixed value there, curl could
+/// never parse it as an option.
+fn build_curl_args(endpoint: &str, tmp_path: &str, header_path: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "-sS".to_string(),
         "--max-time".to_string(),
@@ -389,15 +449,16 @@ fn build_curl_args(endpoint: &str, tmp_path: &str, key: Option<&str>) -> Vec<Str
         "-H".to_string(),
         "Content-Type: application/json".to_string(),
     ];
-    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+    if let Some(hdr_path) = header_path {
         args.push("-H".to_string());
-        args.push(format!("X-Legion-Telemetry-Key: {key}"));
+        args.push(format!("@{hdr_path}"));
     }
     args.extend([
         "--data-binary".to_string(),
         format!("@{tmp_path}"),
         "-w".to_string(),
         "\n%{http_code}".to_string(),
+        "--".to_string(),
         endpoint.to_string(),
     ]);
     args
@@ -408,23 +469,41 @@ fn build_curl_args(endpoint: &str, tmp_path: &str, key: Option<&str>) -> Vec<Str
 /// a response-body echo capped at `MAX_ERR_BODY_CHARS`, plus the curl exit
 /// code and a trimmed stderr snippet (≤ `MAX_ERR_STDERR_CHARS`) whenever
 /// curl itself failed — so transport problems are diagnosable from the
-/// message alone. The temp payload is removed on every path. When
-/// `LEGION_TELEMETRY_KEY` is set and non-empty, the request carries the
-/// shared secret as an `X-Legion-Telemetry-Key` header (checked by the WAN
-/// reverse proxy); the value itself never reaches any error message.
+/// message alone. Both temp files (payload and — when `LEGION_TELEMETRY_KEY`
+/// is set — the private header file carrying the shared secret) are removed
+/// on every path; the secret itself never reaches the argument vector, any
+/// log, or any error message.
 pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String> {
     let json = serde_json::to_string(report).map_err(|e| format!("serialize: {e}"))?;
-    let tmp = create_temp_payload(&json)?;
+
+    let mut temps: Vec<std::path::PathBuf> = Vec::new();
+    let remove_temps = |files: &[std::path::PathBuf]| {
+        for f in files {
+            let _ = std::fs::remove_file(f);
+        }
+    };
 
     let outcome = (|| -> Result<String, String> {
-        // Per-send env read: the secret flows into the argument list only
-        // and is deliberately absent from every error string built below.
-        let key = telemetry_key_from_env();
+        let tmp = create_temp_payload(&json)?;
+        temps.push(tmp.clone());
+
+        // Per-send env read: the secret flows ONLY into its own brand-new
+        // 0600 header file, referenced from curl as `-H @path` — never into
+        // the argument vector (/proc/<pid>/cmdline is world-readable while
+        // curl runs) and never into any error string built below.
+        let hdr_tmp = normalize_key(telemetry_key_from_env().as_deref())
+            .map(create_header_temp)
+            .transpose()?;
+        let hdr_view = hdr_tmp.as_deref().map(Path::to_string_lossy);
+        if let Some(h) = &hdr_tmp {
+            temps.push(h.clone());
+        }
+
         let out = std::process::Command::new("curl")
             .args(build_curl_args(
                 endpoint,
                 &tmp.to_string_lossy(),
-                key.as_deref(),
+                hdr_view.as_deref(),
             ))
             .output()
             .map_err(|e| {
@@ -482,8 +561,9 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
         }
     })();
 
-    // Removed on EVERY path — success, HTTP error, curl failure.
-    let _ = std::fs::remove_file(&tmp);
+    // Both temp files removed on EVERY path — success, HTTP error, curl
+    // failure, header-file creation failure.
+    remove_temps(&temps);
     outcome
 }
 
@@ -555,6 +635,14 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// Serialises tests that touch process-global state: `resolve_endpoint`
+    /// reads `LEGION_TELEMETRY_URL`, so the test that mutates that variable
+    /// must not interleave with the other resolution tests.
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The privacy contract, enforced: whatever this machine's real
     /// hostname/username/MAC-like tokens are, they must not appear anywhere
     /// in the serialized report.
@@ -621,10 +709,76 @@ mod tests {
 
     #[test]
     fn endpoint_resolution_precedence() {
+        let _env = lock_env();
         assert_eq!(resolve_endpoint(Some("http://x"), ""), "http://x");
         assert_eq!(resolve_endpoint(None, "http://y"), "http://y");
         assert_eq!(resolve_endpoint(None, ""), DEFAULT_WAN_ENDPOINT);
         assert_eq!(resolve_endpoint(Some(""), "http://y"), "http://y");
+    }
+
+    /// Option-injection hardening: an override that does not start with an
+    /// explicit `http(s)://` scheme (case-insensitive) is rejected and falls
+    /// through to the next precedence level (configured endpoint, then WAN
+    /// default) — curl can never be handed `--proxy`, `-o`, config-file
+    /// style arguments or a non-HTTP scheme.
+    #[test]
+    fn endpoint_resolution_rejects_option_injection_override() {
+        let _env = lock_env();
+        // Dash-prefixed injection falls through to configured, then default.
+        assert_eq!(
+            resolve_endpoint(Some("--proxy http://evil"), "http://y"),
+            "http://y"
+        );
+        assert_eq!(
+            resolve_endpoint(Some("--proxy http://evil"), ""),
+            DEFAULT_WAN_ENDPOINT
+        );
+        // Other option/scheme shapes are equally rejected.
+        assert_eq!(
+            resolve_endpoint(Some("-o /etc/passwd"), ""),
+            DEFAULT_WAN_ENDPOINT
+        );
+        assert_eq!(
+            resolve_endpoint(Some("config /dev/null"), ""),
+            DEFAULT_WAN_ENDPOINT
+        );
+        assert_eq!(
+            resolve_endpoint(Some("ftp://h/x"), ""),
+            DEFAULT_WAN_ENDPOINT
+        );
+        assert_eq!(
+            resolve_endpoint(Some("file:///etc/passwd"), ""),
+            DEFAULT_WAN_ENDPOINT
+        );
+        // A legitimate https override still wins.
+        assert_eq!(resolve_endpoint(Some("https://good"), ""), "https://good");
+        // Scheme match is case-insensitive; the value itself passes through
+        // byte-for-byte after trimming.
+        assert_eq!(resolve_endpoint(Some("HTTPS://Good"), ""), "HTTPS://Good");
+        assert_eq!(resolve_endpoint(Some("Http://x"), "https://y"), "Http://x");
+    }
+
+    /// The same scheme gate applies to the `LEGION_TELEMETRY_URL` env
+    /// override: an option-shaped value is ignored (falls through to the
+    /// configured endpoint / default), a scheme-valid one keeps working.
+    #[test]
+    fn endpoint_resolution_rejects_non_http_env_override() {
+        let _env = lock_env();
+        let saved = std::env::var("LEGION_TELEMETRY_URL").ok();
+        std::env::set_var("LEGION_TELEMETRY_URL", "--proxy http://evil");
+        assert_eq!(resolve_endpoint(None, ""), DEFAULT_WAN_ENDPOINT);
+        // A valid explicit override still beats the poisoned env value.
+        assert_eq!(
+            resolve_endpoint(Some("https://override"), ""),
+            "https://override"
+        );
+        // Scheme-valid env values keep working.
+        std::env::set_var("LEGION_TELEMETRY_URL", DEFAULT_TAILSCALE_ENDPOINT);
+        assert_eq!(resolve_endpoint(None, ""), DEFAULT_TAILSCALE_ENDPOINT);
+        match saved {
+            Some(v) => std::env::set_var("LEGION_TELEMETRY_URL", v),
+            None => std::env::remove_var("LEGION_TELEMETRY_URL"),
+        }
     }
 
     /// Edge: a whitespace-only override is treated as unset (falls through
@@ -632,6 +786,7 @@ mod tests {
     /// trimmed off meaningful overrides.
     #[test]
     fn endpoint_resolution_whitespace_only_override_is_unset() {
+        let _env = lock_env();
         assert_eq!(resolve_endpoint(Some("   "), ""), DEFAULT_WAN_ENDPOINT);
         assert_eq!(resolve_endpoint(Some("\t\n "), "http://y"), "http://y");
         assert_eq!(resolve_endpoint(Some("  http://x  "), ""), "http://x");
@@ -662,7 +817,8 @@ mod tests {
     }
 
     /// Argument builder without a secret: base flags retained, `@tmp`
-    /// payload and trailing endpoint present, and no telemetry-key header.
+    /// payload and trailing endpoint present, no telemetry-key header, and
+    /// `--` guarding the endpoint.
     #[test]
     fn build_curl_args_without_key_omits_secret_header() {
         let args = build_curl_args("https://ep.example/v1/diagnostics", "/tmp/p.json", None);
@@ -676,60 +832,76 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w[0] == "--data-binary" && w[1] == "@/tmp/p.json"));
+        // `--` immediately precedes the trailing endpoint: option parsing
+        // stops there, so the endpoint can never be read as a flag.
         assert_eq!(args.last().unwrap(), "https://ep.example/v1/diagnostics");
+        assert_eq!(
+            args[args.len() - 2],
+            "--",
+            "endpoint not preceded by `--`: {args:?}"
+        );
+        // Exactly one header pair (Content-Type) — no secret anything.
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "-H").count(),
+            1,
+            "unexpected extra -H without a key: {args:?}"
+        );
         assert!(
             !args.iter().any(|a| a.contains("X-Legion-Telemetry-Key")),
             "secret header without a key: {args:?}"
         );
     }
 
-    /// Argument builder with a secret: exactly one `-H` pair carries the
-    /// header, and the key appears in precisely one argument (nothing else
-    /// echoes it — it must never leak into other args or error strings).
+    /// Argument builder with a secret: the key NEVER travels in argv.
+    /// Instead exactly one `-H @<header-file>` pair points curl at the
+    /// private header temp file; base shape is intact and `--` still guards
+    /// the endpoint.
     #[test]
-    fn build_curl_args_with_key_adds_single_header_pair() {
+    fn build_curl_args_passes_secret_via_header_file_not_argv() {
+        let hdr = "/tmp/legion-diag-hdr-4242-42.txt";
         let args = build_curl_args(
             "https://ep.example/v1/diagnostics",
             "/tmp/p.json",
-            Some("s3cret"),
+            Some(hdr),
         );
-        let header_positions: Vec<usize> = args
-            .iter()
-            .enumerate()
-            .filter_map(|(i, a)| a.contains("X-Legion-Telemetry-Key").then_some(i))
-            .collect();
-        assert_eq!(
-            header_positions.len(),
-            1,
-            "header not exactly once: {args:?}"
-        );
-        let pos = header_positions[0];
-        assert_eq!(args[pos], "X-Legion-Telemetry-Key: s3cret");
-        assert!(pos > 0 && args[pos - 1] == "-H", "header not in an -H pair");
-
-        // Base shape intact around the inserted pair.
         for flag in ["-sS", "--max-time", "15", "-X", "POST", "-w"] {
             assert!(args.iter().any(|a| a == flag), "flag {flag} missing");
         }
+        assert!(args.contains(&"\n%{http_code}".to_string()));
+        // Exactly two -H pairs: Content-Type plus the @file secret header…
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-H" && w[1] == format!("@{hdr}")));
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "-H").count(),
+            2,
+            "expected Content-Type + @header-file pairs only: {args:?}"
+        );
+        // …payload and guarded endpoint intact.
         assert!(args
             .windows(2)
             .any(|w| w[0] == "--data-binary" && w[1] == "@/tmp/p.json"));
         assert_eq!(args.last().unwrap(), "https://ep.example/v1/diagnostics");
-        // The key itself surfaces only inside that one header argument.
-        assert_eq!(
-            args.iter().filter(|a| a.contains("s3cret")).count(),
-            1,
-            "key echoed more than once: {args:?}"
+        assert_eq!(args[args.len() - 2], "--");
+        // THE invariant: neither the literal key nor any header text leaks
+        // into the argument vector (world-readable via /proc cmdline).
+        let argv = args.join("\u{1}");
+        assert!(!argv.contains("s3cret"), "key leaked into argv: {args:?}");
+        assert!(
+            !argv.contains("X-Legion-Telemetry-Key"),
+            "header text leaked into argv: {args:?}"
         );
     }
 
-    /// Blank secrets are dropped rather than sent as empty/blank headers.
+    /// Key normalisation (now upstream of the header file): blank secrets
+    /// become None — no header file, no `-H` flag ever — meaningful keys
+    /// survive trimming.
     #[test]
-    fn build_curl_args_drops_blank_keys() {
-        for blank in [None, Some(""), Some("   ")] {
-            let args = build_curl_args("https://ep/x", "/tmp/p", blank);
-            assert!(!args.iter().any(|a| a.contains("X-Legion-Telemetry-Key")));
-        }
+    fn normalize_key_drops_blank_and_trims() {
+        assert_eq!(normalize_key(None), None);
+        assert_eq!(normalize_key(Some("")), None);
+        assert_eq!(normalize_key(Some("   ")), None);
+        assert_eq!(normalize_key(Some("\t s3cret \n")), Some("s3cret"));
     }
 
     /// Unit coverage for the log-tail redactor: literal $HOME, foreign
