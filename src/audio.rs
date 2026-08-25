@@ -283,6 +283,13 @@ pub fn troubleshoot() -> FixReport {
         };
     }
 
+    // Gate every destructive action on the *pre-state*, exactly like
+    // diagnose() computes it: those flags are only set when the onboard
+    // speakers are actually in play, so users of external sinks (USB
+    // headset, BT, HDMI) keep their mixer levels, default sink, and running
+    // services untouched instead of having them hijacked by a "fix".
+    let mixer_needs_touch = before.speakers_muted || before.bass_off || before.volume_low;
+
     if let Some(card) = before.hda_card {
         let card_s = card.to_string();
         // UCM is optional — many Legion ALC287 cards have no UCM profile.
@@ -306,52 +313,75 @@ pub fn troubleshoot() -> FixReport {
             }
         }
 
-        for (ctl, extra) in [
-            ("Master", &["100%", "unmute"][..]),
-            ("Speaker", &["100%", "unmute"][..]),
-            ("Bass Speaker", &["unmute"][..]),
-            ("Headphone", &["unmute"][..]),
-        ] {
-            let mut args = vec!["sset", "-c", card_s.as_str(), ctl];
-            args.extend_from_slice(extra);
-            match run_cmd("amixer", &args) {
-                Ok(_) => steps.push(format!("amixer {ctl} → {}", extra.join(" "))),
-                Err(e) => {
-                    if ctl != "Bass Speaker" && ctl != "Headphone" {
-                        errors.push(format!("amixer {ctl}: {e}"));
+        if mixer_needs_touch {
+            for (ctl, extra) in [
+                ("Master", &["100%", "unmute"][..]),
+                ("Speaker", &["100%", "unmute"][..]),
+                ("Bass Speaker", &["unmute"][..]),
+                ("Headphone", &["unmute"][..]),
+            ] {
+                let mut args = vec!["sset", "-c", card_s.as_str(), ctl];
+                args.extend_from_slice(extra);
+                match run_cmd("amixer", &args) {
+                    Ok(_) => steps.push(format!("amixer {ctl} → {}", extra.join(" "))),
+                    Err(e) => {
+                        if ctl != "Bass Speaker" && ctl != "Headphone" {
+                            errors.push(format!("amixer {ctl}: {e}"));
+                        }
                     }
                 }
             }
+        } else {
+            steps.push(
+                "skipped amixer changes — mute/bass/volume looked fine before the reset \
+                 (onboard speakers not in play; leaving user levels untouched)"
+                    .into(),
+            );
         }
     }
 
-    match run_cmd(
-        "systemctl",
-        &[
-            "--user",
-            "restart",
-            "pipewire.service",
-            "pipewire-pulse.service",
-            "wireplumber.service",
-        ],
-    ) {
-        Ok(_) => steps.push("restarted pipewire, pipewire-pulse, wireplumber".into()),
-        Err(e) => errors.push(format!("systemctl restart audio: {e}")),
+    if before.health == Health::Ok {
+        steps.push(
+            "skipped pipewire/wireplumber restart — audio stack was healthy before the reset"
+                .into(),
+        );
+    } else {
+        match run_cmd(
+            "systemctl",
+            &[
+                "--user",
+                "restart",
+                "pipewire.service",
+                "pipewire-pulse.service",
+                "wireplumber.service",
+            ],
+        ) {
+            Ok(_) => steps.push("restarted pipewire, pipewire-pulse, wireplumber".into()),
+            Err(e) => errors.push(format!("systemctl restart audio: {e}")),
+        }
     }
 
-    // PipeWire republishes sinks slowly after restart.
-    let sink = wait_for_internal_sink(std::time::Duration::from_secs(5));
-    if let Some(sink) = sink {
-        match run_cmd("pactl", &["set-default-sink", &sink]) {
-            Ok(_) => {
-                steps.push(format!("default sink → {sink}"));
-                let _ = run_cmd("pactl", &["set-sink-mute", &sink, "0"]);
-                let _ = run_cmd("pactl", &["set-sink-volume", &sink, "80%"]);
+    // PipeWire republishes sinks slowly after restart. Only steal the default
+    // sink when diagnose() saw a wrong one to begin with.
+    if before.wrong_default_sink {
+        let sink = wait_for_internal_sink(std::time::Duration::from_secs(5));
+        if let Some(sink) = sink {
+            match run_cmd("pactl", &["set-default-sink", &sink]) {
+                Ok(_) => {
+                    steps.push(format!("default sink → {sink}"));
+                    let _ = run_cmd("pactl", &["set-sink-mute", &sink, "0"]);
+                    let _ = run_cmd("pactl", &["set-sink-volume", &sink, "80%"]);
+                }
+                Err(e) => errors.push(format!("set-default-sink: {e}")),
             }
-            Err(e) => errors.push(format!("set-default-sink: {e}")),
+        } else {
+            errors.push("Onboard analog PipeWire sink did not appear after restart".into());
         }
     } else {
-        errors.push("Onboard analog PipeWire sink did not appear after restart".into());
+        steps.push(format!(
+            "skipped set-default-sink — {} was already a sane default before the reset",
+            before.default_sink.as_deref().unwrap_or("current default")
+        ));
     }
 
     let after = diagnose();
