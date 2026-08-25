@@ -6,6 +6,18 @@ use legion_core::{
     diagnostics, selftest,
 };
 
+/// Print an operational-failure banner to stderr and exit 1 (stdout stays empty).
+fn fail(msg: impl std::fmt::Display) -> ! {
+    eprintln!("error: {msg}");
+    std::process::exit(1);
+}
+
+/// Print a usage error to stderr and exit 2 (stdout stays empty).
+fn usage_fail(msg: impl std::fmt::Display) -> ! {
+    eprintln!("error: {msg}");
+    std::process::exit(2);
+}
+
 #[derive(Parser)]
 #[command(
     name = "legion-cli",
@@ -248,10 +260,20 @@ fn main() {
             }
         }
         Commands::FanAuto => {
+            let mut errors: Vec<String> = Vec::new();
             for fan in [1u8, 2, 4] {
-                send_command(DaemonCommand::SetFanTarget(fan, 0)).ok();
+                match send_command(DaemonCommand::SetFanTarget(fan, 0)) {
+                    Ok(DaemonResponse::Ok) => {}
+                    Ok(DaemonResponse::Error(e)) => errors.push(format!("fan {fan}: {e}")),
+                    Err(e) => errors.push(format!("fan {fan}: {e}")),
+                    _ => errors.push(format!("fan {fan}: unexpected response")),
+                }
             }
-            println!("all fans → auto");
+            if errors.is_empty() {
+                println!("all fans → auto");
+            } else {
+                fail(format!("fans → auto failed: {}", errors.join("; ")));
+            }
         }
         Commands::Kbd => match send_command(DaemonCommand::GetKbdBrightness) {
             Ok(DaemonResponse::KbdBrightness(b)) => {
@@ -310,10 +332,11 @@ fn main() {
                     Err(e) => eprintln!("error: {e}"),
                 }
             } else {
-                eprintln!(
-                    "error: unknown effect. Try: {}",
+                usage_fail(format!(
+                    "unknown effect '{}'. Try: {}",
+                    name,
                     legion_core::keyboard::RgbEffect::all_names().join(", ")
-                );
+                ));
             }
         }
         Commands::Brightness { level } => match legion_core::keyboard::set_rgb_brightness(level) {
@@ -366,7 +389,11 @@ fn main() {
             _ => eprintln!("error: unexpected response"),
         },
         Commands::Conservation { state } => {
-            let on = matches!(state.to_lowercase().as_str(), "on" | "true" | "1");
+            let on = match state.to_lowercase().as_str() {
+                "on" | "true" | "1" => true,
+                "off" | "false" | "0" => false,
+                _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
+            };
             match send_command(DaemonCommand::SetConservation(on)) {
                 Ok(DaemonResponse::Ok) => {
                     println!(
@@ -532,10 +559,7 @@ fn main() {
             let on = match state.to_lowercase().as_str() {
                 "on" | "1" | "true" | "enable" => true,
                 "off" | "0" | "false" | "disable" => false,
-                _ => {
-                    eprintln!("error: use on or off");
-                    return;
-                }
+                _ => usage_fail("use on or off"),
             };
             if !on {
                 let n = legion_core::cpu::logical_cpus().max(2);
@@ -577,10 +601,7 @@ fn main() {
             let on = match state.to_lowercase().as_str() {
                 "on" | "1" | "true" | "enable" => true,
                 "off" | "0" | "false" | "disable" => false,
-                _ => {
-                    eprintln!("error: use on or off");
-                    return;
-                }
+                _ => usage_fail("use on or off"),
             };
             match send_command(DaemonCommand::SetBoost(on)) {
                 Ok(DaemonResponse::Ok) => {
@@ -656,7 +677,11 @@ fn main() {
             None => eprintln!("error: cannot read logo state"),
         },
         Commands::SetLogo { state } => {
-            let on = matches!(state.to_lowercase().as_str(), "on" | "true" | "1");
+            let on = match state.to_lowercase().as_str() {
+                "on" | "true" | "1" => true,
+                "off" | "false" | "0" => false,
+                _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
+            };
             match send_command(DaemonCommand::SetLogo(on)) {
                 Ok(DaemonResponse::Ok) => println!("logo → {}", if on { "on" } else { "off" }),
                 Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
@@ -779,14 +804,14 @@ fn main() {
                         eprintln!("error: {e}");
                         std::process::exit(1);
                     }
-                    _ => eprintln!("error: unexpected response"),
+                    _ => fail("unexpected response"),
                 }
             }
         },
         Commands::Diagnose { action } => match action {
             DiagAction::Dump => {
                 let json = serde_json::to_string_pretty(&diagnostics::collect())
-                    .expect("serialize diagnostics report");
+                    .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
                 println!("{json}");
             }
             DiagAction::Selfcheck => {
@@ -918,6 +943,12 @@ fn rgb_fix_local() {
     };
     println!("status      {tag}");
     println!("summary     {}", report.after.summary);
+    if report.after.health == legion_core::rgb_panic::Health::HardwareBroken {
+        std::process::exit(2);
+    }
+    if report.after.health == legion_core::rgb_panic::Health::SoftIssue {
+        std::process::exit(1);
+    }
 }
 
 fn friendly_profile(name: &str) -> String {
