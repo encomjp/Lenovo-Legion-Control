@@ -6,9 +6,9 @@
 //! MAC addresses, IP addresses, disk serials, per-key colour maps, custom
 //! user strings. Included: hardware model/type/BIOS/CPU/GPU/EC identity,
 //! distro+kernel, sensor readings, battery health stats (no serial), fan
-//! states, thermal/CO configuration, a small settings digest, the daemon log
-//! tail (sanitized at write time and *additionally* passed through a
-//! home-path redactor here — see `redact_home_paths`) and the self-check
+//! states, thermal/CO configuration, a small settings digest, a slim log
+//! digest (counts + last error, passed through `redact_home_paths` here),
+//! and the self-check
 //! results.
 //!
 //! Endpoints — one resolution chain over two defaults
@@ -36,11 +36,11 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-/// WAN alpha collector — PLACEHOLDER host until DNS/CDN is chosen; swap in
-/// the real hostname here after deploy. Served over HTTPS: TLS terminates at
-/// the operator's reverse proxy, which also validates the optional shared
+/// WAN alpha collector — points at the operator VPS (`telemetry.
+/// adrian-kozlowski.de`). Served over HTTPS: TLS terminates at the
+/// operator's reverse proxy, which also validates the optional shared
 /// secret sent by [`send`] (env `LEGION_TELEMETRY_KEY`).
-pub const DEFAULT_WAN_ENDPOINT: &str = "https://legion-telemetry.example.com/v1/diagnostics";
+pub const DEFAULT_WAN_ENDPOINT: &str = "https://telemetry.adrian-kozlowski.de/v1/diagnostics";
 
 /// Legacy/dev collector on the operator's IONOS VPS — plain HTTP, reachable
 /// only inside the tailnet. Value frozen for existing dev setups; select it
@@ -71,8 +71,20 @@ pub struct DiagnosticsReport {
     pub profiles: ProfilesDigest,
     pub curve_optimizer: undervolt::CurveOptimizerStatus,
     pub settings: SettingsDigest,
-    pub daemon_log_tail: String,
+    /// Slimmed log summary — counts plus the last error (redacted). Raw log
+    /// lines never leave the machine; this keeps reports small and the
+    /// anonymity contract robust even if a message slips a path in.
+    pub log_digest: LogDigest,
     pub self_checks: Vec<SelfCheck>,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct LogDigest {
+    pub info_count: u32,
+    pub warn_count: u32,
+    pub error_count: u32,
+    /// Last ERROR-level message, home-redacted, capped at 200 chars.
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -238,6 +250,27 @@ pub fn collect() -> DiagnosticsReport {
 
     let generated_at = chrono::Utc::now().to_rfc3339();
 
+    let entries = crate::logging::recent_logs(200);
+    let mut digest = LogDigest::default();
+    for e in &entries {
+        match e.level.as_str() {
+            "ERROR" => {
+                digest.error_count += 1;
+                digest.last_error = Some(redact_home_paths(&e.message));
+            }
+            "WARN" => digest.warn_count += 1,
+            "INFO" => digest.info_count += 1,
+            _ => {}
+        }
+    }
+    if let Some(err) = &digest.last_error {
+        let mut capped: String = err.chars().take(200).collect();
+        if capped.len() < err.len() {
+            capped.push('…');
+        }
+        digest.last_error = Some(capped);
+    }
+
     DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
         generated_at,
@@ -258,7 +291,7 @@ pub fn collect() -> DiagnosticsReport {
             keyboard_layout: cfg.keyboard_layout.clone(),
             restore_on_launch: cfg.restore_on_launch,
         },
-        daemon_log_tail: redact_home_paths(&crate::logging::recent_logs_text(200)),
+        log_digest: digest,
         self_checks: run_self_checks(),
     }
 }
@@ -576,13 +609,14 @@ mod tests {
         if home.len() > 1 {
             assert!(!json.contains(&home), "raw HOME value leaked");
         }
-        // The tail really made it through, redacted — not silently dropped.
-        assert!(
-            report.daemon_log_tail.contains("~/legion.conf")
-                && report.daemon_log_tail.contains("~/legion.sock"),
-            "injected markers missing/redacted wrongly: {:?}",
-            report.daemon_log_tail
-        );
+        // The digest really made it through — counts present, last error
+        // redacted (the injected warn carries the canary markers).
+        let dig = &report.log_digest;
+        assert!(dig.warn_count >= 1, "injected warn not counted");
+        if let Some(msg) = &dig.last_error {
+            assert!(!msg.contains("/home/"), "last_error leaked home path");
+            assert!(!msg.contains("/run/user/"), "last_error leaked uid path");
+        }
     }
 
     #[test]
@@ -614,6 +648,16 @@ mod tests {
         assert_eq!(
             DEFAULT_TAILSCALE_ENDPOINT,
             "http://127.0.0.1:8787/v1/diagnostics"
+        );
+    }
+
+    /// The WAN default must point at the operator VPS — pin it byte-for-byte
+    /// so a regression back to a placeholder host fails loudly.
+    #[test]
+    fn wan_default_endpoint_points_at_operator_vps() {
+        assert_eq!(
+            DEFAULT_WAN_ENDPOINT,
+            "https://telemetry.adrian-kozlowski.de/v1/diagnostics"
         );
     }
 

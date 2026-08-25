@@ -2,6 +2,7 @@
 """Legion Control — operator portal for diagnostics reports (alpha).
 
 Read-only dashboard over the same sqlite store that server/wan/db.py owns.
+from __future__ import annotations
 This is the SECOND service instance, bound by deploy to the Tailscale IP on
 :8788 (collector.py runs on :8787). There is deliberately NO authentication —
 the gate is network position on the tailnet. Never expose this to the WAN.

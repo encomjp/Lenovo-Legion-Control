@@ -8,7 +8,7 @@ User=legion-tel
 Group=legion-tel
 WorkingDirectory=/opt/legion-telemetry/server/wan
 EnvironmentFile=-/etc/default/legion-telemetry
-ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.app:app --host 127.0.0.1 --port 8787 --workers 1
+ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.app:app --host 127.0.0.1 --port 8791 --workers 1
 Restart=on-failure
 RestartSec=3
 

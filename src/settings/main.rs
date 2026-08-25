@@ -1181,15 +1181,20 @@ fn show_welcome_if_needed(
             "Unofficial community tool for Lenovo Legion laptops.\n\n\
              Not affiliated with Lenovo. Use at your own risk.\n\n\
              Choose optional components now, or change them later under About.\n\n\
-             This build is alpha: anonymous diagnostics stay OFF unless you enable them in Setup.",
+             ── Alpha telemetry ──\n\
+             Share ONE anonymized report occasionally (hardware model, distro,\n\
+             sensors, fan/battery stats, self-check results)?\n\
+             Never: hostname · username · serials · MACs · IPs · key colors.\n\
+             Full details under Setup → Alpha diagnostics.",
         ),
     );
     dialog.add_response("ok", "Not now");
     dialog.add_response("donate", "Donate");
     dialog.add_response("issues", "Report an issue");
     dialog.add_response("setup", "First-time setup");
+    dialog.add_response("share", "Share ✓");
     dialog.set_response_appearance("donate", adw::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("setup", adw::ResponseAppearance::Suggested);
+    dialog.set_response_appearance("share", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("setup"));
     dialog.set_close_response("ok");
     let stack = stack.clone();
@@ -1197,6 +1202,11 @@ fn show_welcome_if_needed(
     dialog.connect_response(None, move |_, response| {
         legion_core::config::mark_welcome_seen();
         match response {
+            "share" => {
+                legion_core::config::update(|c| c.diagnostics.enabled = true);
+                // The Setup switch seeds itself from config on next build,
+                // and the debounced toggle keeps later changes in sync.
+            }
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
             "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
             "setup" => {
@@ -4968,7 +4978,7 @@ fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferen
         .subtitle(
             "Alpha program: with your consent, one anonymized JSON report is sent per click/schedule — \
              hardware model, distro/kernel, sensor readings, fan states, battery health stats, thermal & \
-             Curve Optimizer settings, a settings digest, recent daemon log lines, and self-check results. \
+             Curve Optimizer settings, a settings digest, a log summary (warn/error counts + last error, home paths redacted), and self-check results. \
              NEVER included: hostname, username, serials, MACs, IPs, per-key colors, profile names. \
              Off by default.",
         )
