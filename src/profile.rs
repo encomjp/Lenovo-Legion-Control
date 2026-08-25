@@ -106,33 +106,62 @@ fn write_profile(path: &Path, name: &str) -> Result<(), String> {
 
 const FW_ATTR_ROOT: &str = "/sys/class/firmware-attributes";
 
+/// Unit a firmware attribute is expressed in — drives all user-facing labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitUnit {
+    Watts,
+    Celsius,
+}
+
+impl LimitUnit {
+    pub fn symbol(self) -> &'static str {
+        match self {
+            LimitUnit::Watts => "W",
+            LimitUnit::Celsius => "°C",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PptLimit {
     pub id: &'static str,
     pub label: &'static str,
+    pub unit: LimitUnit,
     pub current: u32,
     pub default: u32,
     pub min: u32,
     pub max: u32,
 }
 
-const PPT_IDS: &[(&str, &str)] = &[
-    ("ppt_pl1_spl", "Everyday power"),
-    ("ppt_pl2_sppt", "Short boost"),
-    ("ppt_pl3_fppt", "Peak burst"),
-    ("ppt_cpu_cl", "CPU share"),
-    ("cpu_temp", "CPU thermal limit"),
-    ("gpu_temp", "GPU thermal limit"),
+impl PptLimit {
+    /// "`85–100 °C`"-style range label used by CLI + GUI alike.
+    pub fn range_label(&self) -> String {
+        format!("{}–{} {}", self.min, self.max, self.unit.symbol())
+    }
+    pub fn value_label(&self, value: u32) -> String {
+        format!("{value} {}", self.unit.symbol())
+    }
+}
+
+const PPT_IDS: &[(&str, &str, LimitUnit)] = &[
+    ("ppt_pl1_spl", "Everyday power", LimitUnit::Watts),
+    ("ppt_pl2_sppt", "Short boost", LimitUnit::Watts),
+    ("ppt_pl3_fppt", "Peak burst", LimitUnit::Watts),
+    ("ppt_cpu_cl", "CPU share", LimitUnit::Watts),
+    // Firmware thermal cutoffs — INDEPENDENT of, and stacking with, the
+    // software scaling_max_freq governor (Settings → Thermal).
+    ("cpu_temp", "CPU thermal limit", LimitUnit::Celsius),
+    ("gpu_temp", "GPU thermal limit", LimitUnit::Celsius),
 ];
 
 /// NVIDIA GPU power knobs (Other Mode WMI). Same Custom-mode gate as CPU PPT.
 /// Only attributes with a real firmware min/max range are exposed — some BIOS
 /// builds list cTGP/PPAB but reject writes (EINVAL).
-const GPU_PPT_IDS: &[(&str, &str)] = &[
-    ("gpu_nv_ac_offset", "GPU AC power target"),
-    ("gpu_nv_ctgp", "GPU cTGP"),
-    ("gpu_nv_ppab", "GPU PPAB"),
-    ("gpu_nv_cpu_boost", "GPU↔CPU boost"),
+const GPU_PPT_IDS: &[(&str, &str, LimitUnit)] = &[
+    ("gpu_nv_ac_offset", "GPU AC power target", LimitUnit::Watts),
+    ("gpu_nv_ctgp", "GPU cTGP", LimitUnit::Watts),
+    ("gpu_nv_ppab", "GPU PPAB", LimitUnit::Watts),
+    ("gpu_nv_cpu_boost", "GPU↔CPU boost", LimitUnit::Watts),
 ];
 
 fn fw_attr_dir(attr: &str) -> Option<PathBuf> {
@@ -154,9 +183,9 @@ fn read_u32_file(path: &Path) -> Option<u32> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
-fn collect_limits(ids: &[(&'static str, &'static str)]) -> Vec<PptLimit> {
+fn collect_limits(ids: &[(&'static str, &'static str, LimitUnit)]) -> Vec<PptLimit> {
     let mut out = Vec::new();
-    for (id, label) in ids {
+    for (id, label, unit) in ids {
         let Some(dir) = fw_attr_dir(id) else {
             continue;
         };
@@ -173,6 +202,7 @@ fn collect_limits(ids: &[(&'static str, &'static str)]) -> Vec<PptLimit> {
         out.push(PptLimit {
             id,
             label,
+            unit: *unit,
             current,
             default,
             min,
@@ -200,12 +230,26 @@ pub fn all_ppt_limits() -> Vec<PptLimit> {
     out
 }
 
-fn known_fw_attr(attr: &str) -> bool {
-    PPT_IDS.iter().any(|(id, _)| *id == attr) || GPU_PPT_IDS.iter().any(|(id, _)| *id == attr)
+/// Single source of truth for which firmware attributes this app may write.
+/// The daemon's SetFwAttr gate MUST use this (prefix checks caused a drift
+/// where cpu_temp/gpu_temp passed the lib but were rejected by the daemon).
+pub fn is_known_fw_attr(attr: &str) -> bool {
+    PPT_IDS.iter().any(|(id, _, _)| *id == attr) || GPU_PPT_IDS.iter().any(|(id, _, _)| *id == attr)
+}
+
+/// Unit for a firmware attribute; defaults to Watts for unknown ids
+/// (unknown ids are rejected by set_ppt anyway).
+pub fn limit_unit(attr: &str) -> LimitUnit {
+    PPT_IDS
+        .iter()
+        .find(|(id, _, _)| *id == attr)
+        .or_else(|| GPU_PPT_IDS.iter().find(|(id, _, _)| *id == attr))
+        .map(|(_, _, u)| *u)
+        .unwrap_or(LimitUnit::Watts)
 }
 
 pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
-    if !known_fw_attr(attr) {
+    if !is_known_fw_attr(attr) {
         return Err(format!("Unknown PPT attribute '{attr}'"));
     }
     let dir = fw_attr_dir(attr).ok_or_else(|| format!("firmware-attribute '{attr}' not found"))?;
@@ -251,15 +295,41 @@ mod tests {
 
     #[test]
     fn known_fw_attr_matches_declared_ids() {
-        assert!(known_fw_attr("ppt_pl1_spl"));
-        assert!(known_fw_attr("gpu_nv_ac_offset"));
-        assert!(!known_fw_attr("unknown_attr"));
-        assert!(!known_fw_attr(""));
+        assert!(is_known_fw_attr("ppt_pl1_spl"));
+        assert!(is_known_fw_attr("gpu_nv_ac_offset"));
+        assert!(is_known_fw_attr("cpu_temp"), "thermal limits are writable");
+        assert!(is_known_fw_attr("gpu_temp"));
+        assert!(!is_known_fw_attr("unknown_attr"));
+        assert!(!is_known_fw_attr(""));
+    }
+
+    /// The daemon gate and the discovery lists must never drift: every
+    /// attribute we can discover must also pass the write gate.
+    #[test]
+    fn every_discoverable_limit_passes_the_daemon_gate() {
+        for lim in all_ppt_limits() {
+            assert!(
+                is_known_fw_attr(lim.id),
+                "{} discoverable but not writable via SetFwAttr",
+                lim.id
+            );
+        }
+        // Static lists too (covers attrs absent on this machine).
+        for (id, _, _) in PPT_IDS.iter().chain(GPU_PPT_IDS.iter()) {
+            assert!(is_known_fw_attr(id));
+        }
     }
 
     #[test]
     fn set_ppt_rejects_unknown_attr_without_touching_sysfs() {
         let err = set_ppt("bogus_attr", 100).unwrap_err();
         assert!(err.contains("Unknown PPT attribute"), "err={err:?}");
+    }
+
+    #[test]
+    fn limit_unit_maps_temps_to_celsius() {
+        assert_eq!(limit_unit("cpu_temp"), LimitUnit::Celsius);
+        assert_eq!(limit_unit("gpu_nv_ac_offset"), LimitUnit::Watts);
+        assert_eq!(limit_unit("bogus"), LimitUnit::Watts);
     }
 }

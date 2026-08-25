@@ -2171,8 +2171,8 @@ fn build_cpu_power_page(
             .title(lim.label)
             .activatable(false)
             .build();
-        tip(&row, &format!("{} · {}–{} W", lim.label, lim.min, lim.max));
-        let val = gtk::Label::new(Some(&format!("{} W", lim.current)));
+        tip(&row, &format!("{} · {}", lim.label, lim.range_label()));
+        let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         row.add_suffix(&val);
@@ -2188,10 +2188,7 @@ fn build_cpu_power_page(
         scale.set_draw_value(false);
         scale.set_hexpand(true);
         scale.set_width_request(160);
-        tip(
-            &scale,
-            &format!("{} · {}–{} W", lim.label, lim.min, lim.max),
-        );
+        tip(&scale, &format!("{} · {}", lim.label, lim.range_label()));
         row.add_suffix(&scale);
         preview.add(&row);
     }
@@ -2571,43 +2568,55 @@ fn attach_custom_ppt_group(
             .build();
         let ppt_tip = match lim.id {
             "ppt_pl1_spl" => format!(
-                "Sustained power limit (SPL) — long-term CPU watts · range {}–{} W",
-                lim.min, lim.max
+                "Sustained power limit (SPL) — long-term CPU watts · range {}",
+                lim.range_label()
             ),
             "ppt_pl2_sppt" => format!(
-                "Slow boost (SPPT) — medium burst · range {}–{} W",
-                lim.min, lim.max
+                "Slow boost (SPPT) — medium burst · range {}",
+                lim.range_label()
             ),
             "ppt_pl3_fppt" => format!(
-                "Peak burst (FPPT) — short turbo · range {}–{} W",
-                lim.min, lim.max
+                "Peak burst (FPPT) — short turbo · range {}",
+                lim.range_label()
             ),
             "ppt_cpu_cl" => format!(
-                "CPU cross-load share · range {}–{} W",
-                lim.min, lim.max
+                "CPU cross-load share · range {}",
+                lim.range_label()
+            ),
+            "cpu_temp" => format!(
+                "CPU thermal cutoff — firmware throttles near this temperature · \
+                 independent of, and stacking with, the software Thermal governor · \
+                 range {} (°C, not watts)",
+                lim.range_label()
+            ),
+            "gpu_temp" => format!(
+                "GPU thermal cutoff — firmware throttles near this temperature · \
+                 independent of, and stacking with, the software Thermal governor · \
+                 range {} (°C, not watts)",
+                lim.range_label()
             ),
             "gpu_nv_ac_offset" => format!(
-                "GPU AC total processing power target (BIOS attribute). Firmware range {}–{} W. \
+                "GPU AC total processing power target (BIOS attribute). Firmware range {}. \
                  This is not the absolute {peak_tgp} W NVIDIA TGP — Performance/Max already use {peak_tgp} W.",
-                lim.min, lim.max
+                lim.range_label()
             ),
             "gpu_nv_ctgp" => format!(
-                "GPU configurable TGP (cTGP) · range {}–{} W",
-                lim.min, lim.max
+                "GPU configurable TGP (cTGP) · range {}",
+                lim.range_label()
             ),
             "gpu_nv_ppab" => format!(
-                "GPU PPAB boost · range {}–{} W",
-                lim.min, lim.max
+                "GPU PPAB boost · range {}",
+                lim.range_label()
             ),
             "gpu_nv_cpu_boost" => format!(
-                "GPU↔CPU dynamic boost share · range {}–{} W",
-                lim.min, lim.max
+                "GPU↔CPU dynamic boost share · range {}",
+                lim.range_label()
             ),
-            _ => format!("{} · {}–{} W", lim.label, lim.min, lim.max),
+            _ => format!("{} · {}", lim.label, lim.range_label()),
         };
         tip(&row, &ppt_tip);
 
-        let val = gtk::Label::new(Some(&format!("{} W", lim.current)));
+        let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         tip(&val, &ppt_tip);
@@ -2633,6 +2642,7 @@ fn attach_custom_ppt_group(
         let queue = apply_queue.clone();
         let id = lim.id.to_string();
         let lim_max = lim.max;
+        let unit_sym = lim.unit.symbol();
         let lim_label = lim.label.to_string();
         let val_l = val.clone();
         let drop_c = drop.clone();
@@ -2645,7 +2655,7 @@ fn attach_custom_ppt_group(
                 return;
             }
             let v = s.value().round() as u32;
-            val_l.set_text(&format!("{v} W"));
+            val_l.set_text(&format!("{v} {unit_sym}"));
             let warn_at = (lim_max as f64 * 0.92).round() as u32;
             if v >= warn_at && !ppt_warned.get() {
                 ppt_warned.set(true);
@@ -2662,7 +2672,7 @@ fn attach_custom_ppt_group(
                     s,
                     "High power limit",
                     &format!(
-                        "{lim_label} at {v} W is near the firmware maximum ({lim_max} W).\n\n\
+                        "{lim_label} at {v} {unit_sym} is near the firmware maximum ({lim_max} {unit_sym}).\n\n\
                          Sustained high limits increase heat and fan noise.\n\n\
                          Continue only if cooling is strong."
                     ),

@@ -114,7 +114,10 @@ fn flush(inner: Rc<Inner>) {
                 name: name.clone(),
                 value: value.clone(),
             }) {
-                Ok(DaemonResponse::Ok) => ok_bits.push(format!("{name} → {value} W")),
+                Ok(DaemonResponse::Ok) => {
+                    let unit = legion_core::profile::limit_unit(&name);
+                    ok_bits.push(format!("{name} → {value} {}", unit.symbol()));
+                }
                 Ok(DaemonResponse::Error(e)) | Err(e) => {
                     log::warn!("apply-queue {name}: {e}");
                     errors.push(e);

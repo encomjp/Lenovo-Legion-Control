@@ -311,7 +311,14 @@ fn probe_lighting() -> String {
 fn probe_ppt_attrs() -> Vec<String> {
     crate::profile::all_ppt_limits()
         .into_iter()
-        .map(|l| format!("{} ({}–{} W, now {} W)", l.id, l.min, l.max, l.current))
+        .map(|l| {
+            format!(
+                "{} (now {}, range {})",
+                l.id,
+                l.value_label(l.current),
+                l.range_label()
+            )
+        })
         .collect()
 }
 

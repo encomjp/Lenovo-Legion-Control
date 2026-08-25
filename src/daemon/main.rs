@@ -750,7 +750,9 @@ fn process_command(
             None => DaemonResponse::Error("Camera power not found".into()),
         },
         DaemonCommand::SetFwAttr { name, value } => {
-            if name.starts_with("ppt_") || name.starts_with("gpu_nv_") {
+            // Single source of truth: the same allow-list that drives
+            // discovery (profile::all_ppt_limits) gates writes here.
+            if profile::is_known_fw_attr(&name) {
                 match value.trim().parse::<u32>() {
                     Ok(v) => match profile::set_ppt(&name, v) {
                         Ok(()) => DaemonResponse::Ok,
