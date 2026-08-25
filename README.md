@@ -4,6 +4,10 @@ Linux control app for **Lenovo Legion** laptops — fans, power modes, Spectrum 
 
 This is the **monorepo root**: research notes, kernel-driver PoCs, and the SVG icon set live here; the Rust application, installer, and GitHub-facing docs live in the nested repo **[`lenovo-legion-tool/`](./lenovo-legion-tool/)**.
 
+## Alpha telemetry (opt-in)
+
+Alpha builds can send **one anonymized JSON** report — hardware model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/Curve-Optimizer settings, settings digest, sanitized daemon-log tail, self-check results — to the developer's collector ([`server/`](./server/README.md)). **Off by default**, enabled in Setup; endpoint configurable. Never included: hostname, username, serials, MAC/IP addresses.
+
 ```bash
 ./install.sh          # from this repo root (delegates to lenovo-legion-tool/install.sh)
 # or
