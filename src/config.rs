@@ -192,6 +192,26 @@ pub struct AppConfig {
     pub welcome_seen: bool,
     #[serde(default)]
     pub thermal: ThermalConfig,
+    /// Optional anonymous diagnostics (alpha) — off unless the user opts in.
+    #[serde(default)]
+    pub diagnostics: DiagnosticsConfig,
+}
+
+/// Alpha telemetry settings. Nothing is collected or sent unless `enabled`
+/// is explicitly turned on by the user.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnosticsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Empty string = use the built-in default collector URL.
+    #[serde(default)]
+    pub endpoint: String,
+    /// Auto-send interval in hours; 0 = manual only.
+    #[serde(default)]
+    pub auto_period_hours: u32,
+    /// RFC3339 timestamp of the last successful send (informational).
+    #[serde(default)]
+    pub last_sent: Option<String>,
 }
 
 fn default_lighting_mode() -> String {
@@ -232,6 +252,7 @@ impl Default for AppConfig {
             active_profile: String::new(),
             welcome_seen: false,
             thermal: ThermalConfig::default(),
+            diagnostics: DiagnosticsConfig::default(),
         }
     }
 }

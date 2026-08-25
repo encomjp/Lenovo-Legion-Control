@@ -1171,7 +1171,8 @@ fn show_welcome_if_needed(parent: &impl glib::object::IsA<gtk::Widget>, stack: &
         Some(
             "Unofficial community tool for Lenovo Legion laptops.\n\n\
              Not affiliated with Lenovo. Use at your own risk.\n\n\
-             Choose optional components now, or change them later under About.",
+             Choose optional components now, or change them later under About.\n\n\
+             This build is alpha: anonymous diagnostics stay OFF unless you enable them in Setup.",
         ),
     );
     dialog.add_response("ok", "Not now");
@@ -4928,6 +4929,175 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     group
 }
 
+/// Alpha diagnostics opt-in — privacy disclosure, consent switch, self-check
+/// runner, and on-demand send. All of it works without the daemon running.
+fn build_diagnostics_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+    let group = pref_group("Alpha diagnostics (anonymous)", None);
+
+    // Caption-style disclosure row — the exact data contract shown verbatim.
+    let disclosure = adw::ActionRow::builder()
+        .activatable(false)
+        .subtitle(
+            "Alpha program: with your consent, one anonymized JSON report is sent per click/schedule — \
+             hardware model, distro/kernel, sensor readings, fan states, battery health stats, thermal & \
+             Curve Optimizer settings, a settings digest, recent daemon log lines, and self-check results. \
+             NEVER included: hostname, username, serials, MACs, IPs, per-key colors, profile names. \
+             Off by default.",
+        )
+        .build();
+    group.add(&disclosure);
+
+    let share_row = adw::SwitchRow::builder()
+        .title("Share anonymous diagnostics")
+        .subtitle("Off by default · sends only on demand or schedule")
+        .active(legion_core::config::get().diagnostics.enabled)
+        .build();
+    tip(
+        &share_row,
+        "Consent switch — nothing is collected or sent while this is off",
+    );
+    group.add(&share_row);
+
+    {
+        let overlay = toast_overlay.clone();
+        share_row.connect_active_notify(move |row| {
+            let enabled = row.is_active();
+            legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+            if enabled {
+                toast_ok(&overlay, "Anonymous diagnostics enabled");
+            } else {
+                toast_ok(&overlay, "Anonymous diagnostics disabled");
+            }
+        });
+    }
+
+    let check_row = adw::ActionRow::builder()
+        .title("Self-check")
+        .subtitle("Read-only checks of config, battery, fans, sensors, and lighting")
+        .activatable(false)
+        .build();
+    let run_btn = gtk::Button::with_label("Run");
+    run_btn.set_valign(Align::Center);
+    run_btn.add_css_class("pill-btn");
+    tip(
+        &run_btn,
+        "Runs read-only local checks — nothing is written or sent",
+    );
+    check_row.add_suffix(&run_btn);
+    group.add(&check_row);
+
+    // Results land here once the first run completes; hidden until then.
+    let results = gtk::Label::new(None);
+    results.add_css_class("detail-body");
+    results.set_halign(Align::Start);
+    results.set_wrap(true);
+    results.set_xalign(0.0);
+    results.set_selectable(true);
+    results.set_margin_start(12);
+    results.set_margin_end(12);
+    results.set_margin_top(4);
+    results.set_margin_bottom(8);
+    tip(
+        &results,
+        "One line per check — selectable so you can copy it into a bug report",
+    );
+    let expander = gtk::Expander::builder()
+        .label("Self-check results")
+        .child(&results)
+        .visible(false)
+        .build();
+    group.add(&expander);
+
+    {
+        let overlay = toast_overlay.clone();
+        let run_btn_connect = run_btn.clone();
+        let run_btn_closure = run_btn.clone();
+        let expander_closure = expander.clone();
+        let results_closure = results.clone();
+        run_btn_connect.connect_clicked(move |_| {
+            run_btn_closure.set_sensitive(false);
+            let overlay = overlay.clone();
+            let run_btn = run_btn_closure.clone();
+            let expander = expander_closure.clone();
+            let results = results_closure.clone();
+            dispatch_async(
+                move || {
+                    Ok::<Vec<legion_core::selftest::SelfCheck>, String>(
+                        legion_core::selftest::run_self_checks(),
+                    )
+                },
+                "Self-check stopped without a result",
+                move |result| {
+                    run_btn.set_sensitive(true);
+                    match result {
+                        Ok(checks) => {
+                            let total = checks.len();
+                            let passed = checks.iter().filter(|c| c.ok).count();
+                            let lines: Vec<String> = checks
+                                .iter()
+                                .map(|c| {
+                                    format!(
+                                        "{} {} — {}",
+                                        if c.ok { "✓" } else { "✗" },
+                                        c.name,
+                                        c.detail
+                                    )
+                                })
+                                .collect();
+                            results.set_text(&lines.join("\n"));
+                            expander.set_label(Some(&format!(
+                                "Self-check results ({passed}/{total} passed)"
+                            )));
+                            expander.set_expanded(true);
+                            expander.set_visible(true);
+                        }
+                        Err(error) => toast_error(&overlay, &error),
+                    }
+                },
+            );
+        });
+    }
+
+    let send_row = adw::ActionRow::builder()
+        .title("Send now")
+        .subtitle("Collects and uploads one anonymized report")
+        .activatable(false)
+        .build();
+    let send_btn = gtk::Button::with_label("Send now");
+    send_btn.set_valign(Align::Center);
+    send_btn.add_css_class("pill-btn");
+    tip(
+        &send_btn,
+        "Collects and sends one anonymized report immediately",
+    );
+    send_row.add_suffix(&send_btn);
+    group.add(&send_row);
+
+    {
+        let overlay = toast_overlay.clone();
+        let send_btn_connect = send_btn.clone();
+        let send_btn_closure = send_btn.clone();
+        send_btn_connect.connect_clicked(move |_| {
+            send_btn_closure.set_sensitive(false);
+            let overlay = overlay.clone();
+            let btn_inner = send_btn_closure.clone();
+            dispatch_async(
+                move || legion_core::diagnostics::collect_and_send(None),
+                "Diagnostics send stopped without a result",
+                move |result| {
+                    btn_inner.set_sensitive(true);
+                    match result {
+                        Ok(_) => toast_info(&overlay, "Diagnostics sent — thank you!"),
+                        Err(error) => toast_error(&overlay, &error),
+                    }
+                },
+            );
+        });
+    }
+
+    group
+}
+
 fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     let group = pref_group("First-time setup", None);
 
@@ -5080,6 +5250,7 @@ fn build_about_pages(
 
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
+    setup_page.append(&build_diagnostics_section(toast_overlay));
 
     let help = pref_group("Help", None);
     let report_row = adw::ActionRow::builder()

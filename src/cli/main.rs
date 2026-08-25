@@ -1,7 +1,10 @@
 //! Legion CLI — command-line control for Lenovo Legion laptops.
 
 use clap::{Parser, Subcommand};
-use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
+use legion_core::{
+    comms::{send_command, DaemonCommand, DaemonResponse},
+    diagnostics, selftest,
+};
 
 #[derive(Parser)]
 #[command(
@@ -138,6 +141,25 @@ enum Commands {
     Thermal {
         #[command(subcommand)]
         command: ThermalCmd,
+    },
+    /// Anonymous diagnostics (alpha) — off unless enabled in Settings.
+    Diagnose {
+        #[command(subcommand)]
+        action: DiagAction,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+enum DiagAction {
+    /// Print the full ANONYMOUS diagnostics JSON (no upload)
+    Dump,
+    /// Run read-only self-health checks and print a pass/fail table
+    Selfcheck,
+    /// Collect and POST to the configured collector endpoint
+    Send {
+        /// Override collector URL (else Settings/default)
+        #[arg(long)]
+        endpoint: Option<String>,
     },
 }
 
@@ -758,6 +780,35 @@ fn main() {
                         std::process::exit(1);
                     }
                     _ => eprintln!("error: unexpected response"),
+                }
+            }
+        },
+        Commands::Diagnose { action } => match action {
+            DiagAction::Dump => {
+                let json = serde_json::to_string_pretty(&diagnostics::collect())
+                    .expect("serialize diagnostics report");
+                println!("{json}");
+            }
+            DiagAction::Selfcheck => {
+                let checks = selftest::run_self_checks();
+                let total = checks.len();
+                let passed = checks.iter().filter(|c| c.ok).count();
+                for c in &checks {
+                    let mark = if c.ok { "✓" } else { "✗" };
+                    println!("{mark} {} — {}", c.name, c.detail);
+                }
+                println!("{passed}/{total} passed");
+                if passed != total {
+                    std::process::exit(1);
+                }
+            }
+            DiagAction::Send { endpoint } => {
+                match diagnostics::collect_and_send(endpoint.as_deref()) {
+                    Ok(resp) => println!("sent ✓ {}", resp.chars().take(200).collect::<String>()),
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
         },
