@@ -41,6 +41,7 @@ use crate::{battery, config, device, fans, profile, sensors, thermal, undervolt}
 use serde::Serialize;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime};
 
 /// WAN alpha collector — points at the operator VPS (`telemetry.
@@ -695,10 +696,48 @@ pub fn is_opted_in() -> bool {
 /// diagnose send`) constitutes opt-in for that single send. Callers own the
 /// consent decision — use [`is_opted_in`] only to decide whether automatic
 /// or background sending may happen at all.
+/// Process-level dedup: millis of the last send attempt. 0 = never sent.
+static LAST_SEND_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Convenience used by CLI/GUI: collect + send with config-resolved endpoint.
+/// Guards against accidental double-send from the same process (60 s window).
 pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let last = LAST_SEND_MS.load(Ordering::Relaxed);
+    if last > 0 && now_ms - last < 60_000 {
+        return Err(
+            "diagnostics were sent less than a minute ago — skipping duplicate send".into(),
+        );
+    }
+    LAST_SEND_MS.store(now_ms, Ordering::Relaxed);
+
     let cfg = config::get().diagnostics;
+    let machine_id = if cfg.machine_id.is_empty() {
+        // Generate a fresh UUID v4 from /dev/urandom (no external deps).
+        let mut b = [0u8; 16];
+        if let Ok(raw) = std::fs::read("/dev/urandom") {
+            for (i, byte) in raw.iter().take(16).enumerate() {
+                b[i] = *byte;
+            }
+        }
+        b[6] = (b[6] & 0x0F) | 0x40;
+        b[8] = (b[8] & 0x3F) | 0x80;
+        let id = format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+        );
+        config::update(|c| c.diagnostics.machine_id = id.clone());
+        id
+    } else {
+        cfg.machine_id.clone()
+    };
     let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
-    let report = collect();
+    let mut report = collect();
+    report.machine_id = machine_id.clone();
     let resp = send(&report, &endpoint)?;
     config::update(|c| {
         c.diagnostics.last_sent = Some(chrono::Utc::now().to_rfc3339());

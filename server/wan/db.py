@@ -123,6 +123,21 @@ def get_payload(report_id: int) -> str | None:
     return row[0] if row else None
 
 
+def find_recent_by_machine(machine_id: str | None, minutes: int = 5) -> int | None:
+    """Return the id of a recent report from this machine, if any."""
+    if not machine_id:
+        return None
+    init()
+    with _lock:
+        assert _conn is not None
+        row = _conn.execute(
+            "SELECT id FROM reports WHERE machine_id = ?"
+            " AND received_at > datetime('now', ?) LIMIT 1",
+            (machine_id, f"-{minutes} minutes"),
+        ).fetchone()
+    return row[0] if row else None
+
+
 def count() -> int:
     init()
     with _lock:

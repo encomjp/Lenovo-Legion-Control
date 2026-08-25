@@ -175,6 +175,14 @@ def ingest(request: Request) -> dict:
     ts = datetime.now(timezone.utc).isoformat()
     distro, model, app_version, schema_version = db._extract_meta(doc)  # noqa: SLF001
     machine_id = doc.get("machine_id") if isinstance(doc.get("machine_id"), str) else None
+
+    # Server-side dedup: reject if the same machine already sent within
+    # 5 minutes. Prevents retry storms and double-clicks from creating
+    # duplicate rows.
+    existing = db.find_recent_by_machine(machine_id, minutes=5)
+    if existing is not None:
+        return {"ok": True, "duplicate": True, "id": existing}
+
     report_id = db.insert(ts, text, machine_id, distro, model, app_version, schema_version)
     return {"ok": True, "id": report_id}
 
