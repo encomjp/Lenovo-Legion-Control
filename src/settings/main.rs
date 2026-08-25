@@ -293,8 +293,11 @@ fn is_version_skew_error(e: &str) -> bool {
 /// GTK main loop via a 100 ms poll. Nothing in `work` may touch widgets.
 /// If the worker dies before sending (panic), `done` receives
 /// `Err(stopped_msg)`.
-fn dispatch_async<T, F>(work: F, stopped_msg: &'static str, done: impl FnOnce(Result<T, String>) + 'static)
-where
+fn dispatch_async<T, F>(
+    work: F,
+    stopped_msg: &'static str,
+    done: impl FnOnce(Result<T, String>) + 'static,
+) where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
@@ -327,9 +330,7 @@ fn apply_charge_limit_blocking(pct: u32) -> Result<(), String> {
     match send_command(DaemonCommand::SetChargeLimit(pct)) {
         Ok(DaemonResponse::Ok) => Ok(()),
         Ok(DaemonResponse::Error(e)) => Err(e),
-        Err(e) if is_version_skew_error(&e) => {
-            Err("Service outdated — reinstall to update".into())
-        }
+        Err(e) if is_version_skew_error(&e) => Err("Service outdated — reinstall to update".into()),
         _ => legion_core::battery::set_charge_limit_pct(pct)
             .map_err(|_| "Service outdated — reinstall to update".into()),
     }
@@ -409,9 +410,7 @@ fn build_ui(app: &adw::Application) {
         lighting_tabs.set_visible_child_name("keyboard");
     }
 
-    let about_initial = legion_page_req
-        .as_deref()
-        .and_then(hub_initial_tab);
+    let about_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
     let about_hub = hub_page(
         vec![
             (about_setup_page, "setup", "Setup"),
@@ -540,7 +539,10 @@ fn build_ui(app: &adw::Application) {
             "Setup, hardware, storage, help",
         ),
     ] {
-        let row = adw::ActionRow::builder().title(title).activatable(true).build();
+        let row = adw::ActionRow::builder()
+            .title(title)
+            .activatable(true)
+            .build();
         let ic = color_icon(icon, 15);
         ic.set_opacity(0.72);
         row.add_prefix(&ic);
@@ -678,7 +680,9 @@ fn build_ui(app: &adw::Application) {
         let starting_r = starting_b.clone();
         run_daemon_command_async(DaemonCommand::GetProfile, move |result| {
             if matches!(result, Ok(DaemonResponse::Profile(_))) {
-                sync_daemon_ui(true, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r);
+                sync_daemon_ui(
+                    true, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r,
+                );
                 toast_ok(&overlay_ready, "Control service is ready");
                 return;
             }
@@ -802,7 +806,9 @@ fn build_ui(app: &adw::Application) {
     {
         let show = show_page.clone();
         nav_list.connect_row_selected(move |_, row| {
-            let Some(r) = row else { return; };
+            let Some(r) = row else {
+                return;
+            };
             if let Some(id) = FLAT_IDS.get(r.index() as usize) {
                 if let Some(title) = page_title(id) {
                     show(id, title);
@@ -943,7 +949,9 @@ fn build_ui(app: &adw::Application) {
         let gate_r = gate_f.clone();
         run_daemon_command_async(DaemonCommand::GetProfile, move |result| {
             let ok = matches!(result, Ok(DaemonResponse::Profile(_)));
-            sync_daemon_ui(ok, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r);
+            sync_daemon_ui(
+                ok, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r,
+            );
             if ok {
                 toast_ok(&overlay_r, "Control service is ready");
             } else {
@@ -986,17 +994,15 @@ fn build_ui(app: &adw::Application) {
         let foot_q = foot_p.clone();
         let banner_q = banner_p.clone();
         let gate_q = gate_p.clone();
-        glib::timeout_add_local(Duration::from_millis(250), move || {
-            match rx.try_recv() {
-                Ok(ok) => {
-                    sync_daemon_ui(
-                        ok, &dot_q, &conn_l_q, &conn_s_q, &foot_q, &banner_q, &gate_q,
-                    );
-                    glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        glib::timeout_add_local(Duration::from_millis(250), move || match rx.try_recv() {
+            Ok(ok) => {
+                sync_daemon_ui(
+                    ok, &dot_q, &conn_l_q, &conn_s_q, &foot_q, &banner_q, &gate_q,
+                );
+                glib::ControlFlow::Break
             }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         });
         glib::ControlFlow::Continue
     });
@@ -1090,9 +1096,9 @@ fn open_uri(uri: &str) {
 
 fn setup_helper_path() -> Option<&'static str> {
     [
-        "/usr/libexec/legion-control-setup",        // Fedora, Arch, source --prefix /usr
-        "/usr/local/libexec/legion-control-setup",  // source installs (default prefix)
-        "/usr/lib/legion-control-setup",            // Debian-style relocation, just in case
+        "/usr/libexec/legion-control-setup", // Fedora, Arch, source --prefix /usr
+        "/usr/local/libexec/legion-control-setup", // source installs (default prefix)
+        "/usr/lib/legion-control-setup",     // Debian-style relocation, just in case
     ]
     .into_iter()
     .find(|path| std::path::Path::new(path).is_file())
@@ -1263,22 +1269,24 @@ fn apply_profile(
     });
 
     let overlay = overlay.clone();
-    glib::timeout_add_local(Duration::from_millis(150), move || match receiver.try_recv() {
-        Ok(errors) => {
-            if toast {
-                if errors.is_empty() {
-                    toast_ok(&overlay, &ok_msg);
-                } else {
-                    overlay.add_toast(adw::Toast::new(&format!(
-                        "{} error(s) applying profile",
-                        errors.len()
-                    )));
+    glib::timeout_add_local(Duration::from_millis(150), move || {
+        match receiver.try_recv() {
+            Ok(errors) => {
+                if toast {
+                    if errors.is_empty() {
+                        toast_ok(&overlay, &ok_msg);
+                    } else {
+                        overlay.add_toast(adw::Toast::new(&format!(
+                            "{} error(s) applying profile",
+                            errors.len()
+                        )));
+                    }
                 }
+                glib::ControlFlow::Break
             }
-            glib::ControlFlow::Break
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
     });
 }
 
@@ -2170,7 +2178,10 @@ fn build_cpu_power_page(
         scale.set_draw_value(false);
         scale.set_hexpand(true);
         scale.set_width_request(160);
-        tip(&scale, &format!("{} · {}–{} W", lim.label, lim.min, lim.max));
+        tip(
+            &scale,
+            &format!("{} · {}–{} W", lim.label, lim.min, lim.max),
+        );
         row.add_suffix(&scale);
         preview.add(&row);
     }
@@ -2892,8 +2903,9 @@ fn apply_platform_profile(
     let ppt_scales = ppt_scales.clone();
     let ppt_suppress = ppt_suppress.clone();
     let name = name.to_string();
-    run_daemon_command_async(DaemonCommand::SetProfile(name.clone()), move |result| {
-        match result {
+    run_daemon_command_async(
+        DaemonCommand::SetProfile(name.clone()),
+        move |result| match result {
             Ok(DaemonResponse::Ok) => {
                 legion_core::config::remember_platform_profile(&name);
                 let show = name == "custom" && !ppt_scales.borrow().is_empty();
@@ -2910,13 +2922,16 @@ fn apply_platform_profile(
                     }
                     ppt_suppress.set(false);
                 }
-                toast_ok(&overlay, &format!("Switched to {}", friendly_profile(&name)));
+                toast_ok(
+                    &overlay,
+                    &format!("Switched to {}", friendly_profile(&name)),
+                );
             }
             Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
             Err(e) => toast_error(&overlay, &e),
             _ => {}
-        }
-    });
+        },
+    );
 }
 
 const MAX_POWER_WARNING: &str = "\
@@ -2997,9 +3012,8 @@ fn ensure_custom_then_ppt(
         let overlay = overlay.clone();
         let queue = queue.clone();
         let id = id.to_string();
-        run_daemon_command_async(
-            DaemonCommand::SetProfile("custom".into()),
-            move |result| match result {
+        run_daemon_command_async(DaemonCommand::SetProfile("custom".into()), move |result| {
+            match result {
                 Ok(DaemonResponse::Ok) => {
                     queue.set_fw_attr(&id, watts.to_string());
                     legion_core::config::remember_ppt(&id, watts);
@@ -3007,8 +3021,8 @@ fn ensure_custom_then_ppt(
                 Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
                 Err(e) => toast_error(&overlay, &e),
                 _ => {}
-            },
-        );
+            }
+        });
         return;
     }
     queue.set_fw_attr(id, watts.to_string());
@@ -3419,7 +3433,6 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let acked: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
 
-
     // Immediate daemon write (no hysteresis UI, no inline ack).
     let do_apply = {
         let scale_c = scale.clone();
@@ -3753,7 +3766,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         enabled_c.set_active(st.config.enabled);
                         scale_c.set_value(st.config.max_temp as f64);
                         value_c.set_text(&format!("{} °C", st.config.max_temp));
-                            apply_mute_c(st.config.enabled);
+                        apply_mute_c(st.config.enabled);
                         suppress_c.set(false);
                         acked_c.set(st.config.max_temp >= 96);
                         last_max_c.set(st.config.max_temp);
@@ -3976,10 +3989,7 @@ fn fan_card(
 
 // ─── Power ──────────────────────────────────────────────────────────────────
 
-fn build_battery_pages(
-    toast_overlay: &adw::ToastOverlay,
-    gate: &DaemonGate,
-) -> gtk::Box {
+fn build_battery_pages(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let status_page = page_lede("");
 
     // Chips on top — 3×2: Capacity · Voltage · Power · Health · Cycles · Limit
@@ -4180,7 +4190,8 @@ fn build_battery_pages(
             cap_v.set_text(&format!("{pct}%"));
             cap_d.set_text(&legion_core::battery::status().unwrap_or_default());
             pct_row.set_subtitle(&format!("{pct}%"));
-            st_row.set_subtitle(&legion_core::battery::status().unwrap_or_else(|| "Unknown".into()));
+            st_row
+                .set_subtitle(&legion_core::battery::status().unwrap_or_else(|| "Unknown".into()));
         }
         if let Some(v) = legion_core::battery::voltage() {
             volt_v.set_text(&format!("{v:.2} V"));
@@ -4254,87 +4265,89 @@ fn build_battery_pages(
         }
         std::thread::sleep(Duration::from_secs(3));
     });
-    glib::timeout_add_local(Duration::from_millis(300), move || match snap_rx.try_recv() {
-        Ok(s) => {
-            if let Some(pct) = s.pct {
-                pct_row.set_subtitle(&format!("{pct}%"));
-                cap_v_c.set_text(&format!("{pct}%"));
-                cap_d_c.set_text(s.status.as_deref().unwrap_or_default());
-                st_row.set_subtitle(s.status.as_deref().unwrap_or("Unknown"));
-                // Tint capacity chip: warm when discharging low, hot when very low? Use level thresholds.
-                cap_chip_c.remove_css_class("hot");
-                cap_chip_c.remove_css_class("warm");
-                if pct <= 20 {
-                    cap_chip_c.add_css_class("hot");
-                } else if pct <= 40 {
-                    cap_chip_c.add_css_class("warm");
+    glib::timeout_add_local(Duration::from_millis(300), move || {
+        match snap_rx.try_recv() {
+            Ok(s) => {
+                if let Some(pct) = s.pct {
+                    pct_row.set_subtitle(&format!("{pct}%"));
+                    cap_v_c.set_text(&format!("{pct}%"));
+                    cap_d_c.set_text(s.status.as_deref().unwrap_or_default());
+                    st_row.set_subtitle(s.status.as_deref().unwrap_or("Unknown"));
+                    // Tint capacity chip: warm when discharging low, hot when very low? Use level thresholds.
+                    cap_chip_c.remove_css_class("hot");
+                    cap_chip_c.remove_css_class("warm");
+                    if pct <= 20 {
+                        cap_chip_c.add_css_class("hot");
+                    } else if pct <= 40 {
+                        cap_chip_c.add_css_class("warm");
+                    }
                 }
-            }
-            if let Some(v) = s.voltage {
-                volt_l.set_subtitle(&format!("{v:.2} V"));
-                volt_v_c.set_text(&format!("{v:.2} V"));
-                volt_d_c.set_text("");
-                volt_chip_c.remove_css_class("hot");
-                volt_chip_c.remove_css_class("warm");
-            } else {
-                volt_v_c.set_text("—");
-                volt_d_c.set_text("no sensor");
-            }
-            if let Some(p) = s.power_w {
-                pow_l.set_subtitle(&format!("{p:.1} W"));
-                power_v_c.set_text(&format!("{p:.1} W"));
-                // detail: charging vs discharging
-                let st = s.status.as_deref().unwrap_or_default();
-                power_d_c.set_text(if st == "Charging" {
-                    "charging"
-                } else if st == "Discharging" {
-                    "discharging"
+                if let Some(v) = s.voltage {
+                    volt_l.set_subtitle(&format!("{v:.2} V"));
+                    volt_v_c.set_text(&format!("{v:.2} V"));
+                    volt_d_c.set_text("");
+                    volt_chip_c.remove_css_class("hot");
+                    volt_chip_c.remove_css_class("warm");
                 } else {
-                    ""
-                });
-                power_chip_c.remove_css_class("hot");
-                power_chip_c.remove_css_class("warm");
-                if p.abs() > 45.0 {
-                    power_chip_c.add_css_class("warm");
+                    volt_v_c.set_text("—");
+                    volt_d_c.set_text("no sensor");
                 }
-            } else {
-                pow_l.set_subtitle("—");
-                power_v_c.set_text("—");
-                power_d_c.set_text("no sensor");
-            }
-            if let (Some(n), Some(f)) = (s.energy_now, s.energy_full) {
-                en_l.set_subtitle(&format!("{n:.1} / {f:.1} Wh"))
-            }
-            if let Some(h) = s.health {
-                health_l.set_subtitle(&format!("{h:.0}%"));
-                health_v_c.set_text(&format!("{h:.0}%"));
-                health_d_c.set_text(if h < 80.0 { "worn" } else { "good" });
-                health_chip_c.remove_css_class("hot");
-                health_chip_c.remove_css_class("warm");
-                if h < 70.0 {
-                    health_chip_c.add_css_class("hot");
-                } else if h < 85.0 {
-                    health_chip_c.add_css_class("warm");
+                if let Some(p) = s.power_w {
+                    pow_l.set_subtitle(&format!("{p:.1} W"));
+                    power_v_c.set_text(&format!("{p:.1} W"));
+                    // detail: charging vs discharging
+                    let st = s.status.as_deref().unwrap_or_default();
+                    power_d_c.set_text(if st == "Charging" {
+                        "charging"
+                    } else if st == "Discharging" {
+                        "discharging"
+                    } else {
+                        ""
+                    });
+                    power_chip_c.remove_css_class("hot");
+                    power_chip_c.remove_css_class("warm");
+                    if p.abs() > 45.0 {
+                        power_chip_c.add_css_class("warm");
+                    }
+                } else {
+                    pow_l.set_subtitle("—");
+                    power_v_c.set_text("—");
+                    power_d_c.set_text("no sensor");
                 }
-            } else {
-                health_v_c.set_text("—");
-                health_d_c.set_text("no sensor");
+                if let (Some(n), Some(f)) = (s.energy_now, s.energy_full) {
+                    en_l.set_subtitle(&format!("{n:.1} / {f:.1} Wh"))
+                }
+                if let Some(h) = s.health {
+                    health_l.set_subtitle(&format!("{h:.0}%"));
+                    health_v_c.set_text(&format!("{h:.0}%"));
+                    health_d_c.set_text(if h < 80.0 { "worn" } else { "good" });
+                    health_chip_c.remove_css_class("hot");
+                    health_chip_c.remove_css_class("warm");
+                    if h < 70.0 {
+                        health_chip_c.add_css_class("hot");
+                    } else if h < 85.0 {
+                        health_chip_c.add_css_class("warm");
+                    }
+                } else {
+                    health_v_c.set_text("—");
+                    health_d_c.set_text("no sensor");
+                }
+                if let Some(c) = s.cycles {
+                    cycles_l.set_subtitle(&format!("{c}"));
+                    cycles_v_c.set_text(&format!("{c}"));
+                    cycles_d_c.set_text("charge cycles");
+                } else {
+                    cycles_v_c.set_text("—");
+                    cycles_d_c.set_text("no sensor");
+                }
+                limit_v_c.set_text(&format!("{}%", s.limit));
+                limit_d_c.set_text("charge cap");
+                cell_l.set_subtitle(format!("{} {} · {}", s.mfr, s.model, s.tech).trim());
+                glib::ControlFlow::Continue
             }
-            if let Some(c) = s.cycles {
-                cycles_l.set_subtitle(&format!("{c}"));
-                cycles_v_c.set_text(&format!("{c}"));
-                cycles_d_c.set_text("charge cycles");
-            } else {
-                cycles_v_c.set_text("—");
-                cycles_d_c.set_text("no sensor");
-            }
-            limit_v_c.set_text(&format!("{}%", s.limit));
-            limit_d_c.set_text("charge cap");
-            cell_l.set_subtitle(format!("{} {} · {}", s.mfr, s.model, s.tech).trim());
-            glib::ControlFlow::Continue
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(_) => glib::ControlFlow::Break,
         }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(_) => glib::ControlFlow::Break,
     });
 
     status_page
@@ -4944,9 +4957,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
                     "Installed · firmware read-only probe passed".to_string()
                 }
                 Ok(DaemonResponse::CurveOptimizer(status)) => status.reason,
-                _ if smu_installed => {
-                    "Driver loaded · restart the daemon to probe firmware".into()
-                }
+                _ if smu_installed => "Driver loaded · restart the daemon to probe firmware".into(),
                 _ => "Optional · enables temporary AMD Curve Optimizer controls".into(),
             };
             smu_row_c.set_subtitle(&smu_status);
@@ -5543,7 +5554,10 @@ mod tests {
         ];
         for id in known {
             let top = top_level_page(id);
-            assert!(page_title(top).is_some(), "top_level_page({id}) = {top} has no title");
+            assert!(
+                page_title(top).is_some(),
+                "top_level_page({id}) = {top} has no title"
+            );
             if let Some(tab) = hub_initial_tab(id) {
                 let hub = match top {
                     "cpu" => "cpu hub",

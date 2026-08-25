@@ -1967,7 +1967,10 @@ mod layout_consistency_tests {
     /// writer never sends (or vice versa).
     #[test]
     fn painter_layouts_cover_exactly_the_protocol_keycodes() {
-        for (layout, geom) in [(KeyboardLayout::De, LAYOUT_DE), (KeyboardLayout::Us, LAYOUT_US)] {
+        for (layout, geom) in [
+            (KeyboardLayout::De, LAYOUT_DE),
+            (KeyboardLayout::Us, LAYOUT_US),
+        ] {
             let mut painted: Vec<u16> = geom.iter().map(|k| k.code).collect();
             painted.sort_unstable();
             painted.dedup();

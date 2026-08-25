@@ -312,7 +312,12 @@ pub(crate) fn compute_cpu_usage(p_idle: u64, p_total: u64, c_idle: u64, c_total:
 
 /// Pure helper: compute watts from two RAPL energy samples (microjoules +
 /// instants). The single implementation behind `sample_cpu_power_w`.
-pub(crate) fn compute_cpu_power(e0: u64, t0: std::time::Instant, e1: u64, t1: std::time::Instant) -> f64 {
+pub(crate) fn compute_cpu_power(
+    e0: u64,
+    t0: std::time::Instant,
+    e1: u64,
+    t1: std::time::Instant,
+) -> f64 {
     let dt = t1.duration_since(t0).as_secs_f64();
     if dt >= 0.2 && e1 >= e0 {
         (e1 - e0) as f64 / dt / 1_000_000.0
@@ -362,7 +367,10 @@ mod tests {
 
     #[test]
     fn select_ssd_temp_priority() {
-        assert_eq!(select_ssd_temp(Some(40.0), Some(41.0), Some(42.0)), Some(40.0));
+        assert_eq!(
+            select_ssd_temp(Some(40.0), Some(41.0), Some(42.0)),
+            Some(40.0)
+        );
         assert_eq!(select_ssd_temp(None, Some(41.0), Some(42.0)), Some(41.0));
         assert_eq!(select_ssd_temp(None, None, Some(42.0)), Some(42.0));
         assert_eq!(select_ssd_temp(None, None, None), None);

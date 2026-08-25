@@ -532,10 +532,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             if v.exists() && p.exists() {
                 // An unreadable node (device mid-unplug) must not abort the
                 // whole scan — stop walking this branch, try the next hidraw.
-                match (
-                    std::fs::read_to_string(&v),
-                    std::fs::read_to_string(&p),
-                ) {
+                match (std::fs::read_to_string(&v), std::fs::read_to_string(&p)) {
                     (Ok(vendor), Ok(product)) => {
                         matched = vendor.trim().to_lowercase() == VID
                             && product.trim().to_lowercase() == PID;
@@ -1275,8 +1272,14 @@ mod tests {
     #[test]
     fn rgb_effect_from_name_aliases() {
         assert_eq!(RgbEffect::from_name("static"), Some(RgbEffect::Static));
-        assert_eq!(RgbEffect::from_name("Spiral"), Some(RgbEffect::ScrewRainbow));
-        assert_eq!(RgbEffect::from_name("rainbow"), Some(RgbEffect::RainbowWave));
+        assert_eq!(
+            RgbEffect::from_name("Spiral"),
+            Some(RgbEffect::ScrewRainbow)
+        );
+        assert_eq!(
+            RgbEffect::from_name("rainbow"),
+            Some(RgbEffect::RainbowWave)
+        );
         assert_eq!(RgbEffect::from_name("BREATH"), Some(RgbEffect::ColorPulse));
         assert_eq!(RgbEffect::from_name("off"), None);
         assert_eq!(RgbEffect::from_name("bogus"), None);

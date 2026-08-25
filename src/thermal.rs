@@ -104,11 +104,7 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
     let max_mc = cfg.max_temp as i32 * 1000;
     let restore_mc = (cfg.max_temp as i32 - HYSTERESIS) * 1000;
     if temp_mc >= max_mc && cur_max > MIN {
-        Some(
-            cur_max
-                .saturating_sub(down_step(temp_mc - max_mc))
-                .max(MIN),
-        )
+        Some(cur_max.saturating_sub(down_step(temp_mc - max_mc)).max(MIN))
     } else if temp_mc <= restore_mc && cur_max < MAX_FULL {
         Some(cur_max.saturating_add(STEP_UP).min(MAX_FULL))
     } else {

@@ -68,10 +68,7 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
 
 /// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
 pub fn rpm_label(fan: u8) -> String {
-    format_rpm_label(
-        read_target(fan).unwrap_or(0),
-        read_rpm(fan).unwrap_or(0),
-    )
+    format_rpm_label(read_target(fan).unwrap_or(0), read_rpm(fan).unwrap_or(0))
 }
 
 /// Set fan target RPM. 0 = auto mode.

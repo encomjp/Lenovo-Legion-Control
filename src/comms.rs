@@ -291,11 +291,9 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::SetChargeLimit(p) => format!("SetChargeLimit({p}%)"),
         DaemonCommand::GetChargeLimit => "GetChargeLimit".into(),
         DaemonCommand::GetCpuPower => "GetCpuPower".into(),
-        DaemonCommand::SetFwAttr { name, value } => format!(
-            "SetFwAttr({}={})",
-            sanitize_log(name),
-            sanitize_log(value)
-        ),
+        DaemonCommand::SetFwAttr { name, value } => {
+            format!("SetFwAttr({}={})", sanitize_log(name), sanitize_log(value))
+        }
         DaemonCommand::GetSmt => "GetSmt".into(),
         DaemonCommand::SetSmt(on) => format!("SetSmt({on})"),
         DaemonCommand::GetBoost => "GetBoost".into(),
@@ -461,7 +459,10 @@ mod tests {
     fn cmd_kind_is_bounded_and_independent_of_payload() {
         // Client-controlled strings must not create distinct map keys.
         for name in ["foo", "bar\nbaz", "x".repeat(200).as_str()] {
-            assert_eq!(cmd_kind(&DaemonCommand::SetProfile(name.to_string())), "SetProfile");
+            assert_eq!(
+                cmd_kind(&DaemonCommand::SetProfile(name.to_string())),
+                "SetProfile"
+            );
         }
         assert_eq!(
             cmd_kind(&DaemonCommand::SetFwAttr {
@@ -470,7 +471,10 @@ mod tests {
             }),
             "SetFwAttr"
         );
-        assert_eq!(cmd_kind(&DaemonCommand::SetLogLevel("trace\ninject".into())), "SetLogLevel");
+        assert_eq!(
+            cmd_kind(&DaemonCommand::SetLogLevel("trace\ninject".into())),
+            "SetLogLevel"
+        );
     }
 
     #[test]
@@ -500,7 +504,9 @@ mod tests {
             std::env::remove_var("XDG_RUNTIME_DIR");
         }
         let cands = socket_candidates();
-        assert!(cands.iter().any(|p| p == std::path::Path::new(SYSTEM_SOCKET)));
+        assert!(cands
+            .iter()
+            .any(|p| p == std::path::Path::new(SYSTEM_SOCKET)));
         assert!(!cands.iter().any(|p| p.starts_with("/tmp")));
         if let Some(v) = saved {
             unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) };
@@ -550,9 +556,7 @@ mod tests {
                 offset: -15,
                 acknowledge: true,
             },
-            DaemonCommand::ResetCurveOptimizerAcknowledged {
-                acknowledge: true,
-            },
+            DaemonCommand::ResetCurveOptimizerAcknowledged { acknowledge: true },
             DaemonCommand::GetCurveOptimizerPersistence,
             DaemonCommand::SetCurveOptimizerPersistence {
                 enabled: true,
@@ -627,12 +631,16 @@ mod tests {
             let decoded: Result<DaemonCommand, _> = bincode_opts().deserialize(raw);
             assert!(decoded.is_err(), "{raw:?} should not decode into a command");
         }
-        let decoded: DaemonCommand =
-            bincode_opts().deserialize(&[0x02, 0x00]).expect("known degenerate frame");
+        let decoded: DaemonCommand = bincode_opts()
+            .deserialize(&[0x02, 0x00])
+            .expect("known degenerate frame");
         match decoded {
             DaemonCommand::SetProfile(name) => {
                 assert!(name.is_empty(), "expected the degenerate empty name");
-                assert_eq!(crate::profile::set(&name).unwrap_err(), "empty profile name");
+                assert_eq!(
+                    crate::profile::set(&name).unwrap_err(),
+                    "empty profile name"
+                );
             }
             other => panic!("unexpected decode: {}", cmd_label(&other)),
         }

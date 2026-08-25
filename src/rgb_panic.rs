@@ -349,8 +349,8 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                 // whole scan — stop walking this branch, try the next hidraw.
                 match (fs::read_to_string(&v), fs::read_to_string(&p)) {
                     (Ok(vendor), Ok(product)) => {
-                        matched =
-                            vendor.trim().to_lowercase() == VID && product.trim().to_lowercase() == PID;
+                        matched = vendor.trim().to_lowercase() == VID
+                            && product.trim().to_lowercase() == PID;
                     }
                     _ => break,
                 }
