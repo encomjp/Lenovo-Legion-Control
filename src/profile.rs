@@ -121,6 +121,8 @@ const PPT_IDS: &[(&str, &str)] = &[
     ("ppt_pl2_sppt", "Short boost"),
     ("ppt_pl3_fppt", "Peak burst"),
     ("ppt_cpu_cl", "CPU share"),
+    ("cpu_temp", "CPU thermal limit"),
+    ("gpu_temp", "GPU thermal limit"),
 ];
 
 /// NVIDIA GPU power knobs (Other Mode WMI). Same Custom-mode gate as CPU PPT.
