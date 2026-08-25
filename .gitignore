@@ -28,3 +28,4 @@ modules.order
 .env
 .env.*
 !.env.example
+__pycache__/

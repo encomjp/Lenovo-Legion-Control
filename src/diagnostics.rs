@@ -11,6 +11,18 @@
 //! home-path redactor here — see `redact_home_paths`) and the self-check
 //! results.
 //!
+//! Endpoints — one resolution chain over two defaults
+//! ([`resolve_endpoint`]): explicit override > configured endpoint >
+//! [`DEFAULT_WAN_ENDPOINT`].
+//!
+//! * WAN alpha default ([`DEFAULT_WAN_ENDPOINT`]): HTTPS; TLS is terminated
+//!   at the operator's reverse proxy, which additionally enforces an
+//!   optional shared secret delivered by [`send`] as an
+//!   `X-Legion-Telemetry-Key` header (env `LEGION_TELEMETRY_KEY`).
+//! * Tailscale dev ([`DEFAULT_TAILSCALE_ENDPOINT`]): legacy plain-HTTP VPS
+//!   listener reachable only inside the tailnet; still selectable via
+//!   override or configured endpoint for development.
+//!
 //! Transport shells out to `curl` (present on every supported distro) to
 //! avoid adding an HTTPS dependency; the payload goes through a brand-new
 //! 0600 temp file (`create_new` — refuses pre-existing paths and symlinks)
@@ -24,9 +36,16 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-/// Default collector (IONOS VPS, Tailscale-internal during alpha).
-/// Public rollout: front it with nginx + TLS and change this constant.
-pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
+/// WAN alpha collector — PLACEHOLDER host until DNS/CDN is chosen; swap in
+/// the real hostname here after deploy. Served over HTTPS: TLS terminates at
+/// the operator's reverse proxy, which also validates the optional shared
+/// secret sent by [`send`] (env `LEGION_TELEMETRY_KEY`).
+pub const DEFAULT_WAN_ENDPOINT: &str = "https://legion-telemetry.example.com/v1/diagnostics";
+
+/// Legacy/dev collector on the operator's IONOS VPS — plain HTTP, reachable
+/// only inside the tailnet. Value frozen for existing dev setups; select it
+/// via override or configured endpoint.
+pub const DEFAULT_TAILSCALE_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
 
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 
@@ -244,14 +263,21 @@ pub fn collect() -> DiagnosticsReport {
     }
 }
 
-/// Endpoint resolution: explicit override > configured endpoint > default.
-/// Both override and configured value are trimmed first; a whitespace-only
-/// string is treated as unset.
+/// Endpoint resolution: explicit override > configured endpoint > WAN
+/// default ([`DEFAULT_WAN_ENDPOINT`]). Both override and configured value
+/// are trimmed first; a whitespace-only string is treated as unset. The
+/// legacy Tailscale listener remains reachable by pointing the override or
+/// configured endpoint at [`DEFAULT_TAILSCALE_ENDPOINT`].
 pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> String {
+    let from_env = std::env::var("LEGION_TELEMETRY_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let override_url = override_url.map(str::trim).filter(|s| !s.is_empty());
     let cfg_endpoint = cfg_endpoint.trim();
     override_url
         .map(str::to_string)
+        .or(from_env)
         .or_else(|| {
             if cfg_endpoint.is_empty() {
                 None
@@ -259,7 +285,7 @@ pub fn resolve_endpoint(override_url: Option<&str>, cfg_endpoint: &str) -> Strin
                 Some(cfg_endpoint.to_string())
             }
         })
-        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string())
+        .unwrap_or_else(|| DEFAULT_WAN_ENDPOINT.to_string())
 }
 
 /// Bound a string to `max_chars` characters (UTF-8 safe, no suffix marker
@@ -305,32 +331,68 @@ fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
     Ok(tmp)
 }
 
+/// Optional shared secret for the WAN collector, read per-send from the
+/// environment (`LEGION_TELEMETRY_KEY`). `None` when unset or empty. The
+/// value must never appear in logs or error strings — callers pass it only
+/// into [`build_curl_args`], which embeds it in a single header argument.
+fn telemetry_key_from_env() -> Option<String> {
+    std::env::var("LEGION_TELEMETRY_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+}
+
+/// Pure builder for the curl argument list used by [`send`]; factored out so
+/// it is unit-testable (spawning curl itself is not). `key`, when present
+/// and non-empty after trimming, contributes exactly one `-H
+/// X-Legion-Telemetry-Key: …` pair; without a key the pair is omitted and no
+/// blank header is ever sent. The key appears only in that one argument.
+fn build_curl_args(endpoint: &str, tmp_path: &str, key: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "-sS".to_string(),
+        "--max-time".to_string(),
+        "15".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
+        "-H".to_string(),
+        "Content-Type: application/json".to_string(),
+    ];
+    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+        args.push("-H".to_string());
+        args.push(format!("X-Legion-Telemetry-Key: {key}"));
+    }
+    args.extend([
+        "--data-binary".to_string(),
+        format!("@{tmp_path}"),
+        "-w".to_string(),
+        "\n%{http_code}".to_string(),
+        endpoint.to_string(),
+    ]);
+    args
+}
+
 /// POST the serialized report via curl. Returns the server response body on
 /// 2xx. Every error carries its evidence: HTTP status (parsed numerically),
 /// a response-body echo capped at `MAX_ERR_BODY_CHARS`, plus the curl exit
 /// code and a trimmed stderr snippet (≤ `MAX_ERR_STDERR_CHARS`) whenever
 /// curl itself failed — so transport problems are diagnosable from the
-/// message alone. The temp payload is removed on every path.
+/// message alone. The temp payload is removed on every path. When
+/// `LEGION_TELEMETRY_KEY` is set and non-empty, the request carries the
+/// shared secret as an `X-Legion-Telemetry-Key` header (checked by the WAN
+/// reverse proxy); the value itself never reaches any error message.
 pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String> {
     let json = serde_json::to_string(report).map_err(|e| format!("serialize: {e}"))?;
     let tmp = create_temp_payload(&json)?;
 
     let outcome = (|| -> Result<String, String> {
+        // Per-send env read: the secret flows into the argument list only
+        // and is deliberately absent from every error string built below.
+        let key = telemetry_key_from_env();
         let out = std::process::Command::new("curl")
-            .args([
-                "-sS",
-                "--max-time",
-                "15",
-                "-X",
-                "POST",
-                "-H",
-                "Content-Type: application/json",
-                "--data-binary",
-                format!("@{}", tmp.display()).as_str(),
-                "-w",
-                "\n%{http_code}",
+            .args(build_curl_args(
                 endpoint,
-            ])
+                &tmp.to_string_lossy(),
+                key.as_deref(),
+            ))
             .output()
             .map_err(|e| {
                 format!(
@@ -527,7 +589,7 @@ mod tests {
     fn endpoint_resolution_precedence() {
         assert_eq!(resolve_endpoint(Some("http://x"), ""), "http://x");
         assert_eq!(resolve_endpoint(None, "http://y"), "http://y");
-        assert_eq!(resolve_endpoint(None, ""), DEFAULT_ENDPOINT);
+        assert_eq!(resolve_endpoint(None, ""), DEFAULT_WAN_ENDPOINT);
         assert_eq!(resolve_endpoint(Some(""), "http://y"), "http://y");
     }
 
@@ -536,13 +598,94 @@ mod tests {
     /// trimmed off meaningful overrides.
     #[test]
     fn endpoint_resolution_whitespace_only_override_is_unset() {
-        assert_eq!(resolve_endpoint(Some("   "), ""), DEFAULT_ENDPOINT);
+        assert_eq!(resolve_endpoint(Some("   "), ""), DEFAULT_WAN_ENDPOINT);
         assert_eq!(resolve_endpoint(Some("\t\n "), "http://y"), "http://y");
         assert_eq!(resolve_endpoint(Some("  http://x  "), ""), "http://x");
         assert_eq!(
             resolve_endpoint(Some("  http://x  "), "http://y"),
             "http://x"
         );
+    }
+
+    /// The legacy/dev Tailscale endpoint must keep its historical value
+    /// byte-for-byte so existing dev overrides/configs keep working.
+    #[test]
+    fn tailscale_default_endpoint_value_is_frozen() {
+        assert_eq!(
+            DEFAULT_TAILSCALE_ENDPOINT,
+            "http://127.0.0.1:8787/v1/diagnostics"
+        );
+    }
+
+    /// Argument builder without a secret: base flags retained, `@tmp`
+    /// payload and trailing endpoint present, and no telemetry-key header.
+    #[test]
+    fn build_curl_args_without_key_omits_secret_header() {
+        let args = build_curl_args("https://ep.example/v1/diagnostics", "/tmp/p.json", None);
+        for flag in ["-sS", "--max-time", "15", "-X", "POST", "-w"] {
+            assert!(args.iter().any(|a| a == flag), "flag {flag} missing");
+        }
+        assert!(args.contains(&"\n%{http_code}".to_string()));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-H" && w[1] == "Content-Type: application/json"));
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--data-binary" && w[1] == "@/tmp/p.json"));
+        assert_eq!(args.last().unwrap(), "https://ep.example/v1/diagnostics");
+        assert!(
+            !args.iter().any(|a| a.contains("X-Legion-Telemetry-Key")),
+            "secret header without a key: {args:?}"
+        );
+    }
+
+    /// Argument builder with a secret: exactly one `-H` pair carries the
+    /// header, and the key appears in precisely one argument (nothing else
+    /// echoes it — it must never leak into other args or error strings).
+    #[test]
+    fn build_curl_args_with_key_adds_single_header_pair() {
+        let args = build_curl_args(
+            "https://ep.example/v1/diagnostics",
+            "/tmp/p.json",
+            Some("s3cret"),
+        );
+        let header_positions: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter_map(|(i, a)| a.contains("X-Legion-Telemetry-Key").then_some(i))
+            .collect();
+        assert_eq!(
+            header_positions.len(),
+            1,
+            "header not exactly once: {args:?}"
+        );
+        let pos = header_positions[0];
+        assert_eq!(args[pos], "X-Legion-Telemetry-Key: s3cret");
+        assert!(pos > 0 && args[pos - 1] == "-H", "header not in an -H pair");
+
+        // Base shape intact around the inserted pair.
+        for flag in ["-sS", "--max-time", "15", "-X", "POST", "-w"] {
+            assert!(args.iter().any(|a| a == flag), "flag {flag} missing");
+        }
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "--data-binary" && w[1] == "@/tmp/p.json"));
+        assert_eq!(args.last().unwrap(), "https://ep.example/v1/diagnostics");
+        // The key itself surfaces only inside that one header argument.
+        assert_eq!(
+            args.iter().filter(|a| a.contains("s3cret")).count(),
+            1,
+            "key echoed more than once: {args:?}"
+        );
+    }
+
+    /// Blank secrets are dropped rather than sent as empty/blank headers.
+    #[test]
+    fn build_curl_args_drops_blank_keys() {
+        for blank in [None, Some(""), Some("   ")] {
+            let args = build_curl_args("https://ep/x", "/tmp/p", blank);
+            assert!(!args.iter().any(|a| a.contains("X-Legion-Telemetry-Key")));
+        }
     }
 
     /// Unit coverage for the log-tail redactor: literal $HOME, foreign

@@ -1,0 +1,25 @@
+[Unit]
+Description=Legion Telemetry Portal (Tailscale-only dashboard)
+After=network.target tailedscale.service
+Wants=tailscaled.service
+
+[Service]
+Type=simple
+User=legion-tel
+Group=legion-tel
+WorkingDirectory=/opt/legion-telemetry/server/wan
+EnvironmentFile=-/etc/default/legion-telemetry
+Environment=LEGION_PORTAL_HOST=127.0.0.1
+ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.portal:app --host ${LEGION_PORTAL_HOST} --port 8788 --workers 1
+Restart=on-failure
+RestartSec=3
+
+# Hardening — portal is auth-less BY DESIGN and must never leave the tailnet
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/legion-telemetry
+
+[Install]
+WantedBy=multi-user.target

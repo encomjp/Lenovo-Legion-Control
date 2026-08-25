@@ -1,0 +1,23 @@
+[Unit]
+Description=Legion Telemetry Collector (WAN ingest)
+After=network.target
+
+[Service]
+Type=simple
+User=legion-tel
+Group=legion-tel
+WorkingDirectory=/opt/legion-telemetry/server/wan
+EnvironmentFile=-/etc/default/legion-telemetry
+ExecStart=/opt/legion-telemetry/venv/bin/python -m uvicorn server.wan.app:app --host 127.0.0.1 --port 8787 --workers 1
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/legion-telemetry
+
+[Install]
+WantedBy=multi-user.target
