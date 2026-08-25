@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::models::{self, ModelProfile};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -49,7 +50,16 @@ pub struct FanCapability {
     pub current_rpm: u32,
 }
 
+/// Hardware identity is stable for the machine's uptime — cache it so
+/// repeated detection never re-spawns `nvidia-smi` (up to 3 s per call).
+/// `DeviceInfo.current_rpm` is therefore a detection-time snapshot, not live
+/// telemetry; live RPM comes from `fans::read_rpm`.
 pub fn detect() -> DeviceInfo {
+    static DETECTED: OnceLock<DeviceInfo> = OnceLock::new();
+    DETECTED.get_or_init(detect_uncached).clone()
+}
+
+fn detect_uncached() -> DeviceInfo {
     let dmi_name = read_dmi("product_name").unwrap_or_default();
     let dmi_version = read_dmi("product_version").unwrap_or_default();
     let dmi_family = read_dmi("product_family").unwrap_or_default();

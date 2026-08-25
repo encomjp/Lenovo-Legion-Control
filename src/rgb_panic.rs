@@ -533,21 +533,32 @@ pub fn scan_kernel_rgb_faults() -> Vec<String> {
 }
 
 fn kernel_log_blob() -> String {
-    // Prefer journalctl (works without CAP_SYSLOG on many systems).
-    if let Ok(o) = Command::new("journalctl")
-        .args(["-k", "-b", "--no-pager", "-o", "cat"])
+    // Prefer journalctl (works without CAP_SYSLOG on many systems). Only the
+    // most recent lines matter — the whole boot log would be a multi-MB
+    // subprocess result on the GUI/watchdog hot path.
+    let raw = if let Ok(o) = Command::new("journalctl")
+        .args(["-k", "-b", "--no-pager", "-o", "cat", "-n", "200"])
         .output()
     {
         if o.status.success() {
-            return String::from_utf8_lossy(&o.stdout).into_owned();
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        } else {
+            String::new()
         }
-    }
-    if let Ok(o) = Command::new("dmesg").output() {
+    } else if let Ok(o) = Command::new("dmesg").output() {
         if o.status.success() {
-            return String::from_utf8_lossy(&o.stdout).into_owned();
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        } else {
+            String::new()
         }
+    } else {
+        String::new()
+    };
+    let mut lines: Vec<&str> = raw.lines().collect();
+    if lines.len() > 200 {
+        lines.drain(..lines.len() - 200);
     }
-    String::new()
+    lines.join("\n")
 }
 
 struct OpenOptionsCompat;

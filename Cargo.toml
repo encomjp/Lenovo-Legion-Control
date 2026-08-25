@@ -61,3 +61,4 @@ path = "src/setup-helper/main.rs"
 opt-level = 3
 lto = true
 strip = true
+codegen-units = 1
