@@ -16,6 +16,8 @@ cd lenovo-legion-tool && ./install.sh
 
 → **[Full project README](./lenovo-legion-tool/README.md)** · **[Architecture](./lenovo-legion-tool/docs/ARCHITECTURE.md)** · **[Usage](./lenovo-legion-tool/docs/USAGE.md)**
 
+Full change history: [CHANGELOG.md](CHANGELOG.md).
+
 ## Repo layout
 
 ```
