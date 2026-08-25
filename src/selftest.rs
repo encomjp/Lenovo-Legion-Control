@@ -221,27 +221,27 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         "intel_pstate",
         true,
         if crate::intel::pstate_available() {
-            "present".into()
+            String::from("present")
         } else {
-            "not present (AMD)".into()
+            String::from("not present (AMD)")
         },
     ));
     out.push(check(
         "intel_uncore",
         true,
         if crate::intel::uncore_available() {
-            "present".into()
+            String::from("present")
         } else {
-            "not present (AMD)".into()
+            String::from("not present (AMD)")
         },
     ));
     out.push(check(
         "intel_msr",
         true,
         if crate::intel_msr::is_available() {
-            "present".into()
+            String::from("present")
         } else {
-            "not present (AMD)".into()
+            String::from("not present (AMD)")
         },
     ));
 
