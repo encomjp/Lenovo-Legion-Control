@@ -190,6 +190,9 @@ pub struct CpuTopology {
     pub present: BTreeSet<u32>,
 }
 
+/// Field setter used by [`CpuTopology::refresh`]'s table-driven loop.
+type TopologySetter = fn(&mut CpuTopology, BTreeSet<u32>);
+
 impl CpuTopology {
     /// Discover topology from sysfs.
     ///
@@ -209,7 +212,7 @@ impl CpuTopology {
 
         // Table-driven to mirror LLLT's vec-of-closures style but without
         // boxing.
-        let files: [(&str, fn(&mut Self, BTreeSet<u32>)); 4] = [
+        let files: [(&str, TopologySetter); 4] = [
             ("offline", |t, v| t.offline = v),
             ("online", |t, v| t.online = v),
             ("possible", |t, v| t.possible = v),
