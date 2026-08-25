@@ -45,6 +45,10 @@ The GUI, CLI, and widget talk to `legion-daemon` for privileged operations. The 
 
 [Open the architecture diagram as PNG](docs/assets/legion-control-overview.png) · [View the SVG source](docs/assets/legion-control-overview.svg) · [Read the Architecture Guide](docs/ARCHITECTURE.md)
 
+## Alpha telemetry (opt-in)
+
+Alpha builds can send **one anonymized JSON** report — hardware model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/Curve-Optimizer settings, settings digest, sanitized daemon-log tail, self-check results — over encrypted HTTPS to the developer's collector ([`server/wan/`](server/wan/README.md)). The operator reviews reports in a web portal reachable only over Tailscale. **Off by default**, enabled in Setup; see the [privacy statement](server/wan/PRIVACY.md). Never included: hostname, username, serials, MAC/IP addresses. Self-hosters can run their own collector and point clients at it via `LEGION_TELEMETRY_URL`, sharing its secret through `LEGION_TELEMETRY_KEY`.
+
 ## Hardware support
 
 The project is verified on the Lenovo Legion Pro 7 16AFR10H (machine type `83RU`) with a Gen 10 Spectrum RGB keyboard (`048d:c197`). `048d:c193` is a separate Lenovo Lighting controller covered by the udev rule, not the Spectrum implementation. Other Gen 10 Legion models are likely-compatible but not verified here; older generations use different RGB protocols. Check the controller before expecting Spectrum support:
