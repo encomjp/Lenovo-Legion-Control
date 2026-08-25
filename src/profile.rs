@@ -15,13 +15,28 @@ const CLASS_DIR: &str = "/sys/class/platform-profile";
 
 /// First platform-profile handler exposing `file` ("profile"/"choices").
 fn handler_attr_path(file: &str) -> Option<PathBuf> {
-    let dir = fs::read_dir(CLASS_DIR).ok()?;
+    let dir = match fs::read_dir(CLASS_DIR) {
+        Ok(d) => d,
+        Err(e) => {
+            log::debug!("profile: handler_attr_path('{file}'): {CLASS_DIR} unreadable: {e}");
+            return None;
+        }
+    };
+    let mut handlers = 0usize;
     for entry in dir.flatten() {
         let attr = entry.path().join(file);
+        handlers += 1;
         if attr.is_file() {
+            log::debug!(
+                "profile: handler_attr_path('{file}') matched {} after scanning {handlers} handler entries",
+                attr.display()
+            );
             return Some(attr);
         }
     }
+    log::debug!(
+        "profile: handler_attr_path('{file}'): no handler exposes '{file}' ({handlers} entries scanned)"
+    );
     None
 }
 
@@ -50,9 +65,21 @@ pub fn current() -> String {
 
 pub fn choices() -> Vec<String> {
     let path = handler_choices_path().unwrap_or_else(|| PathBuf::from(LEGACY_CHOICES));
-    fs::read_to_string(path)
-        .map(|s| s.split_whitespace().map(String::from).collect())
-        .unwrap_or_default()
+    match fs::read_to_string(&path) {
+        Ok(s) => {
+            let parsed: Vec<String> = s.split_whitespace().map(String::from).collect();
+            log::debug!(
+                "profile: choices ← {} token(s) from {}",
+                parsed.len(),
+                path.display()
+            );
+            parsed
+        }
+        Err(e) => {
+            log::debug!("profile: choices read failed on {}: {e}", path.display());
+            Vec::new()
+        }
+    }
 }
 
 /// Set the platform profile. Writes the class handler when available so
@@ -60,10 +87,15 @@ pub fn choices() -> Vec<String> {
 pub fn set(profile: &str) -> Result<(), String> {
     let name = profile.trim();
     if name.is_empty() {
+        log::debug!("profile: set rejected — empty profile name");
         return Err("empty profile name".into());
     }
     let allowed = choices();
     if !allowed.is_empty() && !allowed.iter().any(|c| c == name) {
+        log::debug!(
+            "profile: set '{name}' rejected — allowed: [{}]",
+            allowed.join(", ")
+        );
         return Err(format!(
             "Profile '{name}' not in choices: {}",
             allowed.join(", ")
@@ -77,6 +109,10 @@ pub fn set(profile: &str) -> Result<(), String> {
 
     // Legacy path cannot set custom (kernel returns -EINVAL).
     if name == "custom" {
+        log::debug!(
+            "profile: set 'custom' rejected — no class handler and the legacy \
+             aggregate path hard-rejects custom"
+        );
         return Err(
             "No platform-profile class handler; kernel rejects writing 'custom' \
              to /sys/firmware/acpi/platform_profile"
@@ -165,17 +201,32 @@ const GPU_PPT_IDS: &[(&str, &str, LimitUnit)] = &[
 ];
 
 fn fw_attr_dir(attr: &str) -> Option<PathBuf> {
-    let root = fs::read_dir(FW_ATTR_ROOT).ok()?;
+    let root = match fs::read_dir(FW_ATTR_ROOT) {
+        Ok(r) => r,
+        Err(e) => {
+            log::debug!("profile: fw_attr_dir('{attr}'): {FW_ATTR_ROOT} unreadable: {e}");
+            return None;
+        }
+    };
+    let mut drivers = 0usize;
     for entry in root.flatten() {
         let name = entry.file_name();
         let n = name.to_string_lossy();
         if n.starts_with("lenovo-wmi-other") {
+            drivers += 1;
             let dir = entry.path().join("attributes").join(attr);
             if dir.is_dir() {
+                log::debug!(
+                    "profile: fw_attr_dir('{attr}') matched driver '{n}' → {}",
+                    dir.display()
+                );
                 return Some(dir);
             }
         }
     }
+    log::debug!(
+        "profile: fw_attr_dir('{attr}'): no attribute dir under {drivers} lenovo-wmi-other driver(s)"
+    );
     None
 }
 
@@ -187,9 +238,14 @@ fn collect_limits(ids: &[(&'static str, &'static str, LimitUnit)]) -> Vec<PptLim
     let mut out = Vec::new();
     for (id, label, unit) in ids {
         let Some(dir) = fw_attr_dir(id) else {
+            log::debug!("profile: collect_limits '{id}' ({label}): attribute dir absent — skipped");
             continue;
         };
         let Some(current) = read_u32_file(&dir.join("current_value")) else {
+            log::debug!(
+                "profile: collect_limits '{id}' ({label}): current_value unreadable in {} — skipped",
+                dir.display()
+            );
             continue;
         };
         let default = read_u32_file(&dir.join("default_value")).unwrap_or(current);
@@ -197,8 +253,14 @@ fn collect_limits(ids: &[(&'static str, &'static str, LimitUnit)]) -> Vec<PptLim
         let max = read_u32_file(&dir.join("max_value")).unwrap_or(current);
         // Skip knobs the firmware exposes but does not actually range/tune.
         if max <= min {
+            log::debug!(
+                "profile: collect_limits '{id}' ({label}): degenerate range (min={min}, max={max}) — skipped"
+            );
             continue;
         }
+        log::debug!(
+            "profile: collect_limits '{id}' ({label}): current={current} default={default} min={min} max={max}"
+        );
         out.push(PptLimit {
             id,
             label,
@@ -234,18 +296,30 @@ pub fn all_ppt_limits() -> Vec<PptLimit> {
 /// The daemon's SetFwAttr gate MUST use this (prefix checks caused a drift
 /// where cpu_temp/gpu_temp passed the lib but were rejected by the daemon).
 pub fn is_known_fw_attr(attr: &str) -> bool {
-    PPT_IDS.iter().any(|(id, _, _)| *id == attr) || GPU_PPT_IDS.iter().any(|(id, _, _)| *id == attr)
+    let known = PPT_IDS.iter().any(|(id, _, _)| *id == attr)
+        || GPU_PPT_IDS.iter().any(|(id, _, _)| *id == attr);
+    log::trace!("profile: is_known_fw_attr('{attr}') → {known}");
+    known
 }
 
 /// Unit for a firmware attribute; defaults to Watts for unknown ids
 /// (unknown ids are rejected by set_ppt anyway).
 pub fn limit_unit(attr: &str) -> LimitUnit {
-    PPT_IDS
+    let found = PPT_IDS
         .iter()
         .find(|(id, _, _)| *id == attr)
         .or_else(|| GPU_PPT_IDS.iter().find(|(id, _, _)| *id == attr))
-        .map(|(_, _, u)| *u)
-        .unwrap_or(LimitUnit::Watts)
+        .map(|(_, _, u)| *u);
+    match found {
+        Some(unit) => {
+            log::trace!("profile: limit_unit('{attr}') → {unit:?}");
+            unit
+        }
+        None => {
+            log::trace!("profile: limit_unit('{attr}') unknown → Watts (default)");
+            LimitUnit::Watts
+        }
+    }
 }
 
 pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
@@ -262,7 +336,14 @@ pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
     const ATTEMPTS: usize = 8;
     for attempt in 0..ATTEMPTS {
         match fs::write(&path, format!("{value}\n")) {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                log::debug!(
+                    "profile: fw-attr {attr}={value} written ok on attempt {}/{}",
+                    attempt + 1,
+                    ATTEMPTS
+                );
+                return Ok(());
+            }
             Err(e) if e.raw_os_error() == Some(16) && attempt + 1 < ATTEMPTS => {
                 log::debug!("fw-attr {attr} busy; retry {}/{}", attempt + 2, ATTEMPTS);
                 std::thread::sleep(std::time::Duration::from_millis(200));
@@ -282,11 +363,16 @@ pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
     // All paths inside the loop either return Ok or Err; this is unreachable
     // but the compiler can't prove it. Use Err as a safety net instead of panic.
     #[allow(unreachable_code)]
-    Err("retry loop exhausted without result".into())
+    {
+        log::warn!("profile: fw-attr {attr}={value}: still busy after {ATTEMPTS} attempts");
+        Err("retry loop exhausted without result".into())
+    }
 }
 
 pub fn ppt_available() -> bool {
-    !all_ppt_limits().is_empty()
+    let available = !all_ppt_limits().is_empty();
+    log::debug!("profile: ppt_available → {available}");
+    available
 }
 
 #[cfg(test)]

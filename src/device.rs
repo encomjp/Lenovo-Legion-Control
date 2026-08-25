@@ -331,21 +331,33 @@ fn collect_fans_from_hwmon(
     profile: Option<&'static ModelProfile>,
 ) -> Vec<FanCapability> {
     let mut ids = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(hw) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if let Some(rest) = name.strip_prefix("fan") {
-                if let Some(num) = rest.strip_suffix("_input") {
-                    if let Ok(id) = num.parse::<u8>() {
-                        ids.push(id);
+    let disp = hw.display();
+    match std::fs::read_dir(hw) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        log::trace!("fan probe: {disp} dir entry error: {e}");
+                        continue;
+                    }
+                };
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(rest) = name.strip_prefix("fan") {
+                    if let Some(num) = rest.strip_suffix("_input") {
+                        if let Ok(id) = num.parse::<u8>() {
+                            ids.push(id);
+                        }
                     }
                 }
             }
         }
+        Err(e) => {
+            log::debug!("fan probe: {disp} readdir failed ({e}) — treating as no fan channels")
+        }
     }
     ids.sort_unstable();
     ids.dedup();
-    let disp = hw.display();
     log::trace!("fan probe: {disp} fan channels discovered: {ids:?}");
 
     ids.into_iter()
@@ -476,7 +488,14 @@ fn usb_hid_present(vid: &str, pid: &str) -> bool {
         log::trace!("hid probe: /sys/bus/hid/devices unreadable");
         return false;
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                log::trace!("hid probe: /sys/bus/hid/devices entry error: {e}");
+                continue;
+            }
+        };
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
         // HID_ID style in dirname: 0003:048D:C197.000B
         let parts: Vec<&str> = name.split(':').collect();
@@ -490,6 +509,8 @@ fn usb_hid_present(vid: &str, pid: &str) -> bool {
                 );
                 return true;
             }
+        } else {
+            log::trace!("hid probe: unexpected device dirname {name:?} — skipped");
         }
     }
     log::trace!("hid probe: {vid}:{pid} absent");
@@ -616,7 +637,9 @@ fn guess_series(marketing: &str) -> &'static str {
 }
 
 fn read_dmi(field: &str) -> Option<String> {
-    let value = std::fs::read_to_string(format!("/sys/class/dmi/id/{field}"))
+    let path = format!("/sys/class/dmi/id/{field}");
+    log::trace!("dmi: reading {path}");
+    let value = std::fs::read_to_string(&path)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
@@ -628,11 +651,19 @@ fn read_dmi(field: &str) -> Option<String> {
 }
 
 fn read_cpu_model() -> Option<String> {
-    for line in std::fs::read_to_string("/proc/cpuinfo").ok()?.lines() {
+    let text = match std::fs::read_to_string("/proc/cpuinfo") {
+        Ok(t) => t,
+        Err(e) => {
+            log::trace!("cpu model: /proc/cpuinfo unreadable: {e}");
+            return None;
+        }
+    };
+    for line in text.lines() {
         if line.starts_with("model name") {
             return line.split(':').nth(1).map(|s| s.trim().to_string());
         }
     }
+    log::trace!("cpu model: /proc/cpuinfo has no \"model name\" line");
     None
 }
 

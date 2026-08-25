@@ -41,7 +41,13 @@ pub struct SensorReadings {
 }
 
 fn read_file(path: &Path) -> Option<String> {
-    let res = fs::read_to_string(path).ok().map(|s| s.trim().to_string());
+    let res = match fs::read_to_string(path) {
+        Ok(s) => Some(s.trim().to_string()),
+        Err(e) => {
+            log::debug!("sensors::read_file — {} returned None: {e}", path.display());
+            None
+        }
+    };
     if let Some(v) = &res {
         log::trace!("sensors::read_file: {} = {v:?}", path.display());
     } else {
@@ -51,7 +57,19 @@ fn read_file(path: &Path) -> Option<String> {
 }
 
 fn read_int(path: &Path) -> Option<i64> {
-    let res = read_file(path).and_then(|s| s.parse().ok());
+    let res = match read_file(path) {
+        Some(s) => match s.parse::<i64>() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                log::trace!(
+                    "sensors::read_int — {} returned None: {e} (raw={s:?})",
+                    path.display()
+                );
+                None
+            }
+        },
+        None => None,
+    };
     if let Some(v) = &res {
         log::trace!("sensors::read_int: {} = {v}", path.display());
     } else {
@@ -60,13 +78,56 @@ fn read_int(path: &Path) -> Option<i64> {
     res
 }
 
+/// Iterate a directory, logging (not silently dropping) readdir failures.
+fn read_dir_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
+    match fs::read_dir(dir) {
+        Ok(rd) => rd.flatten().collect(),
+        Err(e) => {
+            log::debug!("sensors::read_dir_entries — {} failed: {e}", dir.display());
+            Vec::new()
+        }
+    }
+}
+
+/// One-shot diagnostic: report how (and whether) `nvidia-smi` resolves from
+/// PATH. Remote-troubleshooting aid for "dGPU readings are -1.0" reports.
+/// Spawn mechanics (duration, exit code, stdout size) live in crate::dgpu.
+fn log_nvidia_smi_path_once() {
+    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if ONCE.set(()).is_err() {
+        return; // already ran this process
+    }
+    let Some(paths) = std::env::var_os("PATH") else {
+        log::warn!("sensors::nvidia_smi — PATH is unset; cannot locate nvidia-smi");
+        return;
+    };
+    let dirs: Vec<PathBuf> = std::env::split_paths(&paths).collect();
+    for dir in &dirs {
+        let candidate = dir.join("nvidia-smi");
+        if candidate.is_file() {
+            log::debug!(
+                "sensors::nvidia_smi — binary resolved from PATH: {} ({} PATH dir(s) searched)",
+                candidate.display(),
+                dirs.len()
+            );
+            return;
+        }
+    }
+    log::warn!(
+        "sensors::nvidia_smi — nvidia-smi not found in any of {} PATH dir(s) — dGPU readings will be unavailable",
+        dirs.len()
+    );
+}
+
 /// Discover hwmon devices by name, returning their sysfs paths.
 pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
+    let mut scanned = 0usize;
     let base = Path::new("/sys/class/hwmon");
     match fs::read_dir(base) {
         Ok(entries) => {
             for entry in entries.flatten() {
+                scanned += 1;
                 let name_file = entry.path().join("name");
                 if let Some(n) = read_file(&name_file) {
                     log::trace!(
@@ -91,6 +152,9 @@ pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
         Err(e) => log::warn!("sensors::find_hwmon: {base:?} unreadable: {e}"),
     }
     log::debug!(
+        "sensors::find_hwmon — scanned {scanned} dir(s) under /sys/class/hwmon while looking for '{name}'"
+    );
+    log::debug!(
         "sensors::find_hwmon: '{name}' → {} match(es) {:?}",
         paths.len(),
         paths
@@ -109,39 +173,50 @@ pub fn read_all() -> SensorReadings {
 
     // ─── CPU (k10temp) ───
     if let Some(hw) = hwmon_by_name("k10temp") {
-        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+        let mut labels_seen: Vec<(String, &str)> = Vec::new();
+        for entry in read_dir_entries(&hw) {
             let fname = entry.file_name().to_string_lossy().to_string();
             if fname.ends_with("_label") {
                 if let Some(label) = read_file(&entry.path()) {
                     let input_path = hw.join(fname.replace("_label", "_input"));
                     if let Some(val) = read_int(&input_path) {
                         let temp = val as f64 / 1000.0;
-                        match label.as_str() {
+                        let field = match label.as_str() {
                             "Tctl" => {
                                 log::debug!("sensors::read_all: k10temp Tctl → cpu_temp={temp}");
                                 s.cpu_temp = temp;
+                                "cpu_temp"
                             }
                             "Tccd1" => {
                                 log::debug!("sensors::read_all: k10temp Tccd1 → cpu_temp_1={temp}");
                                 s.cpu_temp_1 = temp;
+                                "cpu_temp_1"
                             }
                             "Tccd2" => {
                                 log::debug!("sensors::read_all: k10temp Tccd2 → cpu_temp_2={temp}");
                                 s.cpu_temp_2 = temp;
+                                "cpu_temp_2"
                             }
                             other => {
-                                log::trace!("sensors::read_all: k10temp label '{other}' not mapped")
+                                log::trace!(
+                                    "sensors::read_all: k10temp label '{other}' not mapped"
+                                );
+                                "(unmapped)"
                             }
-                        }
+                        };
+                        labels_seen.push((label, field));
+                    } else {
+                        labels_seen.push((label, "<input unreadable>"));
                     }
                 }
             }
         }
+        log::debug!("sensors::read_all — k10temp labels encountered: {labels_seen:?}");
     }
 
     // ─── EC (legion_hwmon) ───
     if let Some(hw) = hwmon_by_name("legion_hwmon") {
-        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+        for entry in read_dir_entries(&hw) {
             let fname = entry.file_name().to_string_lossy().to_string();
             if fname.ends_with("_label") {
                 if let Some(label) = read_file(&entry.path()) {
@@ -188,6 +263,7 @@ pub fn read_all() -> SensorReadings {
     // ─── dGPU (nvidia-smi) ───
     // Use -1.0 as "unavailable" so the UI does not show "0.0°C" which looks
     // like a frozen sensor.
+    log_nvidia_smi_path_once();
     let t_temp = std::time::Instant::now();
     let temp = crate::dgpu::read_temp();
     log::debug!(
@@ -230,7 +306,7 @@ pub fn read_all() -> SensorReadings {
         nvme_drives += 1;
         let mut composite = None;
         let mut fallback = None;
-        for entry in fs::read_dir(&hw).into_iter().flatten().flatten() {
+        for entry in read_dir_entries(&hw) {
             let fname = entry.file_name().to_string_lossy().to_string();
             if fname.ends_with("_label") {
                 if let Some(label) = read_file(&entry.path()) {
@@ -322,7 +398,8 @@ pub fn read_all() -> SensorReadings {
     }
 
     // ─── Ethernet ───
-    for hw in find_hwmon("r8169") {
+    let exact_r8169 = find_hwmon("r8169");
+    for hw in &exact_r8169 {
         if let Some(val) = read_int(&hw.join("temp1_input")) {
             s.ethernet_temp = val as f64 / 1000.0;
             log::debug!(
@@ -331,14 +408,17 @@ pub fn read_all() -> SensorReadings {
             );
         }
     }
+    if exact_r8169.is_empty() {
+        log::debug!(
+            "sensors::read_all — no hwmon dir named exactly 'r8169'; engaging contains-match fallback scan"
+        );
+    }
     // Also try r8169_0_700:00 variant
-    for entry in fs::read_dir("/sys/class/hwmon")
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
+    let mut r8169_variant_found = false;
+    for entry in read_dir_entries(Path::new("/sys/class/hwmon")) {
         if let Some(name) = read_file(&entry.path().join("name")) {
             if name.contains("r8169") {
+                r8169_variant_found = true;
                 log::trace!(
                     "sensors::read_all: r8169 variant '{name}' at {}",
                     entry.path().display()
@@ -353,6 +433,10 @@ pub fn read_all() -> SensorReadings {
             }
         }
     }
+    log::debug!(
+        "sensors::read_all — r8169 scan finished: exact matches={}, contains-match variant found={r8169_variant_found}",
+        exact_r8169.len()
+    );
 
     // ─── Fans ───
     if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
@@ -484,7 +568,16 @@ pub fn sample_cpu_usage_pct() -> f64 {
     let mut parts = line.split_whitespace().skip(1);
     let mut vals = [0u64; 8];
     for v in vals.iter_mut() {
-        *v = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        *v = match parts.next().map(|s| s.parse::<u64>()) {
+            Some(Ok(n)) => n,
+            Some(Err(e)) => {
+                log::trace!(
+                    "sensors::sample_cpu_usage_pct — stat field unparsable, defaulted to 0: {e}"
+                );
+                0
+            }
+            None => 0,
+        };
     }
     // user nice system idle iowait irq softirq steal
     let idle = vals[3].saturating_add(vals[4]);

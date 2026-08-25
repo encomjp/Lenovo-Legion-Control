@@ -42,21 +42,34 @@ fn conservation_path() -> Option<&'static std::path::Path> {
                     "battery::conservation_path — using known path {}",
                     known.display()
                 );
+                log::debug!(
+                    "battery::conservation_path — conservation_mode found at known path {}",
+                    known.display()
+                );
                 return Some(known.to_path_buf());
             }
             // Fallback: scan platform drivers for ideapad_acpi.
             match std::fs::read_dir("/sys/bus/platform/drivers/ideapad_acpi") {
                 Ok(entries) => {
+                    let mut scanned = 0usize;
                     for entry in entries.flatten() {
+                        scanned += 1;
                         let candidate = entry.path().join("conservation_mode");
                         if candidate.exists() {
                             log::trace!(
                                 "battery::conservation_path — discovered {} via ideapad_acpi scan",
                                 candidate.display()
                             );
+                            log::debug!(
+                                "battery::conservation_path — conservation_mode found at {} after scanning {scanned} ideapad_acpi dir(s)",
+                                candidate.display()
+                            );
                             return Some(candidate);
                         }
                     }
+                    log::debug!(
+                        "battery::conservation_path — scanned {scanned} ideapad_acpi dir(s), none exposed conservation_mode"
+                    );
                 }
                 Err(e) => {
                     log::debug!(
@@ -80,13 +93,33 @@ fn read(path: &str) -> Option<String> {
         }
         Err(e) => {
             log::trace!("battery::read — {path} read returned None: {e}");
+            match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    log::debug!("battery::read — {path}: file missing (does not exist)")
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    log::debug!("battery::read — {path}: permission denied")
+                }
+                _ => log::debug!("battery::read — {path}: read failed: {e}"),
+            }
+            None
+        }
+    }
+}
+
+/// Parse a sysfs value, surfacing (not silently dropping) parse failures.
+fn parse_sysfs<T: std::str::FromStr>(attr: &str, raw: String) -> Option<T> {
+    match raw.parse::<T>() {
+        Ok(v) => Some(v),
+        Err(_) => {
+            log::trace!("battery::parse_sysfs — {attr} returned None (raw={raw:?})");
             None
         }
     }
 }
 
 pub fn capacity() -> Option<u32> {
-    let r = read(&format!("{BAT0}/capacity")).and_then(|s| s.parse().ok());
+    let r = read(&format!("{BAT0}/capacity")).and_then(|s| parse_sysfs::<u32>("capacity", s));
     log::trace!("battery::capacity — result={r:?}");
     r
 }
@@ -98,41 +131,46 @@ pub fn status() -> Option<String> {
 }
 
 pub fn voltage() -> Option<f64> {
-    let mv: Option<i64> = read(&format!("{BAT0}/voltage_now")).and_then(|s| s.parse().ok());
+    let mv: Option<i64> =
+        read(&format!("{BAT0}/voltage_now")).and_then(|s| parse_sysfs::<i64>("voltage_now", s));
     let r = mv.map(|v| v as f64 / 1_000_000.0);
     log::trace!("battery::voltage — result={r:?}");
     r
 }
 
 pub fn cycles() -> Option<u32> {
-    let r = read(&format!("{BAT0}/cycle_count")).and_then(|s| s.parse().ok());
+    let r = read(&format!("{BAT0}/cycle_count")).and_then(|s| parse_sysfs::<u32>("cycle_count", s));
     log::trace!("battery::cycles — result={r:?}");
     r
 }
 
 pub fn power_w() -> Option<f64> {
-    let uw: Option<i64> = read(&format!("{BAT0}/power_now")).and_then(|s| s.parse().ok());
+    let uw: Option<i64> =
+        read(&format!("{BAT0}/power_now")).and_then(|s| parse_sysfs::<i64>("power_now", s));
     let r = uw.map(|v| v as f64 / 1_000_000.0);
     log::trace!("battery::power_w — result={r:?}");
     r
 }
 
 pub fn energy_now_wh() -> Option<f64> {
-    let uwh: Option<i64> = read(&format!("{BAT0}/energy_now")).and_then(|s| s.parse().ok());
+    let uwh: Option<i64> =
+        read(&format!("{BAT0}/energy_now")).and_then(|s| parse_sysfs::<i64>("energy_now", s));
     let r = uwh.map(|v| v as f64 / 1_000_000.0);
     log::trace!("battery::energy_now_wh — result={r:?}");
     r
 }
 
 pub fn energy_full_wh() -> Option<f64> {
-    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full")).and_then(|s| s.parse().ok());
+    let uwh: Option<i64> =
+        read(&format!("{BAT0}/energy_full")).and_then(|s| parse_sysfs::<i64>("energy_full", s));
     let r = uwh.map(|v| v as f64 / 1_000_000.0);
     log::trace!("battery::energy_full_wh — result={r:?}");
     r
 }
 
 pub fn energy_design_wh() -> Option<f64> {
-    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full_design")).and_then(|s| s.parse().ok());
+    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full_design"))
+        .and_then(|s| parse_sysfs::<i64>("energy_full_design", s));
     let r = uwh.map(|v| v as f64 / 1_000_000.0);
     log::trace!("battery::energy_design_wh — result={r:?}");
     r
@@ -140,8 +178,22 @@ pub fn energy_design_wh() -> Option<f64> {
 
 pub fn health_pct() -> Option<f64> {
     log::trace!("battery::health_pct()");
-    let full = energy_full_wh()?;
-    let design = energy_design_wh()?;
+    let full = match energy_full_wh() {
+        Some(v) => v,
+        None => {
+            log::debug!("battery::health_pct — energy_full unreadable, skipping health calc");
+            return None;
+        }
+    };
+    let design = match energy_design_wh() {
+        Some(v) => v,
+        None => {
+            log::debug!(
+                "battery::health_pct — energy_full_design unreadable, skipping health calc"
+            );
+            return None;
+        }
+    };
     let h = health_from_wh(full, design);
     log::debug!(
         "battery::health_pct — computed health={h:?}% (full={full:.2}Wh, design={design:.2}Wh)"
@@ -191,7 +243,15 @@ pub fn conservation_mode() -> Option<bool> {
         );
         return Some(on);
     }
-    let types = charge_types()?;
+    let types = match charge_types() {
+        Some(t) => t,
+        None => {
+            log::debug!(
+                "battery::conservation_mode — charge_types unreadable, legacy fallback impossible"
+            );
+            return None;
+        }
+    };
     let on = types.contains("[Long_Life]");
     log::debug!("battery::conservation_mode — fallback from charge_types={types:?}: {on}");
     Some(on)
@@ -243,7 +303,22 @@ fn parse_selection(types: &str) -> Option<String> {
 }
 
 fn selected_charge_type() -> Option<String> {
-    let r = parse_selection(&charge_types()?);
+    let types = match charge_types() {
+        Some(t) => t,
+        None => {
+            log::debug!("battery::selected_charge_type — charge_types unreadable, returning None");
+            return None;
+        }
+    };
+    let r = match parse_selection(&types) {
+        Some(sel) => Some(sel),
+        None => {
+            log::debug!(
+                "battery::selected_charge_type — no bracketed selection in charge_types={types:?}, returning None"
+            );
+            None
+        }
+    };
     log::trace!("battery::selected_charge_type — result={r:?}");
     r
 }
@@ -342,6 +417,10 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
                 }
             }
         }
+        let last_readback = selected_charge_type();
+        log::debug!(
+            "battery::set_charge_limit_pct — verification exhausted after 5 retries, last readback={last_readback:?}"
+        );
         let msg = format!(
             "Firmware did not accept charge_types={want} (reads {:?}) — charging may be uncapped. AC plug/unplug or reboot usually clears this EC state",
             selected_charge_type().as_deref().unwrap_or("<unreadable>")

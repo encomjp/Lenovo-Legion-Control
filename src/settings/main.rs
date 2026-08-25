@@ -1233,13 +1233,11 @@ fn show_welcome_if_needed(
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
             "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
             "setup" => {
-                // "about-setup" is an INNER tab of the About hub, not an
-                // outer stack child — open the hub first, then select the
-                // Setup tab on its inner ViewStack.
-                stack.set_visible_child_name("about");
-                if let Some(tabs) = about_tabs.as_ref() {
-                    tabs.set_visible_child_name("setup");
-                }
+                // Guided walkthrough instead of a bare tab jump — five
+                // chained dialogs: service, hardware, self-check, telemetry,
+                // summary. The About → Setup shortcut lives on the final
+                // step's dialog instead.
+                run_guided_setup(&stack, about_tabs.as_ref(), &consent, share_switch.as_ref());
             }
             _ => {}
         }
@@ -1247,6 +1245,378 @@ fn show_welcome_if_needed(
     let root = parent.as_ref().root();
     let win = root.and_then(|r| r.downcast::<gtk::Window>().ok());
     dialog.present(win.as_ref());
+}
+
+// ─── First-launch guided setup ──────────────────────────────────────────────
+
+/// Steps of the first-launch walkthrough started by the welcome dialog's
+/// "First-time setup" response. Each step presents one `adw::AlertDialog`
+/// and chains into the next via its response handler.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupStep {
+    /// Probe the privileged control service over IPC.
+    Daemon,
+    /// Identify model, machine type, CPU, GPU, and fan channels.
+    Hardware,
+    /// Read-only self-checks plus the fault scan.
+    SelfCheck,
+    /// Opt-in choice for anonymous diagnostics.
+    Telemetry,
+    /// Summary; closing returns to the main view.
+    Done,
+}
+
+impl SetupStep {
+    /// 1-based position for dialog titles ("First-time setup (2/5) — …").
+    fn number(self) -> usize {
+        match self {
+            SetupStep::Daemon => 1,
+            SetupStep::Hardware => 2,
+            SetupStep::SelfCheck => 3,
+            SetupStep::Telemetry => 4,
+            SetupStep::Done => 5,
+        }
+    }
+
+    /// The step that follows this one (Done is its own successor).
+    fn next(self) -> Self {
+        match self {
+            SetupStep::Daemon => SetupStep::Hardware,
+            SetupStep::Hardware => SetupStep::SelfCheck,
+            SetupStep::SelfCheck => SetupStep::Telemetry,
+            SetupStep::Telemetry | SetupStep::Done => SetupStep::Done,
+        }
+    }
+}
+
+/// Everything a walkthrough step needs to present its dialog and reach the
+/// next one. Cheap to clone — every response handler takes its own copy so
+/// retry loops can re-enter [`SetupCtx::run`] freely.
+#[derive(Clone)]
+struct SetupCtx {
+    win: Option<gtk::Window>,
+    stack: adw::ViewStack,
+    about_tabs: Option<adw::ViewStack>,
+    consent: Rc<Cell<bool>>,
+    share_switch: Option<adw::SwitchRow>,
+}
+
+/// Guided first-launch walkthrough behind the welcome dialog's "First-time
+/// setup" response: five chained alert dialogs (service probe, hardware
+/// identity, self-check, telemetry opt-in, summary). Every probe runs on a
+/// `dispatch_async` worker thread; each dialog appears once its result is in.
+fn run_guided_setup(
+    stack: &adw::ViewStack,
+    about_tabs: Option<&adw::ViewStack>,
+    consent: &Rc<Cell<bool>>,
+    share_switch: Option<&adw::SwitchRow>,
+) {
+    // The main view stack lives inside the window — its root is the parent
+    // every step dialog is presented on.
+    let win = stack
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok());
+    SetupCtx {
+        win,
+        stack: stack.clone(),
+        about_tabs: about_tabs.cloned(),
+        consent: consent.clone(),
+        share_switch: share_switch.cloned(),
+    }
+    .run(SetupStep::Daemon);
+}
+
+impl SetupCtx {
+    fn run(self, step: SetupStep) {
+        match step {
+            SetupStep::Daemon => self.daemon_step(),
+            SetupStep::Hardware => self.hardware_step(),
+            SetupStep::SelfCheck => self.selfcheck_step(),
+            SetupStep::Telemetry => self.telemetry_step(),
+            SetupStep::Done => self.done_step(),
+        }
+    }
+
+    /// Present a finished step dialog; each response id is mapped through
+    /// `routes` into the next step (`None` leaves the walkthrough).
+    fn present(
+        &self,
+        dialog: adw::AlertDialog,
+        routes: impl Fn(&str) -> Option<SetupStep> + 'static,
+    ) {
+        let ctx = self.clone();
+        dialog.connect_response(None, move |_, response| {
+            if let Some(next) = routes(response) {
+                ctx.clone().run(next);
+            }
+        });
+        dialog.present(self.win.as_ref());
+    }
+
+    /// Failure variant of any step: explain what went wrong, offer Retry
+    /// (re-runs the same step) or Continue anyway (skips ahead). Closing the
+    /// dialog abandons the rest of the walkthrough — welcome-seen is already
+    /// recorded, nothing is lost.
+    fn retryable_failure(&self, step: SetupStep, topic: &str, problem: &str, hint: &str) {
+        let body = format!("⚠ {problem}\n\n{hint}");
+        let dialog = setup_step_dialog(
+            step,
+            topic,
+            &body,
+            [("continue", "Continue anyway"), ("retry", "Retry")],
+            "retry",
+        );
+        self.present(dialog, move |response| match response {
+            "retry" => Some(step),
+            "continue" => Some(step.next()),
+            _ => None,
+        });
+    }
+
+    /// Step 1 — is the privileged control service reachable?
+    fn daemon_step(self) {
+        // Connecting to the socket can block briefly — probe off-thread.
+        dispatch_async(
+            move || send_command(DaemonCommand::GetProfile).map(|_| ()),
+            "Service probe stopped without a result",
+            move |result| match result {
+                Ok(()) => {
+                    let dialog = setup_step_dialog(
+                        SetupStep::Daemon,
+                        "Control service",
+                        "✓ Control service is running.\n\n\
+                         Fans, power profiles, and charge limits are handled \
+                         by the privileged legion-control service.",
+                        [("continue", "Continue")],
+                        "continue",
+                    );
+                    self.present(dialog, |_| Some(SetupStep::Hardware));
+                }
+                Err(_) => self.retryable_failure(
+                    SetupStep::Daemon,
+                    "Control service",
+                    "Control service is not running.",
+                    "Run:\nsudo systemctl enable --now legion-control\n\n\
+                     You can continue without it — detection and self-checks work.",
+                ),
+            },
+        );
+    }
+
+    /// Step 2 — what machine is this?
+    fn hardware_step(self) {
+        // Full DMI + GPU probing may spawn nvidia-smi (up to ~3 s) — worker
+        // thread keeps the main loop responsive.
+        dispatch_async(
+            || Ok::<_, String>(legion_core::device::detect()),
+            "Hardware detection stopped without a result",
+            move |result| match result {
+                Ok(info) => {
+                    let known = |value: &String| -> String {
+                        if value.is_empty() {
+                            "unknown".to_string()
+                        } else {
+                            value.clone()
+                        }
+                    };
+                    let fan_count = info.capabilities.fans.len();
+                    let plural = if fan_count == 1 { "" } else { "s" };
+                    let body = format!(
+                        "✓ Hardware detected.\n\n\
+                         Model: {}\n\
+                         Machine type: {}\n\
+                         CPU: {}\n\
+                         GPU: {}\n\
+                         Fans: {} channel{}",
+                        known(&info.model),
+                        known(&info.machine_type),
+                        known(&info.cpu_model),
+                        known(&info.gpu_model),
+                        fan_count,
+                        plural,
+                    );
+                    let dialog = setup_step_dialog(
+                        SetupStep::Hardware,
+                        "Your hardware",
+                        &body,
+                        [("continue", "Continue")],
+                        "continue",
+                    );
+                    self.present(dialog, |_| Some(SetupStep::SelfCheck));
+                }
+                Err(error) => self.retryable_failure(
+                    SetupStep::Hardware,
+                    "Your hardware",
+                    "Hardware detection failed.",
+                    &error,
+                ),
+            },
+        );
+    }
+
+    /// Step 3 — read-only health checks plus anomaly scan.
+    fn selfcheck_step(self) {
+        // Both probes are fast (<200 ms) but stay off-thread so a slow EC
+        // read can never stall the main loop.
+        dispatch_async(
+            || {
+                let checks = legion_core::selftest::run_self_checks();
+                let faults = legion_core::selftest::scan_faults();
+                Ok::<_, String>((checks, faults))
+            },
+            "Self-check stopped without a result",
+            move |result| match result {
+                Ok((checks, faults)) => {
+                    let total = checks.len();
+                    let passed = checks.iter().filter(|c| c.ok).count();
+                    let mut lines =
+                        vec![format!("✓ Self-check finished: {passed} / {total} passed.")];
+
+                    let criticals: Vec<_> = faults
+                        .iter()
+                        .filter(|f| f.severity == legion_core::selftest::Severity::Critical)
+                        .collect();
+                    if criticals.is_empty() {
+                        lines.push("No critical faults found.".into());
+                    } else {
+                        lines.push(format!("⚠ {} critical fault(s):", criticals.len()));
+                        const MAX_LISTED: usize = 6;
+                        for fault in criticals.iter().take(MAX_LISTED) {
+                            lines.push(format!("⚠ {}", fault.detail));
+                        }
+                        let hidden = criticals.len().saturating_sub(MAX_LISTED);
+                        if hidden > 0 {
+                            lines.push(format!("…and {hidden} more"));
+                        }
+                    }
+
+                    let body = lines.join("\n");
+                    let dialog = setup_step_dialog(
+                        SetupStep::SelfCheck,
+                        "Self-check",
+                        &body,
+                        [("continue", "Continue")],
+                        "continue",
+                    );
+                    self.present(dialog, |_| Some(SetupStep::Telemetry));
+                }
+                Err(error) => self.retryable_failure(
+                    SetupStep::SelfCheck,
+                    "Self-check",
+                    "Self-check could not run.",
+                    &error,
+                ),
+            },
+        );
+    }
+
+    /// Step 4 — telemetry opt-in. Enable flips config + live controls and
+    /// shows a confirmation (with the anonymous id when one exists); Skip
+    /// falls straight through to the final step.
+    fn telemetry_step(self) {
+        let dialog = setup_step_dialog(
+            SetupStep::Telemetry,
+            "Anonymous diagnostics",
+            "Share ONE anonymized report occasionally?\n\n\
+             Included: hardware model, distro/kernel, sensors,\n\
+             fan/battery stats, self-check results.\n\
+             Never: hostname · username · serials · MACs · IPs · key colors.\n\n\
+             Off by default — sending happens only on demand or schedule.",
+            [("enable", "Enable"), ("skip", "Skip")],
+            "enable",
+        );
+        let ctx = self.clone();
+        self.present(dialog, move |response| match response {
+            "enable" => {
+                ctx.enable_telemetry();
+                ctx.telemetry_enabled_step();
+                None // confirmation dialog chains into Done itself
+            }
+            _ => Some(SetupStep::Done),
+        });
+    }
+
+    /// Flip every telemetry surface at once: persisted config, the shared
+    /// consent cell gating Send-now, and the live Setup-page switch
+    /// (set_active runs the normal debounced persist path — the extra write
+    /// is an idempotent no-op).
+    fn enable_telemetry(&self) {
+        legion_core::config::update(|c| c.diagnostics.enabled = true);
+        self.consent.set(true);
+        if let Some(row) = self.share_switch.as_ref() {
+            row.set_active(true);
+        }
+    }
+
+    /// Confirmation half of the telemetry step. The anonymous machine id is
+    /// minted lazily on first send, so it is shown only when already there.
+    fn telemetry_enabled_step(&self) {
+        let machine_id = legion_core::config::get().diagnostics.machine_id;
+        let id_note = if machine_id.is_empty() {
+            String::new()
+        } else {
+            format!("\n\nYour anonymous ID: {machine_id}")
+        };
+        let body = format!("✓ Anonymous diagnostics enabled.{id_note}");
+        let dialog = setup_step_dialog(
+            SetupStep::Telemetry,
+            "Anonymous diagnostics",
+            &body,
+            [("continue", "Continue")],
+            "continue",
+        );
+        self.present(dialog, |_| Some(SetupStep::Done));
+    }
+
+    /// Step 5 — farewell. Close returns to the main view; the secondary
+    /// button keeps the old About → Setup shortcut within reach.
+    fn done_step(self) {
+        let dialog = setup_step_dialog(
+            SetupStep::Done,
+            "All done",
+            "✓ Setup complete.\n\nYou can change all of these later under Setup.",
+            [("opensetup", "Open Setup"), ("done", "Close")],
+            "done",
+        );
+        let stack = self.stack.clone();
+        let about_tabs = self.about_tabs.clone();
+        dialog.connect_response(None, move |_, response| {
+            if response == "opensetup" {
+                // "setup" is an INNER tab of the About hub, not an outer
+                // stack child — open the hub first, then select the tab.
+                stack.set_visible_child_name("about");
+                if let Some(tabs) = about_tabs.as_ref() {
+                    tabs.set_visible_child_name("setup");
+                }
+            } else {
+                stack.set_visible_child_name("overview");
+            }
+        });
+        dialog.present(self.win.as_ref());
+    }
+}
+
+/// Build one standard walkthrough step dialog: numbered title, body text,
+/// labeled response buttons (`suggested` is highlighted and bound to Enter).
+fn setup_step_dialog(
+    step: SetupStep,
+    topic: &str,
+    body: &str,
+    responses: impl IntoIterator<Item = (&'static str, &'static str)>,
+    suggested: &'static str,
+) -> adw::AlertDialog {
+    let title = format!(
+        "First-time setup ({}/{}) — {topic}",
+        step.number(),
+        SetupStep::Done.number()
+    );
+    let dialog = adw::AlertDialog::new(Some(title.as_str()), Some(body));
+    for (id, label) in responses {
+        dialog.add_response(id, label);
+    }
+    dialog.set_response_appearance(suggested, adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some(suggested));
+    dialog
 }
 
 fn restore_last_session(_overlay: &adw::ToastOverlay) {

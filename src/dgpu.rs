@@ -39,7 +39,12 @@ fn smi_run(args: &[&str]) -> Option<String> {
     // Reaper thread: owns the child so wait() reaps it even after a timeout
     // kill — the thread always terminates once the process dies.
     thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        if tx.send(child.wait_with_output()).is_err() {
+            log::debug!(
+                "nvidia-smi: reaper for pid {pid} finished but receiver is gone \
+                 (timeout path already returned) — child reaped anyway"
+            );
+        }
     });
     match rx.recv_timeout(SMI_TIMEOUT) {
         Ok(Ok(output)) if output.status.success() => {
@@ -80,7 +85,13 @@ fn smi_run(args: &[&str]) -> Option<String> {
             // SAFETY: kill(pid, SIGKILL) is a plain syscall; the pid belongs
             // to our own child. The reaper thread then reaps it and exits.
             unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                let rc = libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                if rc != 0 {
+                    log::debug!(
+                        "nvidia-smi: SIGKILL to pid {pid} failed: {} (likely already exited)",
+                        std::io::Error::last_os_error()
+                    );
+                }
             }
             log::debug!("nvidia-smi: SIGKILL sent to pid {pid} after timeout");
             None

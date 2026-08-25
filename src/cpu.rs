@@ -12,10 +12,24 @@ const SMT_ACTIVE: &str = "/sys/devices/system/cpu/smt/active";
 const CPU_BOOST: &str = "/sys/devices/system/cpu/cpufreq/boost";
 
 fn read_trim(path: &str) -> Option<String> {
-    let value = fs::read_to_string(path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let value = match fs::read_to_string(path) {
+        Ok(s) => {
+            let trimmed = s.trim().to_string();
+            if trimmed.is_empty() {
+                log::debug!("cpu: read {path} → empty string");
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        Err(e) => {
+            log::debug!(
+                "cpu: read {path} failed: {e} (raw={})",
+                e.raw_os_error().unwrap_or(-1)
+            );
+            None
+        }
+    };
     log::trace!("cpu: read {path} → {value:?}");
     value
 }
@@ -120,9 +134,16 @@ pub fn logical_cpus() -> usize {
                     if !online.exists() {
                         return true; // cpu0 often has no `online` file
                     }
-                    fs::read_to_string(online)
-                        .map(|v| v.trim() == "1")
-                        .unwrap_or(false)
+                    match fs::read_to_string(&online) {
+                        Ok(v) => v.trim() == "1",
+                        Err(e) => {
+                            log::warn!(
+                                "cpu: logical_cpus: cannot read {}: {e} — treating as offline",
+                                online.display()
+                            );
+                            false
+                        }
+                    }
                 })
                 .count()
         })

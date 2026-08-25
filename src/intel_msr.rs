@@ -47,15 +47,23 @@ pub struct Plane {
 // ---------------------------------------------------------------------------
 
 fn read_i32(path: &str) -> Option<i32> {
-    fs::read_to_string(path)
+    let v = fs::read_to_string(path)
         .ok()
-        .and_then(|s| s.trim().parse::<i32>().ok())
+        .and_then(|s| s.trim().parse::<i32>().ok());
+    if v.is_none() {
+        log::trace!("intel_msr: read_i32 {path} → None (absent/unparseable)");
+    }
+    v
 }
 
 fn read_u32(path: &str) -> Option<u32> {
-    fs::read_to_string(path)
+    let v = fs::read_to_string(path)
         .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
+        .and_then(|s| s.trim().parse::<u32>().ok());
+    if v.is_none() {
+        log::trace!("intel_msr: read_u32 {path} → None (absent/unparseable)");
+    }
+    v
 }
 
 fn path_for(plane: &str, suffix: &str) -> String {
@@ -72,6 +80,10 @@ fn plane_snapshot(name: &'static str) -> Plane {
     let supported = read_u32(&path_for(name, "offset_ctrl_supported")).map(|v| v != 0);
     let max_overvolt_mv = read_u32(&path_for(name, "max_overvolt"));
     let max_undervolt_mv = read_u32(&path_for(name, "max_undervolt"));
+    log::debug!(
+        "intel_msr: plane '{name}' offset={offset_mv:?} supported={supported:?} \
+         max_overvolt={max_overvolt_mv:?} max_undervolt={max_undervolt_mv:?}"
+    );
     Plane {
         name,
         offset_mv,
@@ -88,9 +100,12 @@ fn plane_snapshot(name: &'static str) -> Plane {
 /// `Path::exists` fails fast and `planes()` yields all-`None` entries.
 pub fn is_available() -> bool {
     if !Path::new(SYSFS_INTEL_MSR).exists() {
+        log::debug!("intel_msr: is_available → false ({SYSFS_INTEL_MSR} absent)");
         return false;
     }
-    planes().iter().any(|p| p.supported == Some(true))
+    let available = planes().iter().any(|p| p.supported == Some(true));
+    log::debug!("intel_msr: is_available → {available} (driver dir present)");
+    available
 }
 
 /// Enumerate the five planes. Always returns five entries; each field is
@@ -112,7 +127,9 @@ pub fn planes() -> Vec<Plane> {
 /// 4. Write `mv` to `{plane}_offset` via `fs::write`; any I/O error is
 ///    surfaced with the full sysfs path in the message.
 pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
+    log::debug!("intel_msr: set_offset plane='{plane}' {mv} mV");
     if !PLANES.contains(&plane) {
+        log::debug!("intel_msr: set_offset '{plane}' rejected — unknown plane");
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!(
@@ -129,6 +146,10 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
     match supported {
         Some(true) => {}
         _ => {
+            log::debug!(
+                "intel_msr: set_offset plane '{plane}' rejected — offset control not supported \
+                 (supported={supported:?}, path {supported_path})"
+            );
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!(
@@ -145,6 +166,10 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
 
     if let Some(max_ov) = max_overvolt {
         if mv > max_ov as i32 {
+            log::debug!(
+                "intel_msr: set_offset plane '{plane}' rejected — {mv} mV exceeds \
+                 max_overvolt {max_ov} mV"
+            );
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
@@ -157,6 +182,10 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
     if let Some(max_uv) = max_undervolt {
         // `max_undervolt` is a magnitude (e.g. 200 means -200 mV is the limit).
         if mv < 0 && (-(mv as i64) as u32) > max_uv {
+            log::debug!(
+                "intel_msr: set_offset plane '{plane}' rejected — {mv} mV exceeds \
+                 max_undervolt {max_uv} mV"
+            );
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
@@ -167,9 +196,25 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
         }
     }
 
+    log::debug!(
+        "intel_msr: set_offset plane '{plane}' bounds ok \
+         (mv={mv}, max_overvolt={max_overvolt:?}, max_undervolt={max_undervolt:?})"
+    );
+
     let offset_path = path_for(plane, "offset");
-    fs::write(&offset_path, mv.to_string())
-        .map_err(|e| io::Error::new(e.kind(), format!("cannot write {offset_path}: {e}")))
+    match fs::write(&offset_path, mv.to_string()) {
+        Ok(()) => {
+            log::debug!("intel_msr: {offset_path} ← {mv} mV");
+            Ok(())
+        }
+        Err(e) => {
+            log::debug!("intel_msr: set_offset plane '{plane}' write failed on {offset_path}: {e}");
+            Err(io::Error::new(
+                e.kind(),
+                format!("cannot write {offset_path}: {e}"),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]

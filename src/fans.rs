@@ -53,8 +53,12 @@ fn read_fan_u32(fan: u8, caller: &str, path: &std::path::Path) -> Option<u32> {
                 None
             }
         },
-        Err(_) => {
-            log::trace!("fans::{caller}: fan{fan} unavailable ({})", path.display());
+        Err(e) => {
+            log::trace!(
+                "fans::{caller}: fan{fan} unavailable ({}): {e} (raw={})",
+                path.display(),
+                e.raw_os_error().unwrap_or(-1)
+            );
             None
         }
     }
@@ -176,8 +180,15 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
     if rpm != requested {
         log::info!("fan {fan} requested {requested} → clamped {rpm}");
     }
-    let path = fan_path(fan, "target")
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "fan device not found"))?;
+    let path = match fan_path(fan, "target") {
+        Some(p) => p,
+        None => {
+            let msg =
+                format!("fans::set_target({fan},{rpm}): no fan backend/device for target write");
+            log::warn!("{msg}");
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, msg));
+        }
+    };
     if rpm == 0 {
         log::info!("fan {fan} → auto ({})", path.display());
     } else {
@@ -214,9 +225,13 @@ pub fn set_auto() -> std::io::Result<()> {
     let mut last_err = None;
     let mut errors = 0usize;
     for id in all_ids {
-        if let Err(e) = set_target(id, 0) {
-            errors += 1;
-            last_err = Some(e);
+        match set_target(id, 0) {
+            Ok(()) => log::debug!("fans::set_auto: fan{id} → auto ok"),
+            Err(e) => {
+                log::warn!("fans::set_auto: fan{id} failed to switch to auto: {e}");
+                errors += 1;
+                last_err = Some(e);
+            }
         }
     }
     match last_err {

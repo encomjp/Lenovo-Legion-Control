@@ -26,7 +26,13 @@ fn read_opt<T: std::str::FromStr>(path: &str) -> Option<T>
 where
     T::Err: std::fmt::Display,
 {
-    read_val(path).ok()
+    match read_val(path) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            log::trace!("intel: read_opt {path}: {e}");
+            None
+        }
+    }
 }
 
 // ── Intel PState ───────────────────────────────────────────────────────────
@@ -41,7 +47,9 @@ pub struct IntelPState {
 }
 
 pub fn pstate_available() -> bool {
-    Path::new(SYSFS_PSTATE).exists()
+    let available = Path::new(SYSFS_PSTATE).exists();
+    log::debug!("intel: pstate_available → {available} ({SYSFS_PSTATE})");
+    available
 }
 
 pub fn read_pstate() -> std::io::Result<IntelPState> {
@@ -111,7 +119,9 @@ pub struct IntelUncorePackage {
 }
 
 pub fn uncore_available() -> bool {
-    Path::new(SYSFS_UNCORE).exists()
+    let available = Path::new(SYSFS_UNCORE).exists();
+    log::debug!("intel: uncore_available → {available} ({SYSFS_UNCORE})");
+    available
 }
 
 pub fn uncore_packages() -> std::io::Result<Vec<IntelUncorePackage>> {
@@ -129,6 +139,7 @@ pub fn uncore_packages() -> std::io::Result<Vec<IntelUncorePackage>> {
             continue;
         }
         let base = format!("{SYSFS_UNCORE}{name}/");
+        log::debug!("intel: uncore_packages: enumerating '{name}'");
         out.push(IntelUncorePackage {
             package: name,
             current_freq_khz: read_opt(&format!("{base}current_freq_khz")),
@@ -138,6 +149,7 @@ pub fn uncore_packages() -> std::io::Result<Vec<IntelUncorePackage>> {
             min_freq_khz: read_opt(&format!("{base}min_freq_khz")),
         });
     }
+    log::debug!("intel: uncore_packages → {} package(s)", out.len());
     Ok(out)
 }
 
@@ -161,25 +173,35 @@ pub fn set_uncore_min(package: &str, khz: u32) -> std::io::Result<()> {
 // ── Hybrid topology helpers (Intel 12th+ P/E split) ───────────────────────
 
 pub fn hybrid_topology() -> Option<(BTreeSet<u32>, BTreeSet<u32>)> {
-    let parse = |p: &str| -> Option<BTreeSet<u32>> {
-        let s = fs::read_to_string(p).ok()?;
-        Some(
-            s.trim()
-                .split(',')
-                .filter_map(|tok| {
-                    if let Some((lo, hi)) = tok.split_once('-') {
-                        let lo: u32 = lo.parse().ok()?;
-                        let hi: u32 = hi.parse().ok()?;
-                        Some((lo..=hi).collect::<Vec<_>>())
-                    } else {
-                        Some(vec![tok.parse().ok()?])
-                    }
-                })
-                .flatten()
-                .collect(),
-        )
+    let parse = |kind: &str, p: &str| -> Option<BTreeSet<u32>> {
+        let s = match fs::read_to_string(p) {
+            Ok(s) => s,
+            Err(e) => {
+                log::debug!("intel: hybrid_topology '{kind}' cpu list {p} unreadable: {e}");
+                return None;
+            }
+        };
+        let set: BTreeSet<u32> = s
+            .trim()
+            .split(',')
+            .filter_map(|tok| {
+                if let Some((lo, hi)) = tok.split_once('-') {
+                    let lo: u32 = lo.parse().ok()?;
+                    let hi: u32 = hi.parse().ok()?;
+                    Some((lo..=hi).collect::<Vec<_>>())
+                } else {
+                    Some(vec![tok.parse().ok()?])
+                }
+            })
+            .flatten()
+            .collect();
+        log::debug!(
+            "intel: hybrid_topology '{kind}' cpus ← {} cpu(s): {set:?}",
+            set.len()
+        );
+        Some(set)
     };
-    let atom = parse("/sys/devices/cpu_atom/cpus")?;
-    let core = parse("/sys/devices/cpu_core/cpus")?;
+    let atom = parse("atom", "/sys/devices/cpu_atom/cpus")?;
+    let core = parse("core", "/sys/devices/cpu_core/cpus")?;
     Some((atom, core))
 }

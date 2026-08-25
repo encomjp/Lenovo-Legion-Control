@@ -626,6 +626,11 @@ pub fn lookup(
                 );
                 return Some(p);
             }
+            let hint = p.marketing;
+            log::trace!(
+                "model lookup: tier-2a miss (mt_tagged={}, marketing={mkt:?}, hint={hint:?})",
+                p.machine_type.is_some(),
+            );
         }
         log::trace!("model lookup: no MT-tagged {prefix:?} row matched the marketing hint");
 

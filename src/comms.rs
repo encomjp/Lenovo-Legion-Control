@@ -257,19 +257,29 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
 
     let mut last_err = String::from("No legion-control socket found");
     for path in socket_candidates() {
+        let attempt_started = std::time::Instant::now();
         let mut stream = match UnixStream::connect(&path) {
             Ok(s) => {
-                log::debug!("ipc {label}: connected to {}", path.display());
+                log::debug!(
+                    "ipc {label}: connected to {} ({:?})",
+                    path.display(),
+                    attempt_started.elapsed()
+                );
                 s
             }
             Err(e) => {
                 last_err = format!("{}: {}", path.display(), e);
                 match e.raw_os_error() {
                     Some(errno) => log::debug!(
-                        "ipc {label}: connect failed on {} (errno {errno}): {e}",
-                        path.display()
+                        "ipc {label}: connect failed on {} (errno {errno}, after {:?}): {e}",
+                        path.display(),
+                        attempt_started.elapsed()
                     ),
-                    None => log::debug!("ipc {label}: connect failed on {}: {e}", path.display()),
+                    None => log::debug!(
+                        "ipc {label}: connect failed on {} (after {:?}): {e}",
+                        path.display(),
+                        attempt_started.elapsed()
+                    ),
                 }
                 continue;
             }
@@ -297,11 +307,27 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
         })?;
         log::trace!("ipc {label}: request frame {} B", data.len());
 
-        stream.write_all(&data).map_err(|e| {
-            log::warn!("ipc {label}: write failed after {} B: {e}", data.len());
-            format!("Write error: {e}")
-        })?;
-        log::debug!("ipc {label}: sent {} B", data.len());
+        // Manual write_all: tracks how many bytes actually left the process
+        // so a failed write reports the exact partial count.
+        let mut sent = 0usize;
+        while sent < data.len() {
+            match stream.write(&data[sent..]) {
+                Ok(0) => {
+                    log::warn!("ipc {label}: write stalled at {sent}/{} B", data.len());
+                    return Err("Write error: made no progress".to_string());
+                }
+                Ok(n) => sent += n,
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    log::warn!(
+                        "ipc {label}: write failed ({sent}/{} B sent): {e}",
+                        data.len()
+                    );
+                    return Err(format!("Write error: {e}"));
+                }
+            }
+        }
+        log::debug!("ipc {label}: sent {sent} B");
         stream.shutdown(std::net::Shutdown::Write).ok();
 
         let mut buf = Vec::new();

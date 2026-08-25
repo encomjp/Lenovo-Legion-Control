@@ -231,7 +231,15 @@ impl log::Log for Logger {
                             self_trace!(
                                 "retention sweep triggered (>{FILE_RETENTION_DAYS}d old logs)"
                             );
-                            let _ = cleanup_old_logs(&state.path, FILE_RETENTION_DAYS);
+                            // Self-events only — this runs inside Logger::log.
+                            match cleanup_old_logs(&state.path, FILE_RETENTION_DAYS) {
+                                Ok(removed) => {
+                                    self_trace!(
+                                        "retention sweep removed {removed} old log file(s)"
+                                    );
+                                }
+                                Err(e) => self_trace!("retention sweep failed: {e}"),
+                            }
                         }
                     }
                     Err(e) => self_trace!("file write failed: {e}"),
@@ -267,9 +275,10 @@ fn rotate_file(state: &mut FileState, component: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn cleanup_old_logs(base: &Path, days: u64) -> io::Result<()> {
+fn cleanup_old_logs(base: &Path, days: u64) -> io::Result<usize> {
     let dir = base.parent().unwrap_or(Path::new("."));
     let cutoff = SystemTime::now() - Duration::from_secs(days * 86400);
+    let mut removed = 0usize;
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -279,12 +288,19 @@ fn cleanup_old_logs(base: &Path, days: u64) -> io::Result<()> {
         if let Ok(meta) = entry.metadata() {
             if let Ok(mtime) = meta.modified() {
                 if mtime < cutoff {
-                    let _ = fs::remove_file(&path);
+                    // NOTE: called from inside `Logger::log` — self_trace! only,
+                    // never log::*!.
+                    match fs::remove_file(&path) {
+                        Ok(()) => removed += 1,
+                        Err(e) => {
+                            self_trace!("retention sweep: cannot remove {}: {e}", path.display())
+                        }
+                    }
                 }
             }
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
 fn log_dir() -> PathBuf {
@@ -310,11 +326,19 @@ pub fn init(component: &str) {
 
     let _ = ORIGINAL_FILTER.set(env_filter.clone());
 
-    let ring_size = std::env::var("LEGION_LOG_RING")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_RING_SIZE)
-        .clamp(100, MAX_RING_SIZE);
+    // Bootstrap diagnostics run before the logger exists — stderr directly
+    // (same convention as the log-file fallback below).
+    let ring_raw = std::env::var("LEGION_LOG_RING").ok();
+    let ring_size = match ring_raw.as_deref().map(str::parse::<usize>) {
+        Some(Ok(n)) => n.clamp(100, MAX_RING_SIZE),
+        Some(Err(_)) => {
+            eprintln!(
+                "legion-log: LEGION_LOG_RING={ring_raw:?} is not a number — using default {DEFAULT_RING_SIZE}"
+            );
+            DEFAULT_RING_SIZE
+        }
+        None => DEFAULT_RING_SIZE,
+    };
 
     let file_enabled =
         std::env::var("LEGION_LOG_FILE").is_ok_and(|s| s == "1" || s.eq_ignore_ascii_case("true"));
