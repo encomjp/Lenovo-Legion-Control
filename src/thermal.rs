@@ -81,7 +81,10 @@ impl TempFilter {
     pub fn update(&mut self, temp_mc: i32) -> i32 {
         let (seeded, next) = match self.smoothed {
             None => (true, temp_mc),
-            Some(prev) => (false, (prev + temp_mc) / 2),
+            Some(prev) => (
+                false,
+                prev.saturating_add((temp_mc.saturating_sub(prev)) / 2),
+            ),
         };
         self.smoothed = Some(next);
         if seeded {

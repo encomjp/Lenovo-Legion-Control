@@ -707,6 +707,11 @@ impl SpectrumDevice {
             log::warn!("spectrum: {msg}");
             return Err(msg);
         }
+        if (ret as usize) < REPORT_SIZE {
+            let msg = format!("HIDIOCGFEATURE returned short read: {ret} < {REPORT_SIZE}");
+            log::warn!("spectrum: {msg}");
+            return Err(msg);
+        }
         log::trace!(
             "spectrum: HIDIOCGFEATURE requested={} received={} resp_id=0x{:02X} op=0x{:02X}",
             REPORT_SIZE,

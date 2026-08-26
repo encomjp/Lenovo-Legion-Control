@@ -255,45 +255,21 @@ pub fn read_all() -> SensorReadings {
         log::trace!("sensors::read_all: amdgpu hwmon not found");
     }
 
-    // ─── dGPU (nvidia-smi) ───
+    // ─── dGPU (nvidia-smi batch query) ───
+    // Query temp, power, and clock in a single subprocess execution.
     // Use -1.0 as "unavailable" so the UI does not show "0.0°C" which looks
     // like a frozen sensor.
     log_nvidia_smi_path_once();
-    let t_temp = std::time::Instant::now();
-    let temp = crate::dgpu::read_temp();
+    let t_smi = std::time::Instant::now();
+    let dgpu_data = crate::dgpu::read_metrics_batch();
     log::debug!(
-        "sensors::read_all: nvidia-smi temperature.gpu took {} ms → {:?}",
-        t_temp.elapsed().as_millis(),
-        temp
+        "sensors::read_all: nvidia-smi batch query took {} ms → {:?}",
+        t_smi.elapsed().as_millis(),
+        dgpu_data
     );
-    if temp.is_none() {
-        log::warn!(
-            "sensors::read_all: dgpu_temp sentinel -1.0 — no reading (spawn failed/timeout/exit)"
-        );
-    }
-    s.dgpu_temp = temp.unwrap_or(-1.0);
-    let t_power = std::time::Instant::now();
-    let power = crate::dgpu::read_power();
-    log::debug!(
-        "sensors::read_all: nvidia-smi power.draw took {} ms → {:?}",
-        t_power.elapsed().as_millis(),
-        power
-    );
-    if power.is_none() {
-        log::warn!("sensors::read_all: dgpu_power sentinel -1.0 — no reading");
-    }
-    s.dgpu_power = power.unwrap_or(-1.0);
-    let t_clock = std::time::Instant::now();
-    let clock = crate::dgpu::read_clock();
-    log::debug!(
-        "sensors::read_all: nvidia-smi clocks.gr took {} ms → {:?}",
-        t_clock.elapsed().as_millis(),
-        clock
-    );
-    if clock.is_none() {
-        log::warn!("sensors::read_all: dgpu_clock sentinel -1.0 — no reading");
-    }
-    s.dgpu_clock = clock.unwrap_or(-1.0);
+    s.dgpu_temp = dgpu_data.temp.unwrap_or(-1.0);
+    s.dgpu_power = dgpu_data.power.unwrap_or(-1.0);
+    s.dgpu_clock = dgpu_data.clock.unwrap_or(-1.0);
 
     // ─── NVMe SSDs (prefer Composite label; fall back to temp1) ───
     let mut nvme_drives = 0usize;

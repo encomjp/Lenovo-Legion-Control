@@ -5,20 +5,55 @@
 //! unresponsive. On timeout the child is SIGKILLed so the reaper thread
 //! always finishes (no leaked threads or zombies).
 
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const SMI_TIMEOUT: Duration = Duration::from_secs(3);
-const SMI_BIN: &str = "/usr/bin/nvidia-smi";
+
+static SMI_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+fn find_nvidia_smi() -> Option<&'static PathBuf> {
+    SMI_PATH
+        .get_or_init(|| {
+            for p in &[
+                "/usr/bin/nvidia-smi",
+                "/usr/local/bin/nvidia-smi",
+                "/opt/bin/nvidia-smi",
+            ] {
+                let pb = PathBuf::from(p);
+                if pb.exists() {
+                    return Some(pb);
+                }
+            }
+            // Try resolving from PATH
+            if let Ok(path_var) = std::env::var("PATH") {
+                for dir in std::env::split_paths(&path_var) {
+                    let candidate = dir.join("nvidia-smi");
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            None
+        })
+        .as_ref()
+}
 
 /// Run nvidia-smi with a timeout. If the subprocess hasn't exited within
 /// `SMI_TIMEOUT`, it is killed and `None` is returned.
 fn smi_run(args: &[&str]) -> Option<String> {
+    let smi_bin = find_nvidia_smi()?;
     let started = Instant::now();
-    log::debug!("nvidia-smi: spawning {SMI_BIN} {}", args.join(" "));
-    let child = match Command::new(SMI_BIN)
+    log::debug!(
+        "nvidia-smi: spawning {} {}",
+        smi_bin.display(),
+        args.join(" ")
+    );
+    let child = match Command::new(smi_bin)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -108,60 +143,44 @@ pub fn smi_query(query: &str) -> Option<String> {
     value
 }
 
-pub fn read_temp() -> Option<f64> {
-    let raw = smi_query("temperature.gpu")?;
-    match raw.parse::<f64>() {
-        Ok(v) => {
-            log::trace!("gpu temperature: {v} °C");
-            Some(v)
-        }
-        Err(e) => {
-            log::warn!("gpu temperature parse failed for {raw:?}: {e}");
-            None
-        }
+/// Batch snapshot of dGPU metrics in a single subprocess execution.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DgpuMetrics {
+    pub temp: Option<f64>,
+    pub power: Option<f64>,
+    pub clock: Option<f64>,
+    pub util: Option<f64>,
+}
+
+/// Query temperature, power, clock and utilization in a SINGLE nvidia-smi execution.
+pub fn read_metrics_batch() -> DgpuMetrics {
+    let raw = match smi_query("temperature.gpu,power.draw,clocks.gr,utilization.gpu") {
+        Some(r) => r,
+        None => return DgpuMetrics::default(),
+    };
+    let parts: Vec<&str> = raw.split(',').map(|s| s.trim()).collect();
+    DgpuMetrics {
+        temp: parts.first().and_then(|s| s.parse().ok()),
+        power: parts.get(1).and_then(|s| s.parse().ok()),
+        clock: parts.get(2).and_then(|s| s.parse().ok()),
+        util: parts.get(3).and_then(|s| s.parse().ok()),
     }
+}
+
+pub fn read_temp() -> Option<f64> {
+    read_metrics_batch().temp
 }
 
 pub fn read_power() -> Option<f64> {
-    let raw = smi_query("power.draw")?;
-    match raw.parse::<f64>() {
-        Ok(v) => {
-            log::trace!("gpu power draw: {v} W");
-            Some(v)
-        }
-        Err(e) => {
-            log::warn!("gpu power draw parse failed for {raw:?}: {e}");
-            None
-        }
-    }
+    read_metrics_batch().power
 }
 
 pub fn read_clock() -> Option<f64> {
-    let raw = smi_query("clocks.gr")?;
-    match raw.parse::<f64>() {
-        Ok(v) => {
-            log::trace!("gpu core clock: {v} MHz");
-            Some(v)
-        }
-        Err(e) => {
-            log::warn!("gpu core clock parse failed for {raw:?}: {e}");
-            None
-        }
-    }
+    read_metrics_batch().clock
 }
 
 pub fn read_util() -> Option<f64> {
-    let raw = smi_query("utilization.gpu")?;
-    match raw.parse::<f64>() {
-        Ok(v) => {
-            log::trace!("gpu utilization: {v} %");
-            Some(v)
-        }
-        Err(e) => {
-            log::warn!("gpu utilization parse failed for {raw:?}: {e}");
-            None
-        }
-    }
+    read_metrics_batch().util
 }
 
 /// NVIDIA driver maximum power limit (W) — e.g. 175 on RTX 5080 Legion Pro 7.

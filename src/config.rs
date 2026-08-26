@@ -403,13 +403,26 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
     {
         Ok(file) => {
             use std::os::fd::AsRawFd;
-            // SAFETY: flock on a valid fd — plain POSIX call, no memory concerns.
-            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-            if rc != 0 {
+            // Bounded non-blocking flock retry with timeout to prevent hung processes from blocking GUI/CLI forever
+            let fd = file.as_raw_fd();
+            let start = std::time::Instant::now();
+            let mut locked = false;
+            while start.elapsed() < std::time::Duration::from_millis(500) {
+                let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+                if rc == 0 {
+                    locked = true;
+                    break;
+                }
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if !locked {
                 log::warn!(
-                    "config lock failed ({}): {}",
-                    path.display(),
-                    std::io::Error::last_os_error()
+                    "config lock timeout after 500ms ({}) — proceeding under fallback",
+                    path.display()
                 );
             } else {
                 log::trace!(
@@ -418,14 +431,15 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
                 );
             }
             let out = f();
-            // SAFETY: unlocking the fd we locked above.
-            unsafe {
-                libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+            if locked {
+                unsafe {
+                    libc::flock(fd, libc::LOCK_UN);
+                }
+                log::trace!(
+                    "config::with_config_lock — lock released ({})",
+                    path.display()
+                );
             }
-            log::trace!(
-                "config::with_config_lock — lock released ({})",
-                path.display()
-            );
             out
         }
         Err(e) => {
@@ -543,6 +557,11 @@ fn write_disk(cfg: &AppConfig) {
     match write_result {
         Ok(()) => match fs::rename(&tmp, &path) {
             Ok(()) => {
+                if let Some(parent) = path.parent() {
+                    if let Ok(dir) = fs::File::open(parent) {
+                        let _ = dir.sync_all();
+                    }
+                }
                 log::info!(
                     "config::write_disk — settings written to {}",
                     path.display()

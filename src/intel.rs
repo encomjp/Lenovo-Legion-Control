@@ -188,7 +188,11 @@ pub fn hybrid_topology() -> Option<(BTreeSet<u32>, BTreeSet<u32>)> {
                 if let Some((lo, hi)) = tok.split_once('-') {
                     let lo: u32 = lo.parse().ok()?;
                     let hi: u32 = hi.parse().ok()?;
-                    Some((lo..=hi).collect::<Vec<_>>())
+                    if lo <= hi && (hi - lo) < 1024 {
+                        Some((lo..=hi).collect::<Vec<_>>())
+                    } else {
+                        None
+                    }
                 } else {
                     Some(vec![tok.parse().ok()?])
                 }
