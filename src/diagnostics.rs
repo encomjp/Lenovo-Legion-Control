@@ -527,6 +527,16 @@ pub fn collect() -> DiagnosticsReport {
     report
 }
 
+/// Parse a single `/proc/cpuinfo` line's `core id` value, tolerating both
+/// single- and double-tab separators (`core id\t: 0` and `core id\t\t: 0`).
+/// Returns the numeric core id, or `None` for any other line shape.
+fn core_id_from_line(line: &str) -> Option<u32> {
+    let rest = line.strip_prefix("core id")?;
+    let rest = rest.trim_start_matches(['\t', ' ']);
+    let rest = rest.strip_prefix(":")?;
+    rest.trim().parse::<u32>().ok()
+}
+
 /// Safely extract detailed hardware context (CPU topology, RAM, GPU,
 /// storage devices, display metrics) from Linux standard sysfs & /proc files.
 /// 100% read-only, bounds-checked, zero unsafe, zero serial numbers.
@@ -554,12 +564,8 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
                 }
             } else if line.starts_with("processor\t:") {
                 logical_threads += 1;
-            } else if let Some(rest) = line.strip_prefix("core id") {
-                if let Some(v) = rest.trim_start_matches(['\t', ' ']).strip_prefix(":") {
-                    if let Ok(id) = v.trim().parse::<u32>() {
-                        seen_core_ids.insert(id);
-                    }
-                }
+            } else if let Some(id) = core_id_from_line(line) {
+                seen_core_ids.insert(id);
             }
         }
     }
@@ -1503,31 +1509,191 @@ mod tests {
         assert_eq!(truncate_chars(umlauts, 99), umlauts);
     }
 
-    /// Sweeper removes only matching payload files past the cutoff; fresh
-    /// files and non-.json bystanders survive.
+    /// Sweeper removes only matching payload files (plain `.json` AND gzipped
+    /// `.json.gz`) past the cutoff; fresh files and non-payload bystanders
+    /// survive. This pins the regression where gzipped temp files leaked
+    /// because the matcher only recognised the `.json` suffix.
     #[test]
     fn sweep_stale_temp_removes_only_old_payload_files() {
         let dir = std::env::temp_dir();
         let tag = std::process::id();
         let old = dir.join(format!("legion-diag-{tag}-sweep-old.json"));
+        let oldgz = dir.join(format!("legion-diag-{tag}-sweep-old.json.gz"));
         let fresh = dir.join(format!("legion-diag-{tag}-sweep-new.json"));
+        let freshgz = dir.join(format!("legion-diag-{tag}-sweep-new.json.gz"));
         let bystander = dir.join(format!("legion-diag-{tag}-sweep.txt"));
+        for p in [&old, &oldgz, &fresh, &freshgz, &bystander] {
+            if p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
         std::fs::write(&old, "{}").unwrap();
+        std::fs::write(&oldgz, "{}").unwrap();
         std::fs::write(&fresh, "{}").unwrap();
+        std::fs::write(&freshgz, "{}").unwrap();
         std::fs::write(&bystander, "{}").unwrap();
 
         let now = SystemTime::now();
         // Cutoff an hour back → nothing is stale yet.
         sweep_older_than(&dir, now - Duration::from_secs(3600));
         assert!(old.exists(), "swept a fresh payload file");
+        assert!(oldgz.exists(), "swept a fresh .json.gz payload file");
         assert!(fresh.exists(), "swept a fresh payload file");
+        assert!(freshgz.exists(), "swept a fresh .json.gz payload file");
 
-        // Cutoff in the future → every matching .json payload goes.
+        // Cutoff in the future → every matching .json/.json.gz payload goes.
         sweep_older_than(&dir, now + Duration::from_secs(3600));
         assert!(!old.exists(), "stale payload survived sweep");
+        assert!(!oldgz.exists(), "stale .json.gz payload survived sweep");
         assert!(!fresh.exists(), "future-cutoff sweep kept payload");
-        assert!(bystander.exists(), "swept non-.json bystander");
-
+        assert!(
+            !freshgz.exists(),
+            "future-cutoff sweep kept .json.gz payload"
+        );
+        assert!(bystander.exists(), "swept non-payload bystander");
         let _ = std::fs::remove_file(&bystander);
+    }
+
+    /// Regression: recent_logs is oldest-first, and build_log_digest must
+    /// keep the NEWEST error in `last_error` (the fixed code overwrites on
+    /// each ERROR, so a stale oldest-first capture can never resurface).
+    #[test]
+    fn build_log_digest_keeps_newest_error_and_counts_targets() {
+        fn entry(level: &str, target: &str, msg: &str) -> crate::logging::LogEntry {
+            crate::logging::LogEntry {
+                ts: String::new(),
+                level: level.to_string(),
+                target: target.to_string(),
+                file: None,
+                line: None,
+                message: msg.to_string(),
+            }
+        }
+        let entries = vec![
+            entry("INFO", "init", "booted"),
+            entry("WARN", "thermal", "warm"),
+            entry("ERROR", "mod_a", "first error"),
+            entry("WARN", "thermal", "warmer"),
+            entry("ERROR", "mod_b", "second error"),
+        ];
+        let d = build_log_digest(&entries);
+        assert_eq!(d.info_count, 1);
+        assert_eq!(d.warn_count, 2);
+        assert_eq!(d.error_count, 2);
+        // The last_error must be the newest ERROR, not the first.
+        assert_eq!(d.last_error.as_deref(), Some("second error"));
+        // errors_by_target: distinct counts make the desc-sort deterministic.
+        let entries = vec![
+            entry("ERROR", "mod_a", "e1"),
+            entry("ERROR", "mod_a", "e2"),
+            entry("ERROR", "mod_b", "e3"),
+        ];
+        let d = build_log_digest(&entries);
+        let expect: Vec<(String, u32)> = vec![("mod_a".into(), 2), ("mod_b".into(), 1)];
+        assert_eq!(d.errors_by_target, expect);
+        assert_eq!(d.last_error.as_deref(), Some("e3"));
+    }
+
+    /// build_log_digest truncates long error messages to 200 chars and still
+    /// records the newest one.
+    #[test]
+    fn build_log_digest_truncates_long_newest_error() {
+        fn entry(msg: &str) -> crate::logging::LogEntry {
+            crate::logging::LogEntry {
+                ts: String::new(),
+                level: "ERROR".into(),
+                target: "mod".into(),
+                file: None,
+                line: None,
+                message: msg.to_string(),
+            }
+        }
+        let long = "x".repeat(500);
+        let d = build_log_digest(&[entry("short"), entry(&long)]);
+        assert_eq!(d.last_error.as_ref().map(|s| s.chars().count()), Some(200));
+        assert_eq!(d.error_count, 2);
+    }
+
+    /// gzip_bytes must emit a valid gzip stream that round-trips to the
+    /// original, and actually shrink a compressible input.
+    #[test]
+    fn gzip_bytes_roundtrips_and_compresses() {
+        use std::io::Read as _;
+        // Small payload: round-trips exactly (header overhead is fine).
+        let small = r#"{"machine_id":"abcd-1234","sensors":{"cpu_c":61}}"#;
+        let gz = gzip_bytes(small.as_bytes());
+        let mut dec = flate2::read::GzDecoder::new(&gz[..]);
+        let mut out = Vec::new();
+        dec.read_to_end(&mut out).expect("valid gzip stream");
+        assert_eq!(out, small.as_bytes());
+        // Compressible larger payload: gzip must actually shrink it.
+        let big = format!(r#"{{"machine_id":"abcd","note":"{}"}}"#, "x".repeat(4096));
+        let gzb = gzip_bytes(big.as_bytes());
+        assert!(gzb.len() < big.len(), "gzip did not shrink payload");
+        let mut dec = flate2::read::GzDecoder::new(&gzb[..]);
+        let mut outb = Vec::new();
+        dec.read_to_end(&mut outb).expect("valid gzip stream");
+        assert_eq!(outb, big.as_bytes());
+    }
+
+    /// A gzipped send must add exactly one extra `-H Content-Encoding: gzip`
+    /// pair on top of the base shape (Content-Type, and the secret header
+    /// file when a key is present).
+    #[test]
+    fn build_curl_args_gzipped_adds_content_encoding_header() {
+        // Without a key: Content-Type + Content-Encoding = 2 header pairs.
+        let args = build_curl_args(
+            "https://ep.example/v1/diagnostics",
+            "/tmp/p.json.gz",
+            None,
+            true,
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-H" && w[1] == "Content-Encoding: gzip"));
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "-H").count(),
+            2,
+            "expected Content-Type + Content-Encoding only: {args:?}"
+        );
+        // With a key: Content-Type + Content-Encoding + @header-file = 3.
+        let args = build_curl_args(
+            "https://ep.example/v1/diagnostics",
+            "/tmp/p.json.gz",
+            Some("/tmp/hdr"),
+            true,
+        );
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "-H").count(),
+            3,
+            "expected Content-Type + Content-Encoding + @header-file: {args:?}"
+        );
+        // Non-gzipped stays at the old shape (no Content-Encoding).
+        let args = build_curl_args(
+            "https://ep.example/v1/diagnostics",
+            "/tmp/p.json",
+            None,
+            false,
+        );
+        assert!(
+            !args.iter().any(|a| a == "Content-Encoding: gzip"),
+            "Content-Encoding leaked into non-gzip send: {args:?}"
+        );
+    }
+
+    /// Regression: `/proc/cpuinfo` core-id lines can be separated by a single
+    /// OR a double tab (`core id\t: 0` / `core id\t\t: 0`); both must parse,
+    /// and non-core lines must be ignored.
+    #[test]
+    fn core_id_from_line_handles_tab_variants() {
+        assert_eq!(core_id_from_line("core id\t: 0"), Some(0));
+        assert_eq!(core_id_from_line("core id\t\t: 7"), Some(7));
+        assert_eq!(core_id_from_line("core id        : 12"), Some(12));
+        assert_eq!(core_id_from_line("core id\t\t:  3  "), Some(3));
+        // Non-core / malformed lines → None.
+        assert_eq!(core_id_from_line("processor\t: 0"), None);
+        assert_eq!(core_id_from_line("core id\t: abc"), None);
+        assert_eq!(core_id_from_line("coreid\t: 1"), None);
+        assert_eq!(core_id_from_line("model name\t: Intel"), None);
     }
 }

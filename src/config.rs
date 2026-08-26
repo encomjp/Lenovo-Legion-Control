@@ -1003,4 +1003,77 @@ mod tests {
         };
         assert_eq!(z.rgb_effect(), crate::keyboard::RgbEffect::Static);
     }
+
+    /// Regression: legacy `auto_period_hours` must migrate into
+    /// `auto_interval_secs` on load (hours → seconds) when the interval is
+    /// still the default, so old configs stop being ignored.
+    #[test]
+    fn auto_period_hours_migrates_to_interval_seconds() {
+        with_isolated_config_dir(|_| {
+            // A legacy config keeps the serde-default interval (60 s) and only
+            // bumps auto_period_hours.
+            let mut cfg = AppConfig::default();
+            cfg.diagnostics.auto_interval_secs = default_auto_interval_secs();
+            cfg.diagnostics.auto_period_hours = 2;
+            write_disk(&cfg);
+            let loaded = load_from_disk();
+            assert_eq!(loaded.diagnostics.auto_interval_secs, 2 * 3600);
+        });
+    }
+
+    /// A legacy hours value of 0 (unset) must NOT trigger migration and must
+    /// leave the default interval untouched.
+    #[test]
+    fn auto_period_hours_zero_keeps_default_interval() {
+        with_isolated_config_dir(|_| {
+            let mut cfg = AppConfig::default();
+            cfg.diagnostics.auto_interval_secs = default_auto_interval_secs();
+            cfg.diagnostics.auto_period_hours = 0;
+            write_disk(&cfg);
+            let loaded = load_from_disk();
+            assert_eq!(
+                loaded.diagnostics.auto_interval_secs,
+                default_auto_interval_secs()
+            );
+        });
+    }
+
+    /// A config that already set auto_interval_secs must not be clobbered by
+    /// the legacy hours field — explicit modern config wins.
+    #[test]
+    fn auto_interval_secs_takes_precedence_over_legacy_hours() {
+        with_isolated_config_dir(|_| {
+            let mut cfg = AppConfig::default();
+            cfg.diagnostics.auto_interval_secs = 30;
+            cfg.diagnostics.auto_period_hours = 3;
+            write_disk(&cfg);
+            let loaded = load_from_disk();
+            assert_eq!(loaded.diagnostics.auto_interval_secs, 30);
+        });
+    }
+
+    /// ensure_machine_id must mint a canonical UUID v4 (version nibble 4,
+    /// variant 8/9/a/b) exactly once and preserve an existing id thereafter.
+    #[test]
+    fn ensure_machine_id_mints_valid_v4_and_preserves_existing() {
+        let mut cfg = DiagnosticsConfig::default();
+        assert!(cfg.machine_id.is_empty());
+        cfg.ensure_machine_id();
+        let id = cfg.machine_id.clone();
+        let b = id.as_bytes();
+        assert_eq!(b.len(), 36);
+        assert_eq!(&b[14], &b'4', "version nibble must be 4: {id}");
+        let variant = b[19];
+        assert!(
+            (b'8'..=b'b').contains(&variant),
+            "variant must be 8/9/a/b: {id}"
+        );
+        assert_eq!(&b[8], &b'-');
+        assert_eq!(&b[13], &b'-');
+        assert_eq!(&b[18], &b'-');
+        assert_eq!(&b[23], &b'-');
+        // Stable: a second call preserves the existing id.
+        cfg.ensure_machine_id();
+        assert_eq!(cfg.machine_id, id);
+    }
 }
