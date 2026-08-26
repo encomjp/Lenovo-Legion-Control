@@ -5,8 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8791:8791"
-      - "127.0.0.1:8788:8788"
-      - "127.0.0.1:8788:8788"
+      - "${LEGION_PORTAL_BIND:-127.0.0.1}:8788:8788"
     volumes:
       - telemetry-data:/data
     environment:

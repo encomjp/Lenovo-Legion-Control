@@ -192,9 +192,8 @@ pub fn build_log_digest(entries: &[crate::logging::LogEntry]) -> LogDigest {
             }
             _ => {}
         }
-        if e.level == "ERROR" && d.last_error.is_none() {
-            // recent_logs returns oldest-first; keep overwriting so we end
-            // with the NEWEST error.
+        if e.level == "ERROR" {
+            // recent_logs is oldest-first — overwrite each time to keep the NEWEST error.
             let redacted = redact_home_paths(&e.message);
             let capped: String = redacted.chars().take(200).collect();
             d.last_error = Some(capped);
@@ -372,14 +371,14 @@ pub fn collect() -> DiagnosticsReport {
     if machine_id.is_empty() {
         let mut dc = app_cfg.diagnostics.clone();
         dc.ensure_machine_id();
-        machine_id = dc.machine_id.clone();
-        // Persist the minted machine_id so future collects keep the same fleet grouping.
-        let mid = machine_id.clone();
+        let minted = dc.machine_id.clone();
+        // Persist minted ID atomically (flock held inside update); re-read winner to avoid TOCTOU race.
         config::update(|c| {
             if c.diagnostics.machine_id.is_empty() {
-                c.diagnostics.machine_id = mid.clone();
+                c.diagnostics.machine_id = minted.clone();
             }
         });
+        machine_id = config::get().diagnostics.machine_id;
     }
 
     let battery_summary = BatterySummary {
@@ -555,9 +554,11 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
                 }
             } else if line.starts_with("processor\t:") {
                 logical_threads += 1;
-            } else if let Some(v) = line.strip_prefix("core id\t\t: ") {
-                if let Ok(id) = v.trim().parse::<u32>() {
-                    seen_core_ids.insert(id);
+            } else if let Some(rest) = line.strip_prefix("core id") {
+                if let Some(v) = rest.trim_start_matches(['\t', ' ']).strip_prefix(":") {
+                    if let Ok(id) = v.trim().parse::<u32>() {
+                        seen_core_ids.insert(id);
+                    }
                 }
             }
         }
@@ -1082,10 +1083,9 @@ fn sweep_older_than(dir: &Path, cutoff: SystemTime) -> usize {
         return 0;
     };
     for entry in entries.flatten() {
-        let is_payload = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|n| n.starts_with("legion-diag-") && n.ends_with(".json"));
+        let is_payload = entry.file_name().to_str().is_some_and(|n| {
+            n.starts_with("legion-diag-") && (n.ends_with(".json") || n.ends_with(".json.gz"))
+        });
         if !is_payload {
             continue;
         }
@@ -1124,16 +1124,17 @@ pub fn is_opted_in() -> bool {
 static LAST_SEND_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// Convenience used by CLI/GUI: collect + send with config-resolved endpoint.
-/// Guards against accidental double-send from the same process (60 s window).
+/// Guards against accidental double-send from the same process (10 s window — matches
+/// the fastest auto_interval_secs of 15 s with some headroom for manual clicks).
 pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
     let last = LAST_SEND_MS.load(Ordering::Relaxed);
-    if last > 0 && now_ms - last < 60_000 {
+    if last > 0 && now_ms - last < 10_000 {
         return Err(
-            "diagnostics were sent less than a minute ago — skipping duplicate send".into(),
+            "diagnostics were sent less than 10 seconds ago — skipping duplicate send".into(),
         );
     }
     LAST_SEND_MS.store(now_ms, Ordering::Relaxed);

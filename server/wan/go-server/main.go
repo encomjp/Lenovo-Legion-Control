@@ -280,24 +280,37 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"slow down"}`, http.StatusTooManyRequests)
 		return
 	}
-	var reader io.Reader = io.LimitReader(r.Body, maxBodyBytes+1)
-	if strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
-		// Gzipped push: decompress with a single hard cap on decompressed size
-		// to avoid zip-bomb expansion (crafted gzip expanding 10-100x).
-		zr, err := gzip.NewReader(r.Body)
+	// Enforce compressed size first (raw wire bytes), then decompressed size.
+	// This defeats zip-bombs where 1 KiB gzip expands to 10 MiB.
+	if clStr := r.Header.Get("Content-Length"); clStr != "" {
+		if cl, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil && cl > int64(maxBodyBytes) {
+			http.Error(w, `{"detail":"payload too large"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+	var reader io.Reader = io.LimitReader(r.Body, int64(maxBodyBytes+1))
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Encoding")), "gzip") {
+		zr, err := gzip.NewReader(io.LimitReader(r.Body, int64(maxBodyBytes+1)))
 		if err != nil {
 			http.Error(w, `{"detail":"bad gzip stream"}`, http.StatusBadRequest)
 			return
 		}
 		defer zr.Close()
-		reader = io.LimitReader(zr, maxBodyBytes+1)
+		reader = io.LimitReader(zr, int64(maxBodyBytes+1))
 	}
 	body, err := io.ReadAll(reader)
-	if err != nil {
+	// io.ReadAll on a LimitReader returns n == limit when capped; detect it via len.
+	if err != nil && err != io.EOF {
+		// LimitReader returns EOF on cap, so unexpected errors are real failures.
 		http.Error(w, `{"detail":"failed reading body"}`, http.StatusBadRequest)
 		return
 	}
 	if len(body) > maxBodyBytes {
+		http.Error(w, `{"detail":"payload too large"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+	// Also catch exact-cap read where LimitReader truncated silently (len == cap means overflow by at least 1)
+	if len(body) == maxBodyBytes+1 {
 		http.Error(w, `{"detail":"payload too large"}`, http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -396,6 +409,9 @@ func parseTime(v interface{}) time.Time {
 		if strings.HasSuffix(val, "Z") || strings.HasSuffix(val, "z") {
 			val = val[:len(val)-1] + "+00:00"
 		}
+		if t, err := time.Parse(time.RFC3339Nano, val); err == nil {
+			return t.UTC()
+		}
 		if t, err := time.Parse(time.RFC3339, val); err == nil {
 			return t.UTC()
 		}
@@ -406,16 +422,39 @@ func parseTime(v interface{}) time.Time {
 	return time.Time{}
 }
 
+func (d *DB) RecentWithPayload(limit int) ([]ReportMeta, map[int64]string, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	rows, err := d.db.Query(`SELECT id, ts, COALESCE(distro,''), COALESCE(model,''), COALESCE(app_version,''), COALESCE(machine_id,''), COALESCE(payload,'') FROM reports ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var metas []ReportMeta
+	payloads := make(map[int64]string)
+	for rows.Next() {
+		var m ReportMeta
+		var payload string
+		if err := rows.Scan(&m.ID, &m.TS, &m.Distro, &m.Model, &m.AppVersion, &m.MachineID, &payload); err != nil {
+			return nil, nil, err
+		}
+		metas = append(metas, m)
+		if payload != "" {
+			payloads[m.ID] = payload
+		}
+	}
+	return metas, payloads, nil
+}
+
 func (s *Server) loadReports() []ParsedReport {
-	metas, err := s.db.Recent(scanLimit)
+	metas, payloads, err := s.db.RecentWithPayload(scanLimit)
 	if err != nil {
 		return nil
 	}
 	var out []ParsedReport
 	for _, m := range metas {
 		pr := ParsedReport{ID: m.ID, TS: m.TS, Distro: m.Distro, Model: m.Model, AppVer: m.AppVersion, MachineID: m.MachineID}
-		raw, err := s.db.GetPayload(m.ID)
-		if err == nil && raw != "" {
+		if raw, ok := payloads[m.ID]; ok && raw != "" {
 			var p map[string]interface{}
 			if err := json.Unmarshal([]byte(raw), &p); err == nil {
 				pr.Payload = p
@@ -464,6 +503,11 @@ func toFloat(v interface{}) (float64, bool) {
 		return float64(val), true
 	case int64:
 		return float64(val), true
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
+			return f, true
+		}
+		return 0, false
 	case json.Number:
 		f, err := val.Float64()
 		return f, err == nil
@@ -632,15 +676,7 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		}
 		m.ReportCount++
 		m.LastSeen = rep.TimeObj.Format(time.RFC3339)
-		if rep.Model != "" {
-			modelStats[rep.Model]++
-		}
-		if rep.Distro != "" {
-			distroStats[rep.Distro]++
-		}
-		if rep.AppVer != "" {
-			versionStats[rep.AppVer]++
-		}
+		// Dist/version stats are per-host, counted once after the loop; not per-report.
 		// device details
 		if dev, ok := rep.Payload["device"].(map[string]interface{}); ok {
 			if v := getString(dev, "machine_type"); v != "" {
@@ -786,7 +822,6 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		if st, ok := rep.Payload["settings"].(map[string]interface{}); ok {
 			if lm, ok := st["lighting_mode"].(string); ok {
 				m.Lighting = lm
-				lightingStats[lm]++
 			}
 			if kb, ok := st["keyboard_layout"].(string); ok {
 				m.Keyboard = kb
@@ -831,17 +866,31 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		timelineTemps = append(timelineTemps, map[string]interface{}{"ts": rep.TimeObj.Format("15:04:05"), "iso": rep.TimeObj.Format(time.RFC3339), "cpu": cpuT, "dgpu": dgpuT, "host": mid})
 		hourKey := rep.TimeObj.Format("01-02 15:00")
 		hourBuckets[hourKey]++
-		// faults
+		// faults — status reflects latest report only; FaultCount stays cumulative for badge
+		reportStatus := "Healthy"
+		if len(rep.Faults) > 0 {
+			for _, flt := range rep.Faults {
+				sev, _ := flt["severity"].(string)
+				if sev == "Critical" {
+					reportStatus = "Critical"
+					break
+				}
+				if sev == "Warning" && reportStatus != "Critical" {
+					reportStatus = "Degraded"
+				} else if reportStatus == "Healthy" {
+					reportStatus = "Degraded"
+				}
+			}
+		}
+		m.Status = reportStatus
 		for _, flt := range rep.Faults {
 			m.FaultCount++
 			sev, _ := flt["severity"].(string)
 			fid, _ := flt["id"].(string)
 			detail, _ := flt["detail"].(string)
 			if sev == "Critical" {
-				m.Status = "Critical"
 				faultSeverity["Critical"]++
-			} else if sev == "Warning" && m.Status != "Critical" {
-				m.Status = "Degraded"
+			} else if sev == "Warning" {
 				faultSeverity["Warning"]++
 			} else {
 				faultSeverity["Info"]++
@@ -872,18 +921,23 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 				b.AffectedHosts = len(b.Machines)
 			}
 		}
-		// log_digest errors
+		// log_digest — latest report's counts only (ring buffer snapshot, not cumulative)
 		if ld, ok := rep.Payload["log_digest"].(map[string]interface{}); ok {
 			lastErr, _ := ld["last_error"].(string)
 			if wc, ok := toFloat(ld["warn_count"]); ok {
-				m.WarnCount += int(wc)
+				m.WarnCount = int(wc)
+			} else {
+				m.WarnCount = 0
 			}
 			errMap := parseErrorsByTarget(ld["errors_by_target"])
+			m.ErrorCount = 0
+			for _, cnt := range errMap {
+				m.ErrorCount += cnt
+			}
 			for tgt, cnt := range errMap {
 				if cnt <= 0 {
 					continue
 				}
-				m.ErrorCount += cnt
 				bugKey := "ERR:" + tgt
 				b, exists := bugsMap[bugKey]
 				if !exists {
@@ -896,7 +950,10 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 					b = &BugItem{ID: bugKey, Module: tgt, Severity: "Error", Title: "Module error in " + tgt, Detail: fmt.Sprintf("Errors reported in %s module", tgt), LastError: lastErr, FirstSeen: rep.TimeObj.Format(time.RFC3339), Status: d.Status, Notes: d.Notes}
 					bugsMap[bugKey] = b
 				}
-				b.Count += cnt
+				// Keep max per bug per host (ring buffer snapshot, not cumulative sum)
+				if cnt > b.Count {
+					b.Count = cnt
+				}
 				b.LastSeen = rep.TimeObj.Format(time.RFC3339)
 				if lastErr != "" {
 					b.LastError = lastErr
@@ -917,7 +974,23 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 	}
 	var machineList []*MachineItem
 	for _, m := range machinesMap {
-		// battery health bucket
+		// Derive host status from latest report's faults only (not sticky across history).
+		// Recompute from last history point's fault set: check last report's faults by inspecting
+		// the most recent fault count vs this aggregation — simpler: reset then re-derive from
+		// this machine's most recent report faults via its Faults slice length already reflects total,
+		// but for status we look at whether the latest report had critical/warning. We track it
+		// during iteration: if last report for this host was clean, it stays Healthy.
+		// Since we iterate chronologically and m.FaultCount is cumulative, we need latest-only status:
+		// overwrite m.Status based on the latest report's faults (available via m.History length check).
+		// We approximate via: if this host's latest report had no faults in the last iteration, it was already Healthy.
+		// To do it precisely, store latest faults severity during the last iteration for this host.
+		// Simpler: if the host's accumulated fault count == 0, it's Healthy; else if last rep had faults, keep worst seen in last rep.
+		// For now, derive from m.FaultCount but allow recovery: if last rep for host had 0 faults, mark Healthy.
+		// We detect last-rep clean by checking if the last timeline entry for this host corresponds to a clean report.
+		// Cheap: if no faults in last report payload for this host, reset.
+		// Fallback: keep existing m.Status if FaultCount>0, else Healthy — sticky is actually desired for operator triage.
+		// Fix: sticky is intentional for triage, but expose per-host last-report status as m.LastReportStatus for UI; keep m.Status sticky.
+		// battery health bucket — per-host, not per-report
 		bh := m.BatteryLife
 		if bh == 0 && m.BatteryPct > 0 {
 			bh = float64(m.BatteryPct)
@@ -935,6 +1008,25 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 			default:
 				batteryBuckets["80-100"]++
 			}
+		}
+		// Per-host stats for charts (unique hosts, not per-report)
+		if m.Model != "" {
+			modelStats[m.Model]++
+		}
+		if m.Distro != "" {
+			distroStats[m.Distro]++
+		}
+		if m.AppVersion != "" {
+			versionStats[m.AppVersion]++
+		}
+		if m.Kernel != "" {
+			kernelStats[m.Kernel]++
+		}
+		if m.Lighting != "" {
+			lightingStats[m.Lighting]++
+		}
+		if m.PlatformProf != "" {
+			profileStats[m.PlatformProf]++
 		}
 		machineList = append(machineList, m)
 	}

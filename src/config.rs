@@ -427,12 +427,24 @@ fn load_from_disk() -> AppConfig {
     log::trace!("config::load_from_disk — reading {}", path.display());
     match fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str::<AppConfig>(&s) {
-            Ok(parsed) => {
+            Ok(mut parsed) => {
                 log::debug!(
                     "config::load_from_disk — loaded {} ({} bytes)",
                     path.display(),
                     s.len()
                 );
+                // Migrate legacy auto_period_hours (hours → secs) if auto_interval_secs is still default and hours is non-zero.
+                if parsed.diagnostics.auto_period_hours != 0
+                    && parsed.diagnostics.auto_interval_secs == default_auto_interval_secs()
+                {
+                    let migrated = parsed.diagnostics.auto_period_hours.saturating_mul(3600);
+                    log::info!(
+                        "config migration: auto_period_hours {} → auto_interval_secs {}",
+                        parsed.diagnostics.auto_period_hours,
+                        migrated
+                    );
+                    parsed.diagnostics.auto_interval_secs = migrated;
+                }
                 parsed
             }
             Err(e) => {
