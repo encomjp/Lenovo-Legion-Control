@@ -261,13 +261,15 @@ pub struct SettingsDigest {
 
 fn read_os_release() -> OsInfo {
     let raw = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    let mut pretty_name = String::new();
     let mut name = String::new();
     let mut version = String::new();
     for line in raw.lines() {
-        if let Some(v) = line.strip_prefix("NAME=") {
+        if let Some(v) = line.strip_prefix("PRETTY_NAME=") {
+            pretty_name = v.trim_matches('"').to_string();
+        } else if let Some(v) = line.strip_prefix("NAME=") {
             name = v.trim_matches('"').to_string();
-        }
-        if let Some(v) = line.strip_prefix("VERSION_ID=") {
+        } else if let Some(v) = line.strip_prefix("VERSION_ID=") {
             version = v.trim_matches('"').to_string();
         }
     }
@@ -275,12 +277,14 @@ fn read_os_release() -> OsInfo {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     OsInfo {
-        distro: if name.is_empty() {
-            "unknown".into()
-        } else if version.is_empty() {
+        distro: if !pretty_name.is_empty() {
+            pretty_name
+        } else if !name.is_empty() && !version.is_empty() {
+            format!("{name} {version}")
+        } else if !name.is_empty() {
             name
         } else {
-            format!("{name} {version}")
+            "unknown".into()
         },
         kernel,
     }
