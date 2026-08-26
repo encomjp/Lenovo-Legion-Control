@@ -167,6 +167,22 @@ func (d *DB) PruneOlderThan(days int) (int64, error) {
 	return res.RowsAffected()
 }
 
+// DeleteMachine removes every report belonging to one machine. A machine is
+// keyed by its machine_id when present, otherwise by its model (matching the
+// Fleet grouping), so both shapes are matched and nothing else is touched.
+func (d *DB) DeleteMachine(machineID string) (int64, error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	res, err := d.db.Exec(
+		`DELETE FROM reports WHERE (machine_id = ?) OR ((machine_id IS NULL OR machine_id = '') AND model = ?)`,
+		machineID, machineID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 type BugDetail struct {
 	Status string
 	Notes  string
@@ -1142,6 +1158,17 @@ func (s *Server) handleAPIMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ = strings.CutSuffix(id, "/")
+	// DELETE /api/machine/{id} removes every report for that machine.
+	if r.Method == http.MethodDelete {
+		n, err := s.db.DeleteMachine(id)
+		if err != nil {
+			http.Error(w, `{"error":"db error"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "deleted": n})
+		return
+	}
 	reps := s.loadReports()
 	var matched []ParsedReport
 	for _, rep := range reps {

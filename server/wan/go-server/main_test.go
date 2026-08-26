@@ -410,3 +410,41 @@ func TestBugStatusRoundTrip(t *testing.T) {
 	}
 }
 
+// Regression: DELETE /api/machine/{id} removes only that machine's reports
+// and leaves every other machine untouched (Fleet 'remove' action).
+func TestDeleteMachineRemovesOnlyThatMachine(t *testing.T) {
+	s := testServer(t, "secret")
+	for _, mid := range []string{"m-keep", "m-del"} {
+		raw, _ := json.Marshal(validReport(mid))
+		if _, err := s.db.Insert(time.Now().UTC().Format(time.RFC3339), string(raw), mid, "Fedora", "Legion", "0.1.0", 1); err != nil {
+			t.Fatalf("insert %s: %v", mid, err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/machine/m-del", nil)
+	rr := httptest.NewRecorder()
+	s.handleAPIMachine(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete: got %d want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		OK      bool  `json:"ok"`
+		Deleted int64 `json:"deleted"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode delete resp: %v", err)
+	}
+	if !resp.OK || resp.Deleted != 1 {
+		t.Fatalf("delete resp: %+v", resp)
+	}
+	if n, _ := s.db.Count(); n != 1 {
+		t.Fatalf("after delete: %d rows, want 1", n)
+	}
+	// Re-deleting a machine that is already gone is still a success (0 rows).
+	req2 := httptest.NewRequest(http.MethodDelete, "/api/machine/m-del", nil)
+	rr2 := httptest.NewRecorder()
+	s.handleAPIMachine(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("re-delete: got %d want 200", rr2.Code)
+	}
+}
+

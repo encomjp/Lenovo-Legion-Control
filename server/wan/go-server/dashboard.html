@@ -450,7 +450,7 @@
         const card=document.createElement('div');
         card.className='glass rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-legion-accent/30 transition border-l-2 '+border;
         card.onclick=()=>openDrawer(m.id);
-        card.innerHTML='<div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-white font-bold text-sm truncate" title="'+escapeHtml(m.model||'Unknown')+'">'+escapeHtml((m.model||'Unknown').slice(0,28))+'</div><div class="text-[11px] mono text-legion-dim truncate">'+escapeHtml(m.id)+'</div></div><span class="shrink-0 px-2 py-0.5 rounded text-[10px] mono uppercase font-semibold border '+badge+'">'+escapeHtml(m.status)+'</span></div>'
+        card.innerHTML='<div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-white font-bold text-sm truncate" title="'+escapeHtml(m.model||'Unknown')+'">'+escapeHtml((m.model||'Unknown').slice(0,28))+'</div><div class="text-[11px] mono text-legion-dim truncate">'+escapeHtml(m.id)+'</div></div><div class="flex items-center gap-1.5 shrink-0"><span class="px-2 py-0.5 rounded text-[10px] mono uppercase font-semibold border '+badge+'">'+escapeHtml(m.status)+'</span><button title="Remove this machine and its reports" data-rid="'+escapeHtml(m.id)+'" onclick="event.stopPropagation();removeMachine(this)" class="w-6 h-6 grid place-items-center rounded text-legion-dim hover:text-red-400 hover:bg-red-950/30 border border-transparent hover:border-red-800 transition text-xs">✕</button></div></div>'
           +'<div class="grid grid-cols-2 gap-2 text-[11px] mono">'
           +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">OS / KERNEL</div><div class="text-white truncate">'+escapeHtml(m.distro||'—')+'</div><div class="text-legion-dim truncate">'+escapeHtml((m.kernel||'').slice(0,22))+'</div></div>'
           +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">THERMALS</div><div class="text-emerald-400">'+(m.cpu_temp?m.cpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">CPU</span> · '+(m.dgpu_temp?m.dgpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">dGPU</span></div><div class="text-legion-dim">'+(m.thermal_limit?'limit '+m.thermal_limit+'°C':'')+'</div></div>'
@@ -466,6 +466,15 @@
     }
 
     let drawerChart=null;
+    // Remove a machine (and all its reports) from the Fleet, with a confirm.
+    function removeMachine(btn){
+      const id=btn.dataset.rid;
+      if(!confirm('Remove machine "'+id+'" and all of its telemetry reports? This cannot be undone.')) return;
+      fetch('/api/machine/'+encodeURIComponent(id), {method:'DELETE'})
+        .then(r=>r.json())
+        .then(d=>{ if(d&&d.ok){ toast('Machine removed','ok'); fetchData(); } else { toast('Failed to remove machine','err'); } })
+        .catch(()=>toast('Failed to remove machine','err'));
+    }
     async function openDrawer(mid){
       document.getElementById('drawer').classList.remove('hidden');
       document.getElementById('drawer-title').textContent=mid;
