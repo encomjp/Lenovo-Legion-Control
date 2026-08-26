@@ -372,8 +372,8 @@ fn build_ui(app: &adw::Application) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Legion Control")
-        .default_width(1180)
-        .default_height(760)
+        .default_width(1060)
+        .default_height(680)
         .build();
 
     let toast_overlay = adw::ToastOverlay::new();
@@ -2470,7 +2470,10 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
                     move |result| {
                         ui_done.apply_button.set_label("Apply");
                         match update_curve_optimizer_ui(&ui_done, result) {
-                            Ok(()) => toast_ok(&overlay, "Curve Optimizer offset verified"),
+                            Ok(()) => {
+                                toast_ok(&overlay, "Curve Optimizer offset verified");
+                                refresh_curve_optimizer_persistence(&ui_done, Some(&overlay));
+                            }
                             Err(error) => {
                                 ui_done.apply_button.set_sensitive(true);
                                 toast_error(&overlay, &error);
@@ -2506,7 +2509,10 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
                     move |result| {
                         ui_done.reset_button.set_label("Reset");
                         match update_curve_optimizer_ui(&ui_done, result) {
-                            Ok(()) => toast_ok(&overlay, "Curve Optimizer baseline restored"),
+                            Ok(()) => {
+                                toast_ok(&overlay, "Curve Optimizer baseline restored");
+                                refresh_curve_optimizer_persistence(&ui_done, Some(&overlay));
+                            }
                             Err(error) => {
                                 ui_done.reset_button.set_sensitive(true);
                                 toast_error(&overlay, &error);
@@ -3082,6 +3088,8 @@ fn attach_custom_ppt_group(
                 let lim_label = lim_label.clone();
                 let choices_c = choices_c.clone();
                 let drop_c = drop_c.clone();
+                let val_l_c = val_l.clone();
+                let ppt_warned_c = ppt_warned.clone();
                 confirm_risk(
                     s,
                     "High power limit",
@@ -3100,6 +3108,8 @@ fn attach_custom_ppt_group(
                         if !ok {
                             suppress_r.set(true);
                             scale_r.set_value(prev as f64);
+                            val_l_c.set_text(&format!("{prev} {unit_sym}"));
+                            ppt_warned_c.set(false);
                             suppress_r.set(false);
                             return;
                         }

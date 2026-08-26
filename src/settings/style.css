@@ -45,11 +45,13 @@ window {
 }
 
 /* Header — keep title legible at a glance */
-headerbar windowtitle.title {
+headerbar windowtitle label.title,
+headerbar windowtitle .title {
     font-weight: 800;
     letter-spacing: -0.02em;
 }
-headerbar windowtitle.subtitle {
+headerbar windowtitle label.subtitle,
+headerbar windowtitle .subtitle {
     opacity: 0.60;
     font-size: 0.82rem;
 }
@@ -344,19 +346,19 @@ headerbar windowtitle.subtitle {
     border-left-color: #c8102e;
 }
 .metric-chip.hot .value {
-    color: #c8102e;
+    color: #ff6b7e;
 }
 
 .metric-chip.warm {
     border-left-color: #d9981a;
 }
 .metric-chip.warm .value {
-    color: #b7790f;
+    color: #f5c542;
 }
 
 /* ── Status pills — sharper, technical ──────────────────────────── */
 .status-pill {
-    font-size: 0.64rem;
+    font-size: 0.68rem;
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -375,21 +377,21 @@ headerbar windowtitle.subtitle {
 }
 
 .status-ok {
-    color: #1a7a3a;
-    background: alpha(#2ecc71, 0.12);
-    border-color: alpha(#2ecc71, 0.22);
+    color: #46f08a;
+    background: alpha(#2ecc71, 0.16);
+    border-color: alpha(#2ecc71, 0.30);
 }
 
 .status-warn {
-    color: #8a5a00;
-    background: alpha(#d9981a, 0.14);
-    border-color: alpha(#d9981a, 0.24);
+    color: #f5c542;
+    background: alpha(#d9981a, 0.18);
+    border-color: alpha(#d9981a, 0.32);
 }
 
 .status-bad {
-    color: #a70e26;
-    background: alpha(#c8102e, 0.10);
-    border-color: alpha(#c8102e, 0.22);
+    color: #ff6b7e;
+    background: alpha(#c8102e, 0.16);
+    border-color: alpha(#c8102e, 0.30);
 }
 
 .status-muted {

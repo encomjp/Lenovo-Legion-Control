@@ -35,9 +35,9 @@ value() {
 cpu_t="$(printf '%s\n' "$status" | grep -oP '(Tctl|CPU)\s+\K[0-9.]+(?=°C)' | head -1 || true)"
 value CPU_TEMP "$cpu_t"
 value CPU_POWER "$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
-value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[0-9.]+' | head -1 || true)"
+value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[-0-9.]+' | head -1 || true)"
 value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[0-9.]+\s+W' | head -1 | grep -oP '[0-9.]+' || true)"
-fans_line="$(printf '%s\n' "$status" | grep -E 'CPU +[0-9]+ +GPU +[0-9]+' | head -1 || true)"
+fans_line="$(printf '%s\n' "$status" | grep -Ei 'CPU.*[0-9]+.*GPU.*[0-9]+' | head -1 || true)"
 value FAN_CPU "$(printf '%s\n' "$fans_line" | grep -oP 'CPU\s+\K[0-9]+' | head -1 || true)"
 value FAN_GPU "$(printf '%s\n' "$fans_line" | grep -oP 'GPU\s+\K[0-9]+' | head -1 || true)"
 value FAN_AUX "$(printf '%s\n' "$fans_line" | grep -oP 'Aux\s+\K[0-9]+' | head -1 || true)"
@@ -79,7 +79,12 @@ bat_power() {
       awk '{printf "%.1f", $1/1000000}' "$bat/power_now" 2>/dev/null && return
     fi
     if [[ -r "$bat/current_now" && -r "$bat/voltage_now" ]]; then
-      awk '{printf "%.1f", ($1*$2)/1000000000000}' "$bat/current_now" "$bat/voltage_now" 2>/dev/null && return
+      local cur vol
+      cur="$(cat "$bat/current_now" 2>/dev/null || true)"
+      vol="$(cat "$bat/voltage_now" 2>/dev/null || true)"
+      if [[ -n "$cur" && -n "$vol" ]]; then
+        awk -v c="$cur" -v v="$vol" 'BEGIN {printf "%.1f", (c*v)/1000000000000}' 2>/dev/null && return
+      fi
     fi
   done
 }
