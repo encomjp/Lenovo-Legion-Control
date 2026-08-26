@@ -3,23 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Legion Telemetry Control Center</title>
+  <title>Legion Telemetry</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
-          fontFamily: { sans: ['Plus Jakarta Sans','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] },
+          fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] },
           colors: {
             legion: {
-              accent: '#46f08a', dark: '#0a0e0c', card: '#111714', cardAlt: '#161e1a',
-              border: '#1f2d25', borderLight: '#2e4236', text: '#b7ccb9', dim: '#6f8a77',
-              cyan: '#38bdf8', amber: '#fbbf24', red: '#f87171', purple: '#c084fc',
+              accent: '#46f08a', dark: '#090c0a', card: '#111714', cardAlt: '#151d18',
+              border: '#1c2b22', borderLight: '#253a2d', text: '#b7ccb9', dim: '#6f8a77',
+              cyan: '#38bdf8', amber: '#fbbf24', red: '#ef4444', purple: '#a78bfa',
             }
           }
         }
@@ -27,144 +27,144 @@
     }
   </script>
   <style>
-    body { background:#0a0e0c; color:#b7ccb9; font-family:'Plus Jakarta Sans',sans-serif; }
+    body { background:#090c0a; color:#b7ccb9; font-family:'Inter',sans-serif; }
     .mono { font-family:'JetBrains Mono',monospace; }
-    ::-webkit-scrollbar{ width:6px; height:6px; } ::-webkit-scrollbar-track{ background:#0a0e0c; }
-    ::-webkit-scrollbar-thumb{ background:#1f2d25; border-radius:3px; } ::-webkit-scrollbar-thumb:hover{ background:#2e4236; }
-    .glass-card{ background:rgba(17,23,20,.88); backdrop-filter:blur(10px); border:1px solid #1f2d25; }
-    .glass-card:hover{ border-color:rgba(70,240,138,.22); }
-    .kpi-gradient{ background:radial-gradient(circle at top left, rgba(70,240,138,.09), transparent 68%); }
-    .pulse-dot{ animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
-    @keyframes pulse{ 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.45; transform:scale(1.15);} }
-    .shimmer{ background:linear-gradient(90deg,#111714 25%,#161e1a 50%,#111714 75%); background-size:200% 100%; animation:shimmer 1.3s infinite; }
-    @keyframes shimmer{ 0%{ background-position:200% 0;} 100%{ background-position:-200% 0;} }
-    .toast-enter{ animation:toastIn .22s ease; } @keyframes toastIn{ from{ transform:translateY(10px); opacity:0;} to{ transform:translateY(0); opacity:1;} }
+    ::-webkit-scrollbar{ width:6px; height:6px; } ::-webkit-scrollbar-track{ background:#090c0a; }
+    ::-webkit-scrollbar-thumb{ background:#1c2b22; border-radius:3px; } ::-webkit-scrollbar-thumb:hover{ background:#253a2d; }
+    .glass{ background:rgba(17,23,20,.92); backdrop-filter:blur(8px); border:1px solid #1c2b22; }
+    .glass:hover{ border-color:rgba(70,240,138,.20); }
+    .kpi-grad{ background:radial-gradient(520px 220px at 0% 0%, rgba(70,240,138,.10), transparent 62%); }
+    .pulse{ animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+    @keyframes pulse{ 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.45; transform:scale(1.12);} }
+    .toast-in{ animation:toastIn .2s ease; } @keyframes toastIn{ from{ transform:translateY(8px); opacity:0;} to{ transform:translateY(0); opacity:1;} }
+    .tab-active{ background:#1c2b22; color:#fff; border:1px solid rgba(70,240,138,.32); box-shadow: 0 0 0 1px rgba(70,240,138,.08) inset; }
+    .tab-idle{ color:#6f8a77; }
+    .tab-idle:hover{ color:#fff; background:#111714; }
+    .card-title{ font-size:.84rem; font-weight:700; color:#fff; letter-spacing:-.01em; }
+    .card-sub{ font-size:.72rem; color:#6f8a77; }
+    .h256{ height:256px; } .h220{ height:220px; }
   </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-legion-accent selection:text-black">
   <header class="border-b border-legion-border bg-legion-dark/95 backdrop-blur sticky top-0 z-40">
-    <div class="max-w-[84rem] mx-auto px-4 sm:px-6 lg:px-8 h-[3.7rem] flex items-center justify-between gap-3">
+    <div class="max-w-[84rem] mx-auto px-4 sm:px-6 lg:px-8 h-[3.6rem] flex items-center justify-between gap-3">
       <div class="flex items-center gap-3 shrink-0">
-        <div class="w-8 h-8 rounded-lg bg-legion-accent/10 border border-legion-accent/30 flex items-center justify-center text-legion-accent font-mono font-bold text-sm">&gt;_</div>
-        <div>
-          <span class="text-white font-bold text-[1.05rem] tracking-tight">Legion<span class="text-legion-accent">Telemetry</span></span>
-          <span class="ml-2 px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">Fleet Ops</span>
+        <div class="w-8 h-8 rounded-lg bg-legion-accent/10 border border-legion-accent/30 flex items-center justify-center text-legion-accent font-mono font-bold text-sm">›_</div>
+        <div class="leading-none">
+          <div class="text-white font-extrabold text-[1.02rem] tracking-tight">Legion<span class="text-legion-accent">Telemetry</span></div>
+          <div class="text-[10px] mono tracking-widest text-legion-dim -mt-0.5">FLEET OPS • v0.1.0-alpha</div>
         </div>
       </div>
       <nav class="flex items-center gap-1 sm:gap-1.5 overflow-x-auto">
-        <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-white bg-legion-border border border-legion-accent/40 shadow-sm">📊 Analytics</button>
-        <button onclick="switchTab('machines')" id="tab-machines" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">💻 Fleet</button>
-        <button onclick="switchTab('bugs')" id="tab-bugs" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card flex items-center gap-1">🐞 Triage <span id="badge-bug-count" class="px-1.5 py-0.5 rounded-full text-[9px] bg-red-950 text-red-400 border border-red-800">0</span></button>
-        <button onclick="switchTab('reports')" id="tab-reports" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">📋 Reports</button>
-        <button onclick="switchTab('privacy')" id="tab-privacy" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">🛡️ Privacy</button>
+        <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-active whitespace-nowrap px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition">Analytics</button>
+        <button onclick="switchTab('machines')" id="tab-machines" class="tab-idle whitespace-nowrap px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition">Fleet</button>
+        <button onclick="switchTab('bugs')" id="tab-bugs" class="tab-idle whitespace-nowrap px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition flex items-center gap-1.5">Triage <span id="badge-bug-count" class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-950 text-red-300 border border-red-800">0</span></button>
+        <button onclick="switchTab('reports')" id="tab-reports" class="tab-idle whitespace-nowrap px-3.5 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition">Reports</button>
       </nav>
-      <div class="flex items-center gap-2 text-xs font-mono shrink-0">
+      <div class="flex items-center gap-2 text-xs mono shrink-0">
         <div class="hidden sm:flex items-center gap-1.5 bg-legion-card border border-legion-border px-2.5 py-1 rounded-full">
-          <span class="w-2 h-2 rounded-full bg-legion-accent pulse-dot"></span>
-          <span class="text-emerald-400 font-medium text-[11px]">LIVE</span>
-          <svg id="refresh-ring" class="w-4 h-4 -rotate-90" viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" fill="none" stroke="#1f2d25" stroke-width="3"/><circle id="refresh-ring-fg" cx="18" cy="18" r="14" fill="none" stroke="#46f08a" stroke-width="3" stroke-linecap="round" stroke-dasharray="87.96" stroke-dashoffset="87.96"/></svg>
+          <span class="w-2 h-2 rounded-full bg-legion-accent pulse"></span>
+          <span class="text-emerald-400 font-semibold text-[11px]">LIVE</span>
+          <svg id="refresh-ring" class="w-4 h-4 -rotate-90" viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" fill="none" stroke="#1c2b22" stroke-width="3"/><circle id="refresh-ring-fg" cx="18" cy="18" r="14" fill="none" stroke="#46f08a" stroke-width="3" stroke-linecap="round" stroke-dasharray="87.96" stroke-dashoffset="87.96"/></svg>
         </div>
-        <button onclick="fetchData()" class="p-1.5 text-legion-dim hover:text-white hover:bg-legion-card rounded transition" title="Refresh now">↻</button>
+        <button onclick="fetchData()" class="w-7 h-7 grid place-items-center rounded-md bg-legion-card border border-legion-border text-legion-dim hover:text-white hover:bg-legion-cardAlt transition" title="Refresh now" aria-label="Refresh">↻</button>
       </div>
     </div>
   </header>
 
   <main class="flex-1 max-w-[84rem] w-full mx-auto p-4 sm:p-6 lg:px-8 lg:py-6 space-y-6">
-    <!-- KPIs -->
     <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4" id="kpi-row">
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Total Reports</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Total Reports</div>
         <div class="flex items-baseline justify-between mt-2 gap-2">
           <span class="text-2xl font-extrabold text-white mono" id="kpi-total">—</span>
           <span class="text-[11px] mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40" id="kpi-24h">+0</span>
         </div>
         <div class="text-[11px] mono text-legion-dim mt-1" id="kpi-active-hosts">— hosts (24h)</div>
       </div>
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Fleet Size</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Fleet Size</div>
         <div class="text-2xl font-extrabold text-legion-cyan mono mt-2" id="kpi-fleet">—</div>
         <div class="text-[11px] mono text-legion-dim" id="kpi-fleet-sub">unique hosts</div>
       </div>
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Avg CPU Temp</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Avg CPU Temp</div>
         <div class="flex items-baseline gap-2 mt-2">
           <span class="text-2xl font-extrabold text-emerald-400 mono" id="kpi-avg-temp">—°C</span>
           <canvas id="kpi-spark" width="68" height="18" class="opacity-80"></canvas>
         </div>
         <div class="text-[11px] mono text-legion-dim">fleet latest</div>
       </div>
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Warnings</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Warnings</div>
         <div class="text-2xl font-extrabold text-legion-amber mono mt-2" id="kpi-warn">0</div>
         <div class="text-[11px] mono text-amber-400/80">faults</div>
       </div>
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Critical</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Critical</div>
         <div class="text-2xl font-extrabold text-legion-red mono mt-2" id="kpi-crit">0</div>
         <div class="text-[11px] mono text-red-400/80">needs triage</div>
       </div>
-      <div class="glass-card kpi-gradient rounded-xl p-4">
-        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Self-Check Pass</div>
+      <div class="glass kpi-grad rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-widest font-semibold text-legion-dim">Self-Check Pass</div>
         <div class="text-2xl font-extrabold text-white mono mt-2" id="kpi-pass">—%</div>
         <div class="w-full h-1.5 bg-legion-border rounded-full mt-1 overflow-hidden"><div id="kpi-pass-bar" class="h-full bg-legion-accent" style="width:0%"></div></div>
       </div>
     </div>
 
-    <!-- ANALYTICS -->
     <div id="view-analytics" class="space-y-6">
-      <div class="glass-card rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs">
-        <span class="text-white font-bold uppercase tracking-wider text-[11px]">Slicers:</span>
-        <select id="filter-model" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Models</option></select>
-        <select id="filter-distro" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Distros</option></select>
-        <select id="filter-version" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Versions</option></select>
+      <div class="glass rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-white font-bold uppercase tracking-widest text-[11px]">Slicers</span>
+        <select id="filter-model" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Models</option></select>
+        <select id="filter-distro" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Distros</option></select>
+        <select id="filter-version" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Versions</option></select>
         <span class="ml-auto text-legion-dim mono text-[11px]" id="slicer-info"></span>
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="glass-card rounded-xl p-5 lg:col-span-2">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Thermal Timeline</div><div class="text-xs text-legion-dim">CPU & dGPU °C over ingest time (slicer-filtered)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Line</span></div>
-          <div class="h-[260px]"><canvas id="chart-thermal"></canvas></div>
+        <div class="glass rounded-xl p-5 lg:col-span-2">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Thermal Timeline</div><div class="card-sub">CPU and dGPU temperature over ingest time — filtered by slicers</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Line</span></div>
+          <div class="h256"><canvas id="chart-thermal"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Hardware Fleet</div><div class="text-xs text-legion-dim">By Legion model</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Donut</span></div>
-          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-models"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Hardware Fleet</div><div class="card-sub">Share by Legion model</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Donut</span></div>
+          <div class="h256 flex items-center justify-center"><canvas id="chart-models"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Ingest Volume</div><div class="text-xs text-legion-dim">Reports per hour (48h)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Bar</span></div>
-          <div class="h-[260px]"><canvas id="chart-ingest"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Ingest Volume</div><div class="card-sub">Reports per hour — last 48 h</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Bar</span></div>
+          <div class="h256"><canvas id="chart-ingest"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Linux Distros</div><div class="text-xs text-legion-dim">Nodes per distro</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-purple-400">Bar H</span></div>
-          <div class="h-[260px]"><canvas id="chart-distros"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Linux Distros</div><div class="card-sub">Nodes per distribution</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-purple-400">Bar</span></div>
+          <div class="h256"><canvas id="chart-distros"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Battery Health</div><div class="text-xs text-legion-dim">Fleet health % buckets</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Hist</span></div>
-          <div class="h-[260px]"><canvas id="chart-battery"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Battery Health</div><div class="card-sub">Fleet health buckets</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Histogram</span></div>
+          <div class="h256"><canvas id="chart-battery"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Power Profiles</div><div class="text-xs text-legion-dim">ACPI platform profile</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Donut</span></div>
-          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-profiles"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Power Profiles</div><div class="card-sub">Active ACPI profile</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Donut</span></div>
+          <div class="h256 flex items-center justify-center"><canvas id="chart-profiles"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Fault Severity</div><div class="text-xs text-legion-dim">Diagnostics anomalies</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-red-400">Pie</span></div>
-          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-faults"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">Fault Severity</div><div class="card-sub">Diagnostics anomalies</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-red-400">Donut</span></div>
+          <div class="h256 flex items-center justify-center"><canvas id="chart-faults"></canvas></div>
         </div>
-        <div class="glass-card rounded-xl p-5">
-          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">App Versions</div><div class="text-xs text-legion-dim">Adoption by build</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Bar H</span></div>
-          <div class="h-[260px]"><canvas id="chart-versions"></canvas></div>
+        <div class="glass rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="card-title">App Versions</div><div class="card-sub">Adoption by build</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Bar</span></div>
+          <div class="h256"><canvas id="chart-versions"></canvas></div>
         </div>
       </div>
-      <div class="glass-card rounded-xl p-5" id="checks-card" style="display:none">
-        <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Self-Check Fleet Health</div><div class="text-xs text-legion-dim">Pass / fail per diagnostic check (latest report per host)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-legion-accent">Checks</span></div>
-        <div class="h-[220px]"><canvas id="chart-checks"></canvas></div>
+      <div class="glass rounded-xl p-5" id="checks-card" style="display:none">
+        <div class="flex items-center justify-between mb-3"><div><div class="card-title">Self-Check Fleet Health</div><div class="card-sub">Pass and fail per diagnostic check — latest report per host</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-legion-accent">Checks</span></div>
+        <div class="h220"><canvas id="chart-checks"></canvas></div>
       </div>
     </div>
 
-    <!-- FLEET -->
     <div id="view-machines" class="space-y-4 hidden">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div><div class="text-white font-bold">Machine Fleet Explorer</div><div class="text-xs text-legion-dim">Click a card for sensor drill-down • history sparklines inline</div></div>
+        <div><div class="text-white font-bold">Fleet Explorer</div><div class="text-xs text-legion-dim">Card grid with inline sparklines — click a card for sensor drill-down</div></div>
         <div class="flex items-center gap-2">
-          <input id="fleet-q" oninput="renderFleet()" placeholder="Search id / model / distro / kernel" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none focus:border-legion-accent w-64">
+          <input id="fleet-q" oninput="renderFleet()" placeholder="Search id, model, distro, kernel" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none focus:border-legion-accent w-64">
           <select id="fleet-status" onchange="renderFleet()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Status</option><option value="Healthy">Healthy</option><option value="Degraded">Degraded</option><option value="Critical">Critical</option></select>
           <select id="fleet-sort" onchange="renderFleet()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="last">Last seen</option><option value="reports">Reports</option><option value="temp">CPU Temp</option><option value="faults">Faults</option></select>
         </div>
@@ -172,53 +172,42 @@
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="machines-grid"></div>
     </div>
 
-    <!-- BUGS -->
     <div id="view-bugs" class="space-y-4 hidden">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div><div class="text-white font-bold flex items-center gap-2">Bugzilla Triage <span class="text-xs mono px-2 py-0.5 rounded bg-legion-cardAlt border border-legion-border text-legion-accent">v0.1.0-alpha</span></div><div class="text-xs text-legion-dim">Aggregated signatures • expandable detail • notes & triage state persisted</div></div>
+        <div><div class="text-white font-bold flex items-center gap-2">Triage <span class="text-xs mono px-2 py-0.5 rounded bg-legion-cardAlt border border-legion-border text-legion-accent">v0.1.0-alpha</span></div><div class="text-xs text-legion-dim">Aggregated signatures — expand a row for detail, notes and triage are persisted</div></div>
         <div class="flex items-center gap-2 flex-wrap">
-          <input id="bug-q" oninput="renderBugs()" placeholder="Search title / module / detail" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none w-52">
+          <input id="bug-q" oninput="renderBugs()" placeholder="Search title, module, detail" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none w-52">
           <select id="bug-sev" onchange="renderBugs()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Severities</option><option value="Critical">Critical</option><option value="Warning">Warning</option><option value="Info">Info</option><option value="Error">Error</option></select>
           <select id="bug-status" onchange="renderBugs()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Status</option><option value="NEW">NEW</option><option value="TRIAGED">TRIAGED</option><option value="RESOLVED">RESOLVED</option></select>
         </div>
       </div>
-      <div class="flex gap-2 text-[11px] mono" id="bug-counts"></div>
-      <div class="glass-card rounded-xl overflow-hidden overflow-x-auto">
-        <table class="min-w-[900px] w-full divide-y divide-legion-border text-left text-xs">
-          <thead class="bg-legion-cardAlt/80 text-legion-dim mono uppercase text-[11px]"><tr><th class="px-3 py-2 w-6"></th><th class="px-3 py-2">Signature</th><th class="px-3 py-2">Sev</th><th class="px-3 py-2">Module</th><th class="px-3 py-2">Count</th><th class="px-3 py-2">Hosts</th><th class="px-3 py-2">Last Seen</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Triage</th></tr></thead>
+      <div class="flex gap-2 text-[11px] mono flex-wrap" id="bug-counts"></div>
+      <div class="glass rounded-xl overflow-hidden overflow-x-auto">
+        <table class="min-w-[920px] w-full divide-y divide-legion-border text-left text-xs">
+          <thead class="bg-legion-cardAlt/80 text-legion-dim mono uppercase text-[11px]"><tr><th class="px-3 py-2 w-6"></th><th class="px-3 py-2">Signature</th><th class="px-3 py-2">Severity</th><th class="px-3 py-2">Module</th><th class="px-3 py-2">Count</th><th class="px-3 py-2">Hosts</th><th class="px-3 py-2">Last Seen</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Triage</th></tr></thead>
           <tbody id="bugs-body" class="divide-y divide-legion-border mono text-[11.5px]"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- REPORTS -->
     <div id="view-reports" class="space-y-4 hidden">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div><div class="text-white font-bold">Diagnostics Ingest Stream</div><div class="text-xs text-legion-dim">Newest first • filtered view keeps payload links</div></div>
+        <div><div class="text-white font-bold">Ingest Stream</div><div class="text-xs text-legion-dim">Newest first — filtered view keeps payload links</div></div>
         <div class="flex items-center gap-2">
-          <input id="reports-q" oninput="renderReports()" placeholder="Search model / distro / machine" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim w-56">
+          <input id="reports-q" oninput="renderReports()" placeholder="Search model, distro, machine" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim w-56">
           <select id="reports-fault" onchange="renderReports()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All</option><option value="FAULT">With faults</option><option value="CLEAN">Clean</option></select>
         </div>
       </div>
-      <div class="glass-card rounded-xl overflow-hidden overflow-x-auto">
-        <table class="min-w-[800px] w-full divide-y divide-legion-border text-left text-xs">
+      <div class="glass rounded-xl overflow-hidden overflow-x-auto">
+        <table class="min-w-[820px] w-full divide-y divide-legion-border text-left text-xs">
           <thead class="bg-legion-cardAlt/80 text-legion-dim mono uppercase text-[11px]"><tr><th class="px-3 py-2">#</th><th class="px-3 py-2">Timestamp</th><th class="px-3 py-2">Machine</th><th class="px-3 py-2">Model</th><th class="px-3 py-2">Distro</th><th class="px-3 py-2">Ver</th><th class="px-3 py-2">Faults</th><th class="px-3 py-2 text-right">Payload</th></tr></thead>
           <tbody id="reports-body" class="divide-y divide-legion-border mono text-xs"></tbody>
         </table>
       </div>
       <div class="flex justify-center"><button id="reports-more" onclick="reportsLimit+=50;renderReports()" class="hidden px-4 py-1.5 rounded-lg bg-legion-card border border-legion-border text-xs text-white hover:bg-legion-border">Load 50 more</button></div>
     </div>
-
-    <!-- PRIVACY -->
-    <div id="view-privacy" class="space-y-6 hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="privacy-grid">
-        <div class="glass-card rounded-xl p-6 text-xs leading-relaxed"><div id="privacy-de" class="space-y-2"><div class="shimmer h-6 w-40 rounded"></div><div class="shimmer h-4 w-full rounded"></div><div class="shimmer h-4 w-5/6 rounded"></div></div></div>
-        <div class="glass-card rounded-xl p-6 text-xs leading-relaxed"><div id="privacy-en" class="space-y-2"><div class="shimmer h-6 w-40 rounded"></div><div class="shimmer h-4 w-full rounded"></div><div class="shimmer h-4 w-5/6 rounded"></div></div></div>
-      </div>
-    </div>
   </main>
 
-  <!-- Machine Drawer -->
   <div id="drawer" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onclick="closeDrawer()"></div>
     <div class="absolute right-0 top-0 h-full w-full max-w-[560px] bg-[#0f1411] border-l border-legion-border shadow-2xl flex flex-col overflow-hidden">
@@ -237,9 +226,8 @@
     </div>
   </div>
 
-  <!-- JSON Modal -->
   <div id="modal-json" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
-    <div class="glass-card max-w-4xl w-full max-h-[85vh] rounded-2xl flex flex-col overflow-hidden border border-legion-borderLight shadow-2xl">
+    <div class="glass max-w-4xl w-full max-h-[85vh] rounded-2xl flex flex-col overflow-hidden border border-legion-borderLight shadow-2xl">
       <div class="p-4 border-b border-legion-border flex items-center justify-between bg-legion-cardAlt"><h3 class="text-white font-bold text-sm mono flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-legion-accent"></span><span id="modal-title">Report</span></h3><button onclick="closeModal()" class="text-legion-dim hover:text-white text-xl">×</button></div>
       <div class="p-4 overflow-y-auto flex-1 bg-black/40"><pre id="modal-content" class="text-[11.5px] mono text-emerald-300 whitespace-pre-wrap break-words select-all"></pre></div>
       <div class="p-3 border-t border-legion-border bg-legion-card flex justify-end gap-2"><button onclick="copyModalContent()" class="px-3 py-1.5 bg-legion-border hover:bg-legion-borderLight text-white rounded text-xs mono">Copy JSON</button><button onclick="closeModal()" class="px-4 py-1.5 bg-legion-accent text-black font-semibold rounded text-xs">Close</button></div>
@@ -249,12 +237,14 @@
   <div id="toasts" class="fixed bottom-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none"></div>
 
   <script>
-    let globalData=null, charts={}, reportsLimit=50, drawerMachineId=null, refreshTimer=null, ringTimer=null, ringElapsed=0;
+    let globalData=null, charts={}, reportsLimit=50, refreshTimer=null, ringTimer=null, ringElapsed=0;
     const REFRESH_MS=15000;
+    let lastTab='analytics';
+    let pendingData=null;
 
     function toast(msg, type='info'){
       const el=document.createElement('div');
-      el.className='toast-enter pointer-events-auto px-3 py-2 rounded-lg text-xs font-medium border shadow-lg '+(type==='ok'?'bg-emerald-950 text-emerald-300 border-emerald-800':type==='err'?'bg-red-950 text-red-300 border-red-800':'bg-legion-card text-white border-legion-border');
+      el.className='toast-in pointer-events-auto px-3 py-2 rounded-lg text-xs font-medium border shadow-lg '+(type==='ok'?'bg-emerald-950 text-emerald-300 border-emerald-800':type==='err'?'bg-red-950 text-red-300 border-red-800':'bg-legion-card text-white border-legion-border');
       el.textContent=msg;
       document.getElementById('toasts').appendChild(el);
       setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(6px)'; setTimeout(()=>el.remove(),200); }, 2600);
@@ -277,74 +267,98 @@
       ctx.strokeStyle=color; ctx.lineWidth=1.4; ctx.beginPath();
       data.forEach((v,i)=>{ const x=i/(data.length-1)*w; const y=h - (v-min)/range*h; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
       ctx.stroke();
-      // fill
       ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath(); ctx.fillStyle=color+'22'; ctx.fill();
     }
 
     async function fetchData(){
       try{
         const res=await fetch('/api/data'); if(!res.ok) throw new Error(res.status);
-        globalData=await res.json(); updateUI(); ringElapsed=0;
+        const next=await res.json();
+        const firstLoad = !globalData;
+        // structural equality: if same counts + same last_seen, skip re-render to avoid jumps
+        const sig = (d)=> (d.total_reports+'|'+d.total_machines+'|'+(d.machines||[]).map(m=>m.id+':'+m.last_seen).join(',')+'|'+(d.bugs||[]).map(b=>b.id+':'+b.count+':'+b.status).join(','));
+        const nextSig=sig(next), curSig=globalData?sig(globalData):'';
+        globalData=next;
+        if(firstLoad || nextSig!==curSig){
+          updateUI();
+        } else {
+          // only tick KPIs that can change without structural change (temperatures may drift)
+          // keep it lightweight: update avg temp + pass rate only
+          const avg=globalData.avg_cpu_temp||0;
+          document.getElementById('kpi-avg-temp').textContent=avg?avg.toFixed(1)+'°C':'—°C';
+        }
+        // defer auto-refresh of pendingData if tab not visible
+        if(pendingData){ const p=pendingData; pendingData=null; globalData=p; updateUI(); }
+        ringElapsed=0;
       }catch(e){ console.error(e); toast('Failed to fetch telemetry','err'); }
+    }
+    function scheduleDeferredRefresh(){
+      if(document.hidden){ return; }
+      if(pendingData){ const p=pendingData; pendingData=null; globalData=p; updateUI(); }
     }
     function startRefreshLoop(){
       clearInterval(refreshTimer); clearInterval(ringTimer); ringElapsed=0;
-      refreshTimer=setInterval(fetchData, REFRESH_MS);
+      refreshTimer=setInterval(async ()=>{
+        if(document.hidden){
+          // fetch but defer render
+          try{ const r=await fetch('/api/data'); if(r.ok){ pendingData=await r.json(); } }catch(e){}
+          return;
+        }
+        fetchData();
+      }, REFRESH_MS);
       ringTimer=setInterval(()=>{
         if(document.hidden) return;
         ringElapsed+=100; const pct=Math.min(ringElapsed/REFRESH_MS,1);
-        const off=87.96*(1-pct);
         const fg=document.getElementById('refresh-ring-fg'); if(fg) fg.setAttribute('stroke-dashoffset', String(87.96 - 87.96*pct));
       },100);
     }
     function switchTab(id){
+      lastTab=id;
       document.querySelectorAll('main > div[id^="view-"]').forEach(el=>el.classList.add('hidden'));
       document.getElementById('view-'+id).classList.remove('hidden');
-      document.querySelectorAll('.tab-btn').forEach(b=>{ b.classList.remove('text-white','bg-legion-border','border','border-legion-accent/40','shadow-sm'); b.classList.add('text-legion-dim'); });
-      const a=document.getElementById('tab-'+id); a.classList.add('text-white','bg-legion-border','border','border-legion-accent/40','shadow-sm'); a.classList.remove('text-legion-dim');
+      document.querySelectorAll('nav button[id^="tab-"]').forEach(b=>{ b.classList.remove('tab-active'); b.classList.add('tab-idle'); });
+      const a=document.getElementById('tab-'+id); a.classList.add('tab-active'); a.classList.remove('tab-idle');
+      history.replaceState(null,'','#'+id);
       if(id==='analytics') setTimeout(renderCharts,40);
-      if(id==='privacy' && !window._privacyLoaded) loadPrivacy();
     }
-    async function loadPrivacy(){
-      try{
-        const r=await fetch('/api/privacy'); const j=await r.json();
-        document.getElementById('privacy-de').innerHTML=j.de_html||'<p class="text-legion-dim">Not available.</p>';
-        document.getElementById('privacy-en').innerHTML=j.en_html||'<p class="text-legion-dim">Not available.</p>';
-        window._privacyLoaded=true;
-      }catch(e){
-        document.getElementById('privacy-de').innerHTML='<p class="text-legion-dim">Failed to load privacy docs.</p>';
-        document.getElementById('privacy-en').innerHTML='<p class="text-legion-dim">Failed to load privacy docs.</p>';
-      }
-    }
+    // restore tab from hash
+    (function(){
+      const h=(location.hash||'#analytics').slice(1);
+      if(['analytics','machines','bugs','reports'].includes(h)) lastTab=h;
+    })();
+
     function updateUI(){
       if(!globalData) return;
-      const kpis=globalData;
-      document.getElementById('kpi-total').textContent=kpis.total_reports;
-      document.getElementById('kpi-24h').textContent='+'+kpis.reports_24h;
-      document.getElementById('kpi-active-hosts').textContent=kpis.active_machines_24h+' hosts (24h)';
-      document.getElementById('kpi-fleet').textContent=kpis.total_machines;
-      document.getElementById('kpi-fleet-sub').textContent=kpis.total_machines===1?'unique host':'unique hosts';
-      const avg=kpis.avg_cpu_temp||0;
+      const k=globalData;
+      document.getElementById('kpi-total').textContent=k.total_reports;
+      document.getElementById('kpi-24h').textContent='+'+k.reports_24h;
+      document.getElementById('kpi-active-hosts').textContent=k.active_machines_24h+' hosts (24h)';
+      document.getElementById('kpi-fleet').textContent=k.total_machines;
+      document.getElementById('kpi-fleet-sub').textContent=k.total_machines===1?'unique host':'unique hosts';
+      const avg=k.avg_cpu_temp||0;
       document.getElementById('kpi-avg-temp').textContent=avg?avg.toFixed(1)+'°C':'—°C';
-      // spark from timeline_temps last 24 points
-      const temps=(kpis.timeline_temps||[]).slice(-24).map(x=>x.cpu).filter(v=>v>0);
+      const temps=(k.timeline_temps||[]).slice(-24).map(x=>x.cpu).filter(v=>v>0);
       miniSpark(document.getElementById('kpi-spark'), temps, '#46f08a');
-      document.getElementById('kpi-warn').textContent=kpis.fault_severity?.Warning||0;
-      document.getElementById('kpi-crit').textContent=kpis.fault_severity?.Critical||0;
-      const rate=kpis.checks_pass_rate||0;
+      document.getElementById('kpi-warn').textContent=k.fault_severity?.Warning||0;
+      document.getElementById('kpi-crit').textContent=k.fault_severity?.Critical||0;
+      const rate=k.checks_pass_rate||0;
       document.getElementById('kpi-pass').textContent=rate.toFixed(1)+'%';
       document.getElementById('kpi-pass-bar').style.width=rate.toFixed(1)+'%';
-      document.getElementById('badge-bug-count').textContent=(kpis.bugs||[]).length;
-      // slicers
+      document.getElementById('badge-bug-count').textContent=(k.bugs||[]).length;
       const ms=document.getElementById('filter-model'), ds=document.getElementById('filter-distro'), vs=document.getElementById('filter-version');
       const curM=ms.value, curD=ds.value, curV=vs.value;
-      ms.innerHTML='<option value="ALL">All Models</option>'; for(const k in (kpis.model_stats||{})) ms.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.model_stats[k]+')</option>';
-      ds.innerHTML='<option value="ALL">All Distros</option>'; for(const k in (kpis.distro_stats||{})) ds.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.distro_stats[k]+')</option>';
-      vs.innerHTML='<option value="ALL">All Versions</option>'; for(const k in (kpis.version_stats||{})) vs.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.version_stats[k]+')</option>';
-      ms.value=curM||'ALL'; ds.value=curD||'ALL'; vs.value=curV||'ALL';
+      const fillSelect=(el, map, label)=>{
+        const cur=el.value;
+        el.innerHTML='<option value="ALL">'+label+'</option>';
+        for(const kk in (map||{})) el.innerHTML+='<option value="'+escapeHtml(kk)+'">'+escapeHtml(kk)+' ('+map[kk]+')</option>';
+        el.value=cur||'ALL';
+      };
+      fillSelect(ms,k.model_stats,'All Models'); fillSelect(ds,k.distro_stats,'All Distros'); fillSelect(vs,k.version_stats,'All Versions');
       const filtCount=[curM,curD,curV].filter(v=>v&&v!=='ALL').length;
-      document.getElementById('slicer-info').textContent=filtCount? filtCount+' slicer(s) active • '+(kpis.timeline_temps||[]).length+' points':'No slicer • '+(kpis.timeline_temps||[]).length+' points';
-      renderCharts(); renderFleet(); renderBugs(); renderReports();
+      document.getElementById('slicer-info').textContent=filtCount? filtCount+' slicer(s) active — '+(k.timeline_temps||[]).length+' points':'No slicer — '+(k.timeline_temps||[]).length+' points';
+      // only (re)build charts if analytics tab visible
+      if(!document.getElementById('view-analytics').classList.contains('hidden')) renderCharts();
+      renderFleet(); renderBugs(); renderReports();
     }
     function filteredTimeline(){
       const selM=document.getElementById('filter-model').value;
@@ -362,57 +376,48 @@
     function renderCharts(){
       if(!globalData) return;
       const tl=filteredTimeline();
-      // thermal
       const ctxT=document.getElementById('chart-thermal')?.getContext('2d'); if(ctxT){
         if(charts.thermal) charts.thermal.destroy();
         charts.thermal=new Chart(ctxT,{ type:'line', data:{ labels: tl.map(t=>t.ts), datasets:[
           { label:'CPU °C', data: tl.map(t=>t.cpu>0?t.cpu:null), borderColor:'#46f08a', backgroundColor:'rgba(70,240,138,.10)', tension:.32, fill:true, borderWidth:1.7, pointRadius:0 },
           { label:'dGPU °C', data: tl.map(t=>t.dgpu>0?t.dgpu:null), borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,.07)', tension:.32, fill:true, borderWidth:1.7, pointRadius:0 }
-        ]}, options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:11}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}, maxTicksLimit:10 }, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+        ]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, interaction:{mode:'index',intersect:false}, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:11}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}, maxTicksLimit:10 }, grid:{ color:'rgba(28,43,34,.55)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}}, grid:{ color:'rgba(28,43,34,.55)'}}} } });
       }
-      // ingest per hour
       const ctxI=document.getElementById('chart-ingest')?.getContext('2d'); if(ctxI){
         const buckets=globalData.timeline_reports||[];
         if(charts.ingest) charts.ingest.destroy();
-        charts.ingest=new Chart(ctxI,{ type:'bar', data:{ labels: buckets.map(b=>b.hour), datasets:[{ label:'Reports', data: buckets.map(b=>b.count), backgroundColor:'rgba(70,240,138,.55)', borderColor:'#46f08a', borderWidth:1, borderRadius:3 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:10}, maxTicksLimit:8}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1 }, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+        charts.ingest=new Chart(ctxI,{ type:'bar', data:{ labels: buckets.map(b=>b.hour), datasets:[{ label:'Reports', data: buckets.map(b=>b.count), backgroundColor:'rgba(70,240,138,.55)', borderColor:'#46f08a', borderWidth:1, borderRadius:3 }]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:10}, maxTicksLimit:8}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1 }, grid:{ color:'rgba(28,43,34,.55)'}}} } });
       }
-      // models donut
       const ctxM=document.getElementById('chart-models')?.getContext('2d'); if(ctxM){
         if(charts.models) charts.models.destroy();
         const labels=Object.keys(globalData.model_stats||{}), vals=Object.values(globalData.model_stats||{});
-        charts.models=new Chart(ctxM,{ type:'doughnut', data:{ labels: labels.length?labels:['No data'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#46f08a','#38bdf8','#fbbf24','#f87171','#c084fc','#94a3b8'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}, padding:10}}} } });
+        charts.models=new Chart(ctxM,{ type:'doughnut', data:{ labels: labels.length?labels:['No data'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#46f08a','#38bdf8','#fbbf24','#ef4444','#a78bfa','#94a3b8'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}, padding:10}}} } });
       }
-      // distros horizontal
       const ctxD=document.getElementById('chart-distros')?.getContext('2d'); if(ctxD){
         if(charts.distros) charts.distros.destroy();
         const labels=Object.keys(globalData.distro_stats||{}), vals=Object.values(globalData.distro_stats||{});
-        charts.distros=new Chart(ctxD,{ type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:'rgba(56,189,248,.55)', borderColor:'#38bdf8', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
+        charts.distros=new Chart(ctxD,{ type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:'rgba(56,189,248,.55)', borderColor:'#38bdf8', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(28,43,34,.55)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
       }
-      // battery hist
       const ctxB=document.getElementById('chart-battery')?.getContext('2d'); if(ctxB){
         if(charts.battery) charts.battery.destroy();
         const bh=globalData.battery_hist||{"0-20":0,"20-40":0,"40-60":0,"60-80":0,"80-100":0};
-        charts.battery=new Chart(ctxB,{ type:'bar', data:{ labels:Object.keys(bh), datasets:[{ data:Object.values(bh), backgroundColor:['#f87171','#fbbf24','#38bdf8','#46f08a','#10b981'], borderWidth:1, borderColor:'#111714', borderRadius:4 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+        charts.battery=new Chart(ctxB,{ type:'bar', data:{ labels:Object.keys(bh), datasets:[{ data:Object.values(bh), backgroundColor:['#ef4444','#fbbf24','#38bdf8','#46f08a','#10b981'], borderWidth:1, borderColor:'#111714', borderRadius:4 }]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(28,43,34,.55)'}}} } });
       }
-      // profiles
       const ctxP=document.getElementById('chart-profiles')?.getContext('2d'); if(ctxP){
         if(charts.profiles) charts.profiles.destroy();
         const labels=Object.keys(globalData.profile_stats||{}), vals=Object.values(globalData.profile_stats||{});
-        charts.profiles=new Chart(ctxP,{ type:'doughnut', data:{ labels: labels.length?labels:['(no data)'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#38bdf8','#46f08a','#fbbf24','#f87171'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
+        charts.profiles=new Chart(ctxP,{ type:'doughnut', data:{ labels: labels.length?labels:['(no data)'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#38bdf8','#46f08a','#fbbf24','#ef4444'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
       }
-      // faults
       const ctxF=document.getElementById('chart-faults')?.getContext('2d'); if(ctxF){
         if(charts.faults) charts.faults.destroy();
         const fs=globalData.fault_severity||{Critical:0,Warning:0,Info:0};
-        charts.faults=new Chart(ctxF,{ type:'doughnut', data:{ labels:['Critical','Warning','Info'], datasets:[{ data:[fs.Critical||0,fs.Warning||0,fs.Info||0], backgroundColor:['#f87171','#fbbf24','#46f08a'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
+        charts.faults=new Chart(ctxF,{ type:'doughnut', data:{ labels:['Critical','Warning','Info'], datasets:[{ data:[fs.Critical||0,fs.Warning||0,fs.Info||0], backgroundColor:['#ef4444','#fbbf24','#46f08a'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
       }
-      // versions
       const ctxV=document.getElementById('chart-versions')?.getContext('2d'); if(ctxV){
         if(charts.versions) charts.versions.destroy();
         const labels=Object.keys(globalData.version_stats||{}), vals=Object.values(globalData.version_stats||{});
-        charts.versions=new Chart(ctxV,{ type:'bar', data:{ labels: labels.length?labels:['—'], datasets:[{ data: vals.length?vals:[0], backgroundColor:'rgba(192,132,252,.55)', borderColor:'#c084fc', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
+        charts.versions=new Chart(ctxV,{ type:'bar', data:{ labels: labels.length?labels:['—'], datasets:[{ data: vals.length?vals:[0], backgroundColor:'rgba(167,139,250,.55)', borderColor:'#a78bfa', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(28,43,34,.55)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
       }
-      // checks
       const card=document.getElementById('checks-card'), ctxC=document.getElementById('chart-checks')?.getContext('2d');
       const checks=globalData.checks_summary||[];
       if(checks.length && ctxC){
@@ -420,8 +425,8 @@
         if(charts.checks) charts.checks.destroy();
         charts.checks=new Chart(ctxC,{ type:'bar', data:{ labels: checks.map(c=>c.name), datasets:[
           { label:'Pass', data: checks.map(c=>c.pass), backgroundColor:'rgba(70,240,138,.55)', borderColor:'#46f08a', borderWidth:1 },
-          { label:'Fail', data: checks.map(c=>c.fail), backgroundColor:'rgba(248,113,113,.55)', borderColor:'#f87171', borderWidth:1 }
-        ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{size:11}}}}, scales:{ x:{ stacked:true, ticks:{ color:'#6f8a77', font:{size:10}, maxRotation:45}, grid:{display:false}}, y:{ stacked:true, ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+          { label:'Fail', data: checks.map(c=>c.fail), backgroundColor:'rgba(239,68,68,.55)', borderColor:'#ef4444', borderWidth:1 }
+        ]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{size:11}}}}, scales:{ x:{ stacked:true, ticks:{ color:'#6f8a77', font:{size:10}, maxRotation:45}, grid:{display:false}}, y:{ stacked:true, ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(28,43,34,.55)'}}} } });
       } else if(card){ card.style.display='none'; }
     }
 
@@ -431,7 +436,7 @@
       const st=document.getElementById('fleet-status').value;
       const sort=document.getElementById('fleet-sort').value;
       let list=[...(globalData.machines||[])];
-      if(q) list=list.filter(m=> (m.id+m.model+m.distro+m.kernel).toLowerCase().includes(q));
+      if(q) list=list.filter(m=> (m.id+m.model+m.distro+(m.kernel||'')).toLowerCase().includes(q));
       if(st!=='ALL') list=list.filter(m=>m.status===st);
       if(sort==='reports') list.sort((a,b)=>b.report_count-a.report_count);
       else if(sort==='temp') list.sort((a,b)=>(b.cpu_temp||0)-(a.cpu_temp||0));
@@ -439,30 +444,28 @@
       else list.sort((a,b)=> new Date(b.last_seen)-new Date(a.last_seen));
       grid.innerHTML='';
       list.forEach((m,i)=>{
-        let badge='bg-emerald-950 text-emerald-400 border-emerald-800'; if(m.status==='Critical') badge='bg-red-950 text-red-400 border-red-800'; else if(m.status==='Degraded') badge='bg-amber-950 text-amber-400 border-amber-800';
+        let badge='bg-emerald-950 text-emerald-300 border-emerald-800'; if(m.status==='Critical') badge='bg-red-950 text-red-300 border-red-800'; else if(m.status==='Degraded') badge='bg-amber-950 text-amber-300 border-amber-800';
         const border = m.status==='Critical'?'border-l-red-500': m.status==='Degraded'?'border-l-amber-500':'border-l-emerald-500';
         const card=document.createElement('div');
-        card.className='glass-card rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-legion-accent/30 transition border-l-2 '+border;
+        card.className='glass rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-legion-accent/30 transition border-l-2 '+border;
         card.onclick=()=>openDrawer(m.id);
         card.innerHTML='<div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-white font-bold text-sm truncate" title="'+escapeHtml(m.model||'Unknown')+'">'+escapeHtml((m.model||'Unknown').slice(0,28))+'</div><div class="text-[11px] mono text-legion-dim truncate">'+escapeHtml(m.id)+'</div></div><span class="shrink-0 px-2 py-0.5 rounded text-[10px] mono uppercase font-semibold border '+badge+'">'+escapeHtml(m.status)+'</span></div>'
           +'<div class="grid grid-cols-2 gap-2 text-[11px] mono">'
           +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">OS / KERNEL</div><div class="text-white truncate">'+escapeHtml(m.distro||'—')+'</div><div class="text-legion-dim truncate">'+escapeHtml((m.kernel||'').slice(0,22))+'</div></div>'
-          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">THERMALS</div><div class="text-emerald-400">'+(m.cpu_temp?m.cpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">CPU</span> • '+(m.dgpu_temp?m.dgpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">dGPU</span></div><div class="text-legion-dim">'+(m.thermal_limit? 'limit '+m.thermal_limit+'°C':'')+'</div></div>'
-          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">FANS / PROFILE</div><div class="text-legion-cyan">'+(m.fan_details&&m.fan_details.length? m.fan_details.map(f=> (f.rpm!=null?f.rpm+' RPM':'—')).join(' • ') : (m.fan_rpm?m.fan_rpm+' RPM':'Auto'))+'</div><div class="text-white">'+escapeHtml(m.platform_profile||'—')+'</div></div>'
-          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">BATTERY</div><div class="text-white">'+(m.battery_pct?m.battery_pct+'%':'—')+' <span class="text-legion-dim">'+(m.battery_life? '('+m.battery_life.toFixed(0)+'% health)':'')+'</span></div><div class="text-legion-dim">'+(m.battery_cycle?m.battery_cycle+' cycles':'')+' '+(m.charge_limit?'• lim '+m.charge_limit+'%':'')+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">THERMALS</div><div class="text-emerald-400">'+(m.cpu_temp?m.cpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">CPU</span> · '+(m.dgpu_temp?m.dgpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">dGPU</span></div><div class="text-legion-dim">'+(m.thermal_limit?'limit '+m.thermal_limit+'°C':'')+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">FANS / PROFILE</div><div class="text-legion-cyan">'+(m.fan_details&&m.fan_details.length? m.fan_details.map(f=> (f.rpm!=null?f.rpm+' RPM':'—')).join(' · ') : (m.fan_rpm?m.fan_rpm+' RPM':'Auto'))+'</div><div class="text-white">'+escapeHtml(m.platform_profile||'—')+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">BATTERY</div><div class="text-white">'+(m.battery_pct?m.battery_pct+'%':'—')+' <span class="text-legion-dim">'+(m.battery_life? '('+m.battery_life.toFixed(0)+'% health)':'')+'</span></div><div class="text-legion-dim">'+(m.battery_cycle?m.battery_cycle+' cycles':'')+' '+(m.charge_limit?'· lim '+m.charge_limit+'%':'')+'</div></div>'
           +'</div>'
           +'<canvas id="spark-'+i+'" width="280" height="28" class="w-full opacity-80"></canvas>'
-          +'<div class="flex items-center justify-between text-[11px] mono text-legion-dim border-t border-legion-border pt-2"><span>Reports <b class="text-white">'+m.report_count+'</b> • Faults <b class="'+(m.fault_count?'text-red-400':'text-white')+'">'+m.fault_count+'</b> • Errs <b class="'+(m.error_count?'text-red-400':'text-white')+'">'+m.error_count+'</b></span><span>'+relTime(m.last_seen)+' →</span></div>';
+          +'<div class="flex items-center justify-between text-[11px] mono text-legion-dim border-t border-legion-border pt-2"><span>Reports <b class="text-white">'+m.report_count+'</b> · Faults <b class="'+(m.fault_count?'text-red-400':'text-white')+'">'+m.fault_count+'</b> · Errs <b class="'+(m.error_count?'text-red-400':'text-white')+'">'+m.error_count+'</b></span><span>'+relTime(m.last_seen)+' ›</span></div>';
         grid.appendChild(card);
-        setTimeout(()=> miniSpark(document.getElementById('spark-'+i), m.recent_temps||[], m.status==='Critical'?'#f87171':m.status==='Degraded'?'#fbbf24':'#46f08a'), 30);
+        setTimeout(()=> miniSpark(document.getElementById('spark-'+i), m.recent_temps||[], m.status==='Critical'?'#ef4444':m.status==='Degraded'?'#fbbf24':'#46f08a'), 30);
       });
       if(!list.length) grid.innerHTML='<div class="col-span-3 text-center py-10 text-legion-dim text-sm">No machines match filters.</div>';
     }
 
-    // Drawer
     let drawerChart=null;
     async function openDrawer(mid){
-      drawerMachineId=mid;
       document.getElementById('drawer').classList.remove('hidden');
       document.getElementById('drawer-title').textContent=mid;
       document.getElementById('drawer-sub').textContent='Loading…';
@@ -471,7 +474,7 @@
         if(!r.ok) throw new Error(r.status);
         const d=await r.json();
         document.getElementById('drawer-title').textContent=(d.device&&d.device.model)||d.model||mid;
-        document.getElementById('drawer-sub').textContent=(d.device&&d.device.machine_type?d.device.machine_type+' • ':'')+ (d.os&&d.os.distro?d.os.distro:'') + (d.os&&d.os.kernel?' • '+d.os.kernel:'');
+        document.getElementById('drawer-sub').textContent=(d.device&&d.device.machine_type?d.device.machine_type+' · ':'')+ (d.os&&d.os.distro?d.os.distro:'') + (d.os&&d.os.kernel?' · '+d.os.kernel:'');
         window._drawerData=d;
         drawerTab('sensors');
       }catch(e){ document.getElementById('drawer-body').innerHTML='<div class="text-red-400 text-xs">Failed to load machine.</div>'; }
@@ -488,11 +491,11 @@
           +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD1', s.cpu_temp_1, '°C')+sensorRow('CCD2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
           +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
           +'</div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">NVMe / RAM</div><div class="text-legion-dim mono">SSDs: '+(Array.isArray(s.ssd_composite)? s.ssd_composite.map((v,i)=>'NVMe'+i+' '+Number(v).toFixed(1)+'°C').join(' • ') : '—')+'</div><div class="text-legion-dim mono">RAM: '+(Array.isArray(s.ram_temps)? s.ram_temps.join('°C, ')+'°C' : '—')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">NVMe / RAM</div><div class="text-legion-dim mono">SSDs: '+(Array.isArray(s.ssd_composite)? s.ssd_composite.map((v,i)=>'NVMe'+i+' '+Number(v).toFixed(1)+'°C').join(' · ') : '—')+'</div><div class="text-legion-dim mono">RAM: '+(Array.isArray(s.ram_temps)? s.ram_temps.join('°C, ')+'°C' : '—')+'</div></div>'
           +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Fans</div>'+ (fans.length? fans.map(f=>'<div class="flex justify-between mono text-legion-dim">Fan '+(f.id??'?')+' <span class="text-white">'+(f.rpm!=null?f.rpm+' RPM':'—')+' → '+(f.target!=null?f.target+' tgt':'auto')+' ('+f.min_rpm+'–'+f.max_rpm+')</span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>') +'</div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Battery</div><div class="mono text-legion-dim">Capacity '+(b.capacity_pct??'—')+'% • Health '+(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—')+' • Cycles '+(b.cycles??'—')+' • Limit '+(b.charge_limit_pct??'—')+'%</div><div class="mono text-legion-dim">Status '+(b.status||'—')+' • Voltage '+(b.voltage_v!=null?b.voltage_v.toFixed(2)+'V':'—')+'</div></div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device</div><div class="mono text-legion-dim">'+escapeHtml(dev.cpu_model||'')+'</div><div class="mono text-legion-dim">'+escapeHtml(dev.gpu_model||'')+'</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' • BIOS '+escapeHtml(dev.bios_version||'')+' • EC '+escapeHtml(dev.ec_chip||'')+'</div></div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Tuning</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' • Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Battery</div><div class="mono text-legion-dim">Capacity '+(b.capacity_pct??'—')+'% · Health '+(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—')+' · Cycles '+(b.cycles??'—')+' · Limit '+(b.charge_limit_pct??'—')+'%</div><div class="mono text-legion-dim">Status '+(b.status||'—')+' · Voltage '+(b.voltage_v!=null?b.voltage_v.toFixed(2)+'V':'—')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device</div><div class="mono text-legion-dim">'+escapeHtml(dev.cpu_model||'')+'</div><div class="mono text-legion-dim">'+escapeHtml(dev.gpu_model||'')+'</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' · BIOS '+escapeHtml(dev.bios_version||'')+' · EC '+escapeHtml(dev.ec_chip||'')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Tuning</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' · Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
       } else if(tab==='history'){
         body.innerHTML='<div class="h-[220px]"><canvas id="drawer-history"></canvas></div><div class="text-[11px] mono text-legion-dim mt-2">Last '+(d.history||[]).length+' report points</div>';
         setTimeout(()=>{
@@ -502,17 +505,17 @@
           drawerChart=new Chart(ctx,{ type:'line', data:{ labels: hist.map(h=> new Date(h.ts).toLocaleTimeString()), datasets:[
             { label:'CPU °C', data: hist.map(h=>h.cpu>0?h.cpu:null), borderColor:'#46f08a', backgroundColor:'rgba(70,240,138,.10)', tension:.3, fill:true, pointRadius:0, borderWidth:1.6 },
             { label:'dGPU °C', data: hist.map(h=>h.dgpu>0?h.dgpu:null), borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,.07)', tension:.3, fill:true, pointRadius:0, borderWidth:1.6 }
-          ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:10}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:9}, maxTicksLimit:8}, grid:{ color:'rgba(31,45,37,.5)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.5)'}}} } });
+          ]}, options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:10}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:9}, maxTicksLimit:8}, grid:{ color:'rgba(28,43,34,.5)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(28,43,34,.5)'}}} } });
         },40);
       } else if(tab==='checks'){
         const checks=d.checks||[];
         body.innerHTML= checks.length? checks.map(c=>'<div class="flex gap-2 text-xs p-2 rounded border '+(c.ok?'bg-emerald-950/30 border-emerald-900/50':'bg-red-950/30 border-red-900/50')+'"><span class="shrink-0 mt-0.5 '+(c.ok?'text-emerald-400':'text-red-400')+'">'+(c.ok?'✓':'✗')+'</span><div><div class="font-semibold '+(c.ok?'text-emerald-300':'text-red-300')+'">'+escapeHtml(c.name)+'</div><div class="text-legion-dim mono text-[11px]">'+escapeHtml(c.detail||'')+'</div></div></div>').join('') : '<div class="text-legion-dim text-xs">No self-checks in latest report.</div>';
       } else if(tab==='faults'){
         const fh=d.faults_hist||[];
-        body.innerHTML= fh.length? fh.slice(-20).reverse().map(f=>'<div class="p-2 rounded border border-legion-border bg-legion-cardAlt text-xs"><div class="flex items-center gap-2"><span class="px-1.5 py-0.5 rounded text-[10px] border '+(f.severity==='Critical'?'bg-red-950 text-red-400 border-red-800':f.severity==='Warning'?'bg-amber-950 text-amber-400 border-amber-800':'bg-blue-950 text-blue-400 border-blue-800')+'">'+escapeHtml(f.severity)+'</span><span class="text-white font-semibold">'+escapeHtml(f.id)+'</span><span class="ml-auto text-legion-dim mono text-[11px]">'+relTime(f.ts)+'</span></div><div class="text-legion-dim mono mt-1">'+escapeHtml(f.detail||'')+'</div><div class="text-legion-dim mono text-[11px]">Report #'+f.report_id+'</div></div>').join('') : '<div class="text-legion-dim text-xs">No faults recorded for this host.</div>';
+        body.innerHTML= fh.length? fh.slice(-20).reverse().map(f=>'<div class="p-2 rounded border border-legion-border bg-legion-cardAlt text-xs"><div class="flex items-center gap-2"><span class="px-1.5 py-0.5 rounded text-[10px] border '+(f.severity==='Critical'?'bg-red-950 text-red-300 border-red-800':f.severity==='Warning'?'bg-amber-950 text-amber-300 border-amber-800':'bg-blue-950 text-blue-300 border-blue-800')+'">'+escapeHtml(f.severity)+'</span><span class="text-white font-semibold">'+escapeHtml(f.id)+'</span><span class="ml-auto text-legion-dim mono text-[11px]">'+relTime(f.ts)+'</span></div><div class="text-legion-dim mono mt-1">'+escapeHtml(f.detail||'')+'</div><div class="text-legion-dim mono text-[11px]">Report #'+f.report_id+'</div></div>').join('') : '<div class="text-legion-dim text-xs">No faults recorded for this host.</div>';
       } else if(tab==='reports'){
         const reps=d.reports||[];
-        body.innerHTML= reps.slice().reverse().map(r=>'<div class="flex items-center justify-between p-2 rounded border border-legion-border bg-legion-cardAlt text-xs mono"><span>#'+r.id+' • '+relTime(r.ts)+' • Faults '+r.faults+'</span><button onclick="openJson('+r.id+')" class="px-2 py-1 rounded bg-legion-border text-white text-xs">View JSON</button></div>').join('') || '<div class="text-legion-dim text-xs">No reports.</div>';
+        body.innerHTML= reps.slice().reverse().map(r=>'<div class="flex items-center justify-between p-2 rounded border border-legion-border bg-legion-cardAlt text-xs mono"><span>#'+r.id+' · '+relTime(r.ts)+' · Faults '+r.faults+'</span><button onclick="openJson('+r.id+')" class="px-2 py-1 rounded bg-legion-border text-white text-xs">View JSON</button></div>').join('') || '<div class="text-legion-dim text-xs">No reports.</div>';
       }
     }
     function sensorRow(label, val, unit){
@@ -529,16 +532,15 @@
       if(q) list=list.filter(b=> (b.title+b.module+b.detail+(b.last_error||'')).toLowerCase().includes(q));
       if(sevF!=='ALL') list=list.filter(b=>b.severity===sevF);
       if(stF!=='ALL') list=list.filter(b=>b.status===stF);
-      // counts pills
       const counts={NEW:0,TRIAGED:0,RESOLVED:0}; (globalData.bugs||[]).forEach(b=>{ if(counts[b.status]!=null) counts[b.status]++; });
       document.getElementById('bug-counts').innerHTML='<span class="px-2 py-1 rounded bg-purple-950 text-purple-300 border border-purple-800">NEW '+counts.NEW+'</span><span class="px-2 py-1 rounded bg-amber-950 text-amber-300 border border-amber-800">TRIAGED '+counts.TRIAGED+'</span><span class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">RESOLVED '+counts.RESOLVED+'</span><span class="ml-auto text-legion-dim">'+list.length+' shown / '+(globalData.bugs||[]).length+' total</span>';
       tbody.innerHTML='';
       list.forEach(b=>{
-        let sevCls='bg-blue-950 text-blue-400 border-blue-800'; if(b.severity==='Critical'||b.severity==='Error') sevCls='bg-red-950 text-red-400 border-red-800'; else if(b.severity==='Warning') sevCls='bg-amber-950 text-amber-400 border-amber-800';
-        let stCls='bg-emerald-950 text-emerald-400 border-emerald-800'; if(b.status==='NEW') stCls='bg-purple-950 text-purple-400 border-purple-800'; else if(b.status==='TRIAGED') stCls='bg-amber-950 text-amber-400 border-amber-800';
+        let sevCls='bg-blue-950 text-blue-300 border-blue-800'; if(b.severity==='Critical'||b.severity==='Error') sevCls='bg-red-950 text-red-300 border-red-800'; else if(b.severity==='Warning') sevCls='bg-amber-950 text-amber-300 border-amber-800';
+        let stCls='bg-emerald-950 text-emerald-300 border-emerald-800'; if(b.status==='NEW') stCls='bg-purple-950 text-purple-300 border-purple-800'; else if(b.status==='TRIAGED') stCls='bg-amber-950 text-amber-300 border-amber-800';
         const left = b.severity==='Critical'||b.severity==='Error'?'border-l-red-500': b.severity==='Warning'?'border-l-amber-500':'border-l-blue-500';
         const tr=document.createElement('tr'); tr.className='hover:bg-legion-cardAlt/40 border-l-2 '+left;
-        tr.innerHTML='<td class="px-2 py-2 text-center"><button onclick="toggleBug(this)" class="text-legion-dim hover:text-white">▸</button></td>'
+        tr.innerHTML='<td class="px-2 py-2 text-center"><button onclick="toggleBug(this)" class="text-legion-dim hover:text-white" aria-label="Expand">›</button></td>'
           +'<td class="px-3 py-2"><div class="text-white font-semibold">'+escapeHtml(b.title)+'</div><div class="text-[11px] text-legion-dim max-w-[260px] truncate" title="'+escapeHtml(b.detail)+'">'+escapeHtml(b.detail)+'</div></td>'
           +'<td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-[10px] border font-semibold '+sevCls+'">'+escapeHtml(b.severity)+'</span></td>'
           +'<td class="px-3 py-2 text-legion-cyan">'+escapeHtml(b.module)+'</td>'
@@ -561,10 +563,9 @@
     function toggleBug(btn){
       const tr=btn.closest('tr'); const detail=tr.nextElementSibling;
       const open=detail.classList.contains('hidden');
-      detail.classList.toggle('hidden'); btn.textContent=open?'▾':'▸';
+      detail.classList.toggle('hidden'); btn.textContent=open?'▾':'›';
     }
     async function updateBugStatus(bugId, status, tr){
-      // if called from select, also grab notes from detail row textarea
       let notes='';
       if(tr){
         const detail=tr.nextElementSibling; const ta=detail?.querySelector('textarea[data-bug-id]');
@@ -577,16 +578,16 @@
       }catch(e){ toast('Failed to update bug','err'); }
     }
     async function saveBugNotes(btn){
-      const ta=btn.closest('td')?.querySelector('textarea') || btn.parentElement.previousElementSibling;
-      // simpler: find textarea in same detail row
       const detailRow=btn.closest('tr');
-      const ta2=detailRow.querySelector('textarea');
-      const bugId=ta2.getAttribute('data-bug-id');
+      const ta=detailRow.querySelector('textarea');
+      const bugId=ta.getAttribute('data-bug-id');
       const curStatus=(globalData.bugs||[]).find(b=>b.id===bugId)?.status||'NEW';
       try{
-        const r=await fetch('/api/bug/status',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bug_id: bugId, status: curStatus, notes: ta2.value }) });
+        const r=await fetch('/api/bug/status',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bug_id: bugId, status: curStatus, notes: ta.value }) });
         if(!r.ok) throw new Error(r.status);
-        toast('Notes saved','ok'); fetchData();
+        toast('Notes saved','ok');
+        // keep local in sync without full refresh flicker
+        const b=(globalData.bugs||[]).find(x=>x.id===bugId); if(b) b.notes=ta.value;
       }catch(e){ toast('Failed to save notes','err'); }
     }
 
@@ -601,7 +602,7 @@
       const shown=list.slice(0, reportsLimit);
       tbody.innerHTML='';
       shown.forEach(r=>{
-        const badge=r.faults>0? '<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800">'+r.faults+'</span>' : '<span class="text-legion-dim">0</span>';
+        const badge=r.faults>0? '<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-300 border border-red-800">'+r.faults+'</span>' : '<span class="text-legion-dim">0</span>';
         const tr=document.createElement('tr'); tr.className='hover:bg-legion-cardAlt/40';
         tr.innerHTML='<td class="px-3 py-2 font-bold text-white">#'+r.id+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.ts)+' <span class="text-[11px]">('+relTime(r.ts)+')</span></td><td class="px-3 py-2 text-legion-cyan truncate max-w-[110px]" title="'+escapeHtml(r.machine_id||'')+'">'+escapeHtml((r.machine_id||'').slice(0,8)||'—')+'</td><td class="px-3 py-2 text-white">'+escapeHtml(r.model||'?')+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.distro||'?')+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.app_version||'')+'</td><td class="px-3 py-2">'+badge+'</td><td class="px-3 py-2 text-right"><button onclick="openJson('+r.id+')" class="px-2.5 py-1 bg-legion-cardAlt hover:bg-legion-border border border-legion-border rounded text-[11px] text-white mono">View JSON</button></td>';
         tbody.appendChild(tr);
@@ -617,7 +618,6 @@
       try{
         const r=await fetch('/reports/'+id); const j=await r.json();
         const pretty=JSON.stringify(j,null,2);
-        // simple highlight: escape then color keys
         const esc=escapeHtml(pretty);
         const hl=esc.replace(/"([^"]+)":/g,'<span style="color:#38bdf8">"$1"</span>:')
                     .replace(/: "([^"]*)"/g,': <span style="color:#86efac">"$1"</span>')
@@ -630,8 +630,17 @@
     function copyModalContent(){ const t=window._modalRaw||document.getElementById('modal-content').textContent; navigator.clipboard.writeText(t); toast('JSON copied','ok'); }
 
     // init
+    (function(){
+      const h=(location.hash||'#analytics').slice(1);
+      if(['analytics','machines','bugs','reports'].includes(h)) lastTab=h;
+      switchTab(lastTab);
+    })();
     fetchData(); startRefreshLoop();
-    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) fetchData(); });
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) scheduleDeferredRefresh(); });
+    window.addEventListener('hashchange', ()=>{
+      const h=(location.hash||'#analytics').slice(1);
+      if(['analytics','machines','bugs','reports'].includes(h)) switchTab(h);
+    });
   </script>
 </body>
 </html>
