@@ -605,7 +605,7 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 	machinesMap := make(map[string]*MachineItem)
 	bugsMap := make(map[string]*BugItem)
 	now := time.Now().UTC()
-	var timelineTemps []map[string]interface{}
+	timelineTemps := []map[string]interface{}{}
 	modelStats := make(map[string]int)
 	distroStats := make(map[string]int)
 	kernelStats := make(map[string]int)
@@ -939,11 +939,17 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		machineList = append(machineList, m)
 	}
 	sort.Slice(machineList, func(i, j int) bool { return machineList[i].LastSeen > machineList[j].LastSeen })
+	if machineList == nil {
+		machineList = []*MachineItem{}
+	}
 	var bugList []*BugItem
 	for _, b := range bugsMap {
 		bugList = append(bugList, b)
 	}
 	sort.Slice(bugList, func(i, j int) bool { return bugList[i].Count > bugList[j].Count })
+	if bugList == nil {
+		bugList = []*BugItem{}
+	}
 	recentReports := make([]map[string]interface{}, 0, int(math.Min(float64(len(reps)), 100)))
 	for i := len(reps) - 1; i >= 0 && len(recentReports) < 100; i-- {
 		r := reps[i]
@@ -983,8 +989,8 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 	if cpuN > 0 {
 		avgCpu /= float64(cpuN)
 	}
-	// timeline_reports hourly buckets sorted
-	var timelineReports []map[string]interface{}
+	// timeline_reports hourly buckets sorted — always [] not null
+	timelineReports := []map[string]interface{}{}
 	var hourKeys []string
 	for k := range hourBuckets {
 		hourKeys = append(hourKeys, k)
@@ -993,8 +999,8 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 	for _, k := range hourKeys {
 		timelineReports = append(timelineReports, map[string]interface{}{"hour": k, "count": hourBuckets[k]})
 	}
-	// checks_summary
-	var checksSummary []map[string]interface{}
+	// checks_summary — always [] not null
+	checksSummary := []map[string]interface{}{}
 	for name, ag := range checkAgg {
 		total := ag.Pass + ag.Fail
 		rate := 0.0
