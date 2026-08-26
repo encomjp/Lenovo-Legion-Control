@@ -1219,13 +1219,22 @@ fn show_welcome_if_needed(
         legion_core::config::mark_welcome_seen();
         match response {
             "optout" => {
-                legion_core::config::update(|c| c.diagnostics.enabled = false);
-                // Mirror the opt-out to the live Setup-page widgets (they are
-                // built once at startup), so the switch shows OFF immediately.
-                consent.set(false);
-                if let Some(row) = share_switch.as_ref() {
-                    row.set_active(false);
-                }
+                // Nudge before actually opting out — telemetry stays on unless
+                // they explicitly confirm.
+                let consent_c = consent.clone();
+                let share_c = share_switch.clone();
+                let win = stack.root().and_then(|r| r.downcast::<gtk::Window>().ok());
+                confirm_disable_telemetry(win.as_ref(), move |confirmed| {
+                    if confirmed {
+                        legion_core::config::update(|c| c.diagnostics.enabled = false);
+                        // Mirror the opt-out to the live Setup-page widgets
+                        // (built once at startup), so the switch shows OFF.
+                        consent_c.set(false);
+                        if let Some(row) = share_c.as_ref() {
+                            row.set_active(false);
+                        }
+                    }
+                });
             }
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
             "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
@@ -1257,7 +1266,7 @@ enum SetupStep {
     Hardware,
     /// Read-only self-checks plus the fault scan.
     SelfCheck,
-    /// Opt-in choice for anonymous diagnostics.
+    /// Opt-out choice for anonymous diagnostics.
     Telemetry,
     /// Summary; closing returns to the main view.
     Done,
@@ -1525,7 +1534,15 @@ impl SetupCtx {
         let ctx = self.clone();
         self.present(dialog, move |response| match response {
             "optout" => {
-                ctx.disable_telemetry();
+                // Nudge before actually opting out — telemetry stays on unless
+                // they explicitly confirm.
+                let ctx2 = ctx.clone();
+                let win = ctx2.win.clone();
+                confirm_disable_telemetry(win.as_ref(), move |confirmed| {
+                    if confirmed {
+                        ctx2.disable_telemetry();
+                    }
+                });
                 Some(SetupStep::Done)
             }
             _ => Some(SetupStep::Done),
@@ -5340,6 +5357,42 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     group
 }
 
+/// Run-once result handler for the opt-out nudge dialog (wrapped in an
+/// `Option` so the `Fn` connect callback can take it on the first response).
+type DisableNudgeCallback = std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnOnce(bool)>>>>;
+
+/// Nudge shown whenever the user tries to opt out of telemetry. Stresses
+/// that the anonymised data is what enables support for more laptop models;
+/// the opt-out is applied only after explicit confirmation. `on_result(true)`
+/// means "disable anyway"; `false` means "keep telemetry on".
+fn confirm_disable_telemetry(win: Option<&gtk::Window>, on_result: impl FnOnce(bool) + 'static) {
+    let dialog = adw::AlertDialog::new(
+        Some("Keep telemetry on?"),
+        Some(
+            "Your data helps add support for more laptop models.\n\n\
+             Legion Control has been tested on only ONE laptop. The anonymous \
+             diagnostics your laptop sends are what help other people with the \
+             same model get support.\n\n\
+             Disabling telemetry means we're unable to provide support for \
+             people with your model of laptop.",
+        ),
+    );
+    dialog.add_response("keep", "Keep telemetry on");
+    dialog.add_response("disable", "Disable anyway");
+    dialog.set_default_response(Some("keep"));
+    dialog.set_close_response("keep");
+    // connect_response needs an `Fn` callback, but we only want to run the
+    // result handler once — take it out of an Option on the first call.
+    let callback: DisableNudgeCallback =
+        std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(on_result))));
+    dialog.connect_response(None, move |_, r| {
+        if let Some(cb) = callback.borrow_mut().take() {
+            cb(r == "disable");
+        }
+    });
+    dialog.present(win);
+}
+
 /// Alpha diagnostics (opt-out) — privacy disclosure, telemetry switch,
 /// self-check runner, and on-demand send. All of it works without the
 /// daemon running.
@@ -5400,41 +5453,37 @@ fn build_diagnostics_section(
 
     {
         let overlay = toast_overlay.clone();
-        let debounce: Rc<Cell<u32>> = Rc::new(Cell::new(0));
-        let share_d = share_row.clone();
         let send_gate = send_btn.clone();
         let consent_gate = consent.clone();
         share_row.connect_active_notify(move |row| {
             let enabled = row.is_active();
-            // Mirror to the shared cell immediately — the debounced persist
-            // below may lag, but Send-now gating must never read stale
-            // consent (e.g. while a send triggered by the welcome dialog is
-            // still in flight).
-            consent_gate.set(enabled);
-            // Consent gate reacts immediately; the config write and toast are
-            // debounced so rapid toggling does one disk RMW and one toast for
-            // the FINAL state (ticket pattern, like the thermal slider).
-            send_gate.set_sensitive(enabled);
-
-            let ticket = debounce.get().wrapping_add(1);
-            debounce.set(ticket);
-            let overlay = overlay.clone();
-            let share_d = share_d.clone();
-            let send_gate = send_gate.clone();
-            let debounce_c = debounce.clone();
-            glib::timeout_add_local_once(Duration::from_millis(300), move || {
-                if debounce_c.get() != ticket {
-                    return; // superseded by a newer toggle
-                }
-                let enabled = share_d.is_active();
-                legion_core::config::update(|c| c.diagnostics.enabled = enabled);
-                send_gate.set_sensitive(enabled);
-                if enabled {
-                    toast_ok(&overlay, "Anonymous diagnostics enabled");
-                } else {
-                    toast_ok(&overlay, "Anonymous diagnostics disabled");
-                }
-            });
+            if enabled {
+                // Turning ON: apply immediately.
+                consent_gate.set(true);
+                send_gate.set_sensitive(true);
+                legion_core::config::update(|c| c.diagnostics.enabled = true);
+                toast_ok(&overlay, "Anonymous diagnostics enabled");
+            } else {
+                // Turning OFF: nudge before allowing the opt-out.
+                let row_c = row.clone();
+                let consent_c = consent_gate.clone();
+                let send_c = send_gate.clone();
+                let overlay_c = overlay.clone();
+                let win = overlay_c
+                    .root()
+                    .and_then(|r| r.downcast::<gtk::Window>().ok());
+                confirm_disable_telemetry(win.as_ref(), move |confirmed| {
+                    if confirmed {
+                        consent_c.set(false);
+                        send_c.set_sensitive(false);
+                        legion_core::config::update(|c| c.diagnostics.enabled = false);
+                        toast_ok(&overlay_c, "Anonymous diagnostics disabled");
+                    } else {
+                        // Revert the switch to ON — telemetry stays enabled.
+                        row_c.set_active(true);
+                    }
+                });
+            }
         });
     }
 
