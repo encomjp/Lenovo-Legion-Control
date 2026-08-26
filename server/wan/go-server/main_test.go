@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,9 +18,19 @@ import (
 
 func testServer(t *testing.T, key string) *Server {
 	t.Helper()
-	db, err := initDB(filepath.Join(t.TempDir(), "test.db"))
+	dsn := os.Getenv("LEGION_TEST_CLICKHOUSE")
+	if dsn == "" {
+		dsn = "clickhouse://default:chpass@127.0.0.1:19000/telemetry"
+	}
+	db, err := initDB(dsn)
 	if err != nil {
 		t.Fatalf("initDB: %v", err)
+	}
+	// Fresh tables per test so assertions are deterministic.
+	for _, tbl := range []string{"reports", "bug_status"} {
+		if _, err := db.db.Exec("TRUNCATE TABLE " + tbl); err != nil {
+			t.Fatalf("truncate %s: %v", tbl, err)
+		}
 	}
 	return NewServer(db, key, 30)
 }

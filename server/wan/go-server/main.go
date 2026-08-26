@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,7 +22,7 @@ import (
 
 	"database/sql"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 )
 
 //go:embed legal/DATENSCHUTZ-TELEMETRIE.md
@@ -45,42 +44,58 @@ type DB struct {
 	lock sync.Mutex
 }
 
-func initDB(dbPath string) (*DB, error) {
-	// MkdirAll is idempotent: it returns nil when the directory already
-	// exists, so surfacing any other error here is correct — a DB whose
-	// parent directory cannot be created must fail fast instead of hiding.
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		return nil, fmt.Errorf("create db dir: %w", err)
+// initDB connects to ClickHouse (dsn is a clickhouse:// URL) and bootstraps
+// the schema. Retention is a ClickHouse TTL on received_at.
+func initDB(dsn string) (*DB, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("missing ClickHouse DSN")
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
+	db, err := sql.Open("clickhouse", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	ddl := `
-	CREATE TABLE IF NOT EXISTS reports (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		ts TEXT NOT NULL,
-		received_at TEXT NOT NULL,
-		payload TEXT NOT NULL,
-		machine_id TEXT,
-		distro TEXT,
-		model TEXT,
-		app_version TEXT,
-		schema_version INTEGER
-	);
-	CREATE INDEX IF NOT EXISTS idx_reports_ts ON reports(ts);
-	CREATE INDEX IF NOT EXISTS idx_reports_machine ON reports(machine_id);
-	CREATE TABLE IF NOT EXISTS bug_status (
-		bug_id TEXT PRIMARY KEY,
-		status TEXT NOT NULL DEFAULT 'NEW',
-		assigned_to TEXT DEFAULT '',
-		notes TEXT DEFAULT '',
-		updated_at TEXT NOT NULL
-	);
-	`
-	if _, err := db.Exec(ddl); err != nil {
-		return nil, fmt.Errorf("init schema: %w", err)
+	db.SetMaxOpenConns(4)
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("clickhouse ping: %w", err)
+	}
+	retention := 90
+	if dStr := os.Getenv("LEGION_TELEMETRY_RETENTION_DAYS"); dStr != "" {
+		if d, err := strconv.Atoi(dStr); err == nil && d > 0 {
+			retention = d
+		}
+	}
+	reportsDDL := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS reports (
+		id Int64,
+		ts DateTime64(3, 'UTC'),
+		received_at DateTime('UTC'),
+		machine_id String,
+		distro String,
+		model String,
+		app_version String,
+		schema_version UInt8,
+		payload String
+	) ENGINE = MergeTree
+	PARTITION BY toYYYYMM(received_at)
+	ORDER BY (machine_id, received_at)
+	TTL received_at + INTERVAL %d DAY`, retention)
+	for _, stmt := range []string{
+		reportsDDL,
+		`CREATE TABLE IF NOT EXISTS bug_status (
+			bug_id String,
+			status String,
+			notes String,
+			updated_at DateTime64(3, 'UTC')
+		) ENGINE = ReplacingMergeTree(updated_at)
+		ORDER BY bug_id`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, fmt.Errorf("init schema: %w", err)
+		}
+	}
+	// Ensure the TTL matches the configured retention even if the table
+	// already existed with an older policy.
+	if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE reports MODIFY TTL received_at + INTERVAL %d DAY`, retention)); err != nil {
+		log.Printf("[legion-telemetry] TTL modify skipped: %v", err)
 	}
 	return &DB{db: db}, nil
 }
@@ -88,11 +103,22 @@ func initDB(dbPath string) (*DB, error) {
 func (d *DB) Insert(ts, payload, machineID, distro, model, appVersion string, schemaVersion int) (int64, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	res, err := d.db.Exec(`INSERT INTO reports (ts, received_at, payload, machine_id, distro, model, app_version, schema_version) VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?)`, ts, payload, machineID, distro, model, appVersion, schemaVersion)
+	// ClickHouse has no autoincrement; a UnixNano timestamp is unique and
+	// keeps the portal's numeric report-id URLs working.
+	id := time.Now().UnixNano()
+	now := time.Now().UTC()
+	reportTime, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		reportTime = now
+	}
+	_, err = d.db.Exec(
+		`INSERT INTO reports (id, ts, received_at, payload, machine_id, distro, model, app_version, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, reportTime, now, payload, machineID, distro, model, appVersion, schemaVersion,
+	)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return id, nil
 }
 
 func (d *DB) FindRecentByMachine(machineID string, minutes int) (int64, error) {
@@ -101,8 +127,9 @@ func (d *DB) FindRecentByMachine(machineID string, minutes int) (int64, error) {
 	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	cutoff := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute)
 	var id int64
-	err := d.db.QueryRow(`SELECT id FROM reports WHERE machine_id = ? AND received_at > datetime('now', ?) LIMIT 1`, machineID, fmt.Sprintf("-%d minutes", minutes)).Scan(&id)
+	err := d.db.QueryRow(`SELECT id FROM reports WHERE machine_id = ? AND received_at > ? ORDER BY received_at DESC LIMIT 1`, machineID, cutoff).Scan(&id)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -110,18 +137,18 @@ func (d *DB) FindRecentByMachine(machineID string, minutes int) (int64, error) {
 }
 
 type ReportMeta struct {
-	ID         int64  `json:"id"`
-	TS         string `json:"ts"`
-	Distro     string `json:"distro"`
-	Model      string `json:"model"`
-	AppVersion string `json:"app_version"`
-	MachineID  string `json:"machine_id"`
+	ID          int64  `json:"id"`
+	TS          string `json:"ts"`
+	Distro      string `json:"distro"`
+	Model       string `json:"model"`
+	AppVersion  string `json:"app_version"`
+	MachineID   string `json:"machine_id"`
 }
 
 func (d *DB) Recent(limit int) ([]ReportMeta, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	rows, err := d.db.Query(`SELECT id, ts, COALESCE(distro,''), COALESCE(model,''), COALESCE(app_version,''), COALESCE(machine_id,'') FROM reports ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := d.db.Query(`SELECT id, toString(received_at), distro, model, app_version, machine_id FROM reports ORDER BY received_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +168,7 @@ func (d *DB) GetPayload(id int64) (string, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	var payload string
-	err := d.db.QueryRow("SELECT payload FROM reports WHERE id = ?", id).Scan(&payload)
+	err := d.db.QueryRow(`SELECT payload FROM reports WHERE id = ?`, id).Scan(&payload)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -152,35 +179,25 @@ func (d *DB) Count() (int64, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	var c int64
-	err := d.db.QueryRow("SELECT COUNT(*) FROM reports").Scan(&c)
+	err := d.db.QueryRow(`SELECT count() FROM reports`).Scan(&c)
 	return c, err
 }
 
-func (d *DB) PruneOlderThan(days int) (int64, error) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	cutoff := fmt.Sprintf("datetime('now', '-%d days')", days)
-	res, err := d.db.Exec(fmt.Sprintf("DELETE FROM reports WHERE ts < %s", cutoff))
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-// DeleteMachine removes every report belonging to one machine. A machine is
-// keyed by its machine_id when present, otherwise by its model (matching the
-// Fleet grouping), so both shapes are matched and nothing else is touched.
+// DeleteMachine removes every report for a machine (keyed by machine_id, or
+// by model for rows without one). ClickHouse deletes are async mutations, so
+// we return the pre-delete row count and the rows vanish shortly after.
 func (d *DB) DeleteMachine(machineID string) (int64, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	res, err := d.db.Exec(
-		`DELETE FROM reports WHERE (machine_id = ?) OR ((machine_id IS NULL OR machine_id = '') AND model = ?)`,
-		machineID, machineID,
-	)
-	if err != nil {
+	cond := `(machine_id = ?) OR (machine_id = '' AND model = ?)`
+	var n int64
+	if err := d.db.QueryRow(`SELECT count() FROM reports WHERE `+cond, machineID, machineID).Scan(&n); err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	if _, err := d.db.Exec(`ALTER TABLE reports DELETE WHERE `+cond+` SETTINGS mutations_sync = 1`, machineID, machineID); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 type BugDetail struct {
@@ -191,7 +208,9 @@ type BugDetail struct {
 func (d *DB) GetBugDetails() (map[string]BugDetail, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	rows, err := d.db.Query("SELECT bug_id, status, COALESCE(notes,'') FROM bug_status")
+	// ReplacingMergeTree keeps the latest row per bug_id; argMax picks it even
+	// before background merges deduplicate.
+	rows, err := d.db.Query(`SELECT bug_id, argMax(status, updated_at), argMax(notes, updated_at) FROM bug_status GROUP BY bug_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +240,7 @@ func (d *DB) GetBugStatuses() (map[string]string, error) {
 func (d *DB) SetBugStatus(bugID, status, notes string) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := d.db.Exec(`INSERT INTO bug_status (bug_id, status, notes, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(bug_id) DO UPDATE SET status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at`, bugID, status, notes, now)
+	_, err := d.db.Exec(`INSERT INTO bug_status (bug_id, status, notes, updated_at) VALUES (?, ?, ?, ?)`, bugID, status, notes, time.Now().UTC())
 	return err
 }
 
@@ -445,7 +463,7 @@ func parseTime(v interface{}) time.Time {
 func (d *DB) RecentWithPayload(limit int) ([]ReportMeta, map[int64]string, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	rows, err := d.db.Query(`SELECT id, ts, COALESCE(distro,''), COALESCE(model,''), COALESCE(app_version,''), COALESCE(machine_id,''), COALESCE(payload,'') FROM reports ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := d.db.Query(`SELECT id, toString(received_at), distro, model, app_version, machine_id, payload FROM reports ORDER BY received_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1292,15 +1310,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	dbPath := os.Getenv("LEGION_TELEMETRY_DB")
-	if dbPath == "" {
-		dbPath = "diagnostics.db"
+	dsn := os.Getenv("LEGION_TELEMETRY_CLICKHOUSE")
+	if dsn == "" {
+		log.Fatalf("LEGION_TELEMETRY_CLICKHOUSE (clickhouse:// DSN) is required")
 	}
 	teleKey := os.Getenv("LEGION_TELEMETRY_KEY")
 	if teleKey == "" {
 		teleKey = "legion-alpha-secret-key"
 	}
-	db, err := initDB(dbPath)
+	db, err := initDB(dsn)
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)
 	}
@@ -1310,23 +1328,6 @@ func main() {
 			rateLimit = r
 		}
 	}
-	retentionDays := 90
-	if dStr := os.Getenv("LEGION_TELEMETRY_RETENTION_DAYS"); dStr != "" {
-		if d, err := strconv.Atoi(dStr); err == nil && d > 0 {
-			retentionDays = d
-		}
-	}
-	go func() {
-		for {
-			pruned, err := db.PruneOlderThan(retentionDays)
-			if err != nil {
-				log.Printf("[legion-telemetry] retention prune error: %v", err)
-			} else if pruned > 0 {
-				log.Printf("[legion-telemetry] retention: pruned %d report(s)", pruned)
-			}
-			time.Sleep(1 * time.Hour)
-		}
-	}()
 	srv := NewServer(db, teleKey, rateLimit)
 	ingestMux := http.NewServeMux()
 	ingestMux.HandleFunc("/v1/diagnostics", srv.handleIngest)

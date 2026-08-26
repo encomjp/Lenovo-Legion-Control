@@ -1,19 +1,36 @@
 services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: legion-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: telemetry
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-legionchpass}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "-q", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   telemetry:
     build: .
     container_name: legion-telemetry-go
     restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8791:8791"
       - "${LEGION_PORTAL_BIND:-127.0.0.1}:8788:8788"
-    volumes:
-      - telemetry-data:/data
     environment:
-      - LEGION_TELEMETRY_DB=/data/diagnostics.db
+      - LEGION_TELEMETRY_CLICKHOUSE=clickhouse://default:${CLICKHOUSE_PASSWORD:-legionchpass}@clickhouse:9000/telemetry
       - LEGION_TELEMETRY_KEY=${LEGION_TELEMETRY_KEY}
       - LEGION_INGEST_PORT=8791
       - LEGION_PORTAL_PORT=8788
       - LEGION_SERVER_MODE=all
 
 volumes:
-  telemetry-data:
+  clickhouse-data:
