@@ -466,6 +466,11 @@
     }
 
     let drawerChart=null;
+    // Expand/collapse a self-check row in the machine drawer.
+    function toggleCheck(i){
+      const el=document.getElementById('check-detail-'+i);
+      if(el) el.classList.toggle('hidden');
+    }
     // Remove a machine (and all its reports) from the Fleet, with a confirm.
     function removeMachine(btn){
       const id=btn.dataset.rid;
@@ -533,7 +538,20 @@
         },40);
       } else if(tab==='checks'){
         const checks=d.checks||[];
-        body.innerHTML= checks.length? checks.map(c=>'<div class="flex gap-2 text-xs p-2 rounded border '+(c.ok?'bg-emerald-950/30 border-emerald-900/50':'bg-red-950/30 border-red-900/50')+'"><span class="shrink-0 mt-0.5 '+(c.ok?'text-emerald-400':'text-red-400')+'">'+(c.ok?'✓':'✗')+'</span><div><div class="font-semibold '+(c.ok?'text-emerald-300':'text-red-300')+'">'+escapeHtml(c.name)+'</div><div class="text-legion-dim mono text-[11px]">'+escapeHtml(c.detail||'')+'</div></div></div>').join('') : '<div class="text-legion-dim text-xs">No self-checks in latest report.</div>';
+        body.innerHTML= checks.length
+          ? '<div class="text-[11px] uppercase tracking-wider text-legion-dim font-bold mb-2">'+checks.length+' self-checks · click a row to expand</div>'
+            +checks.map((c,i)=>{
+              const ok=!!c.ok;
+              return '<div class="mb-1.5 rounded-lg border overflow-hidden '+(ok?'border-emerald-900/50 bg-emerald-950/20':'border-red-900/50 bg-red-950/20')+'">'
+                +'<button class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition" onclick="toggleCheck('+i+')">'
+                  +'<span class="shrink-0 text-xs '+(ok?'text-emerald-400':'text-red-400')+'">'+(ok?'✓':'✗')+'</span>'
+                  +'<span class="flex-1 font-semibold text-xs '+(ok?'text-emerald-300':'text-red-300')+'">'+escapeHtml(c.name||'?')+'</span>'
+                  +'<span class="text-[10px] mono uppercase '+(ok?'text-emerald-400/80':'text-red-400/80')+'">'+(ok?'pass':'fail')+'</span>'
+                +'</button>'
+                +'<div id="check-detail-'+i+'" class="hidden px-3 pb-2.5 pt-2 text-[11px] mono text-legion-dim whitespace-pre-wrap border-t '+(ok?'border-emerald-900/40':'border-red-900/40')+'">'+(escapeHtml(c.detail||'No additional details.'))+'</div>'
+              +'</div>';
+            }).join('')
+          : '<div class="text-legion-dim text-xs">No self-checks in latest report.</div>';
       } else if(tab==='faults'){
         const fh=d.faults_hist||[];
         body.innerHTML= fh.length? fh.slice(-20).reverse().map(f=>'<div class="p-2 rounded border border-legion-border bg-legion-cardAlt text-xs"><div class="flex items-center gap-2"><span class="px-1.5 py-0.5 rounded text-[10px] border '+(f.severity==='Critical'?'bg-red-950 text-red-300 border-red-800':f.severity==='Warning'?'bg-amber-950 text-amber-300 border-amber-800':'bg-blue-950 text-blue-300 border-blue-800')+'">'+escapeHtml(f.severity)+'</span><span class="text-white font-semibold">'+escapeHtml(f.id)+'</span><span class="ml-auto text-legion-dim mono text-[11px]">'+relTime(f.ts)+'</span></div><div class="text-legion-dim mono mt-1">'+escapeHtml(f.detail||'')+'</div><div class="text-legion-dim mono text-[11px]">Report #'+f.report_id+'</div></div>').join('') : '<div class="text-legion-dim text-xs">No faults recorded for this host.</div>';
