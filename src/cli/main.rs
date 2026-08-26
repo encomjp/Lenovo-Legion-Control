@@ -159,6 +159,8 @@ enum Commands {
         #[command(subcommand)]
         action: DiagAction,
     },
+    /// Check GitHub for new releases of Legion Control
+    CheckUpdate,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -934,6 +936,23 @@ fn main() {
                 }
             }
         },
+        Commands::CheckUpdate => match legion_core::update::check_latest_release() {
+            Ok(info) => {
+                println!("current version: {}", legion_core::update::CURRENT_VERSION);
+                println!("latest release:  {} ({})", info.version, info.name);
+                if info.is_newer {
+                    println!(
+                        "\n✨ A new version of Legion Control is available: v{}",
+                        info.version
+                    );
+                    println!("Release page: {}", info.html_url);
+                    println!("To update via installer:\n  git pull && ./install.sh");
+                } else {
+                    println!("\n✓ Legion Control is up to date.");
+                }
+            }
+            Err(e) => fail(format!("failed to check for updates: {e}")),
+        },
     }
 }
 
@@ -1244,6 +1263,7 @@ fn cmd_label(cmd: &Commands) -> String {
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
+        Commands::CheckUpdate => "check-update".into(),
     }
 }
 

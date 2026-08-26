@@ -5283,6 +5283,151 @@ fn remove_kde_widget() -> Result<(), String> {
     }
 }
 
+fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+    let group = pref_group("Updates & Releases", None);
+    let row = adw::ActionRow::builder()
+        .title("Version & Updates")
+        .subtitle(format!(
+            "Installed: v{} · Checking GitHub…",
+            legion_core::update::CURRENT_VERSION
+        ))
+        .activatable(false)
+        .build();
+
+    let actions = gtk::Box::new(Orientation::Horizontal, 6);
+    actions.set_valign(Align::Center);
+    let check_btn = primary_button_tip(
+        "Check for updates",
+        Some("Query GitHub for the latest Legion Control release"),
+    );
+    let view_btn = gtk::Button::builder()
+        .label("View on GitHub")
+        .tooltip_text("Open GitHub releases in your browser")
+        .valign(Align::Center)
+        .build();
+
+    actions.append(&view_btn);
+    actions.append(&check_btn);
+    row.add_suffix(&actions);
+    group.add(&row);
+
+    let overlay = toast_overlay.clone();
+    let row_c = row.clone();
+    let check_btn_c = check_btn.clone();
+    let release_url: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let release_url_view = release_url.clone();
+
+    view_btn.connect_clicked(move |_| {
+        let url = release_url_view.borrow().clone().unwrap_or_else(|| {
+            format!(
+                "https://github.com/{}/releases",
+                legion_core::update::GITHUB_REPO
+            )
+        });
+        let _ =
+            gtk4::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk4::gio::AppLaunchContext>);
+    });
+
+    let run_check = {
+        let row = row_c.clone();
+        let check_btn = check_btn_c.clone();
+        let overlay = overlay.clone();
+        let release_url = release_url.clone();
+        Rc::new(move |interactive: bool| {
+            check_btn.set_sensitive(false);
+            check_btn.set_label("Checking…");
+            let row = row.clone();
+            let check_btn = check_btn.clone();
+            let overlay = overlay.clone();
+            let release_url = release_url.clone();
+            dispatch_async(
+                legion_core::update::check_latest_release,
+                "Update check thread stopped",
+                move |result| {
+                    check_btn.set_sensitive(true);
+                    check_btn.set_label("Check for updates");
+                    match result {
+                        Ok(info) => {
+                            *release_url.borrow_mut() = Some(info.html_url.clone());
+                            if info.is_newer {
+                                row.set_subtitle(&format!(
+                                    "✨ New version available: v{} (installed: v{})",
+                                    info.version,
+                                    legion_core::update::CURRENT_VERSION
+                                ));
+                                if interactive {
+                                    prompt_update_dialog(&info);
+                                }
+                            } else {
+                                row.set_subtitle(&format!(
+                                    "✓ Up to date (v{} is the latest release)",
+                                    legion_core::update::CURRENT_VERSION
+                                ));
+                                if interactive {
+                                    toast_ok(&overlay, "Legion Control is up to date");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            row.set_subtitle(&format!(
+                                "Installed: v{} · Update check failed: {e}",
+                                legion_core::update::CURRENT_VERSION
+                            ));
+                            if interactive {
+                                toast_error(&overlay, &format!("Update check failed: {e}"));
+                            }
+                        }
+                    }
+                },
+            );
+        })
+    };
+
+    let check_closure = run_check.clone();
+    check_btn.connect_clicked(move |_| {
+        check_closure(true);
+    });
+
+    // Check automatically in the background on About page load
+    let auto_closure = run_check;
+    glib::timeout_add_local_once(Duration::from_millis(500), move || {
+        auto_closure(false);
+    });
+
+    group
+}
+
+fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
+    let dialog = adw::AlertDialog::new(
+        Some("Update Available"),
+        Some(&format!(
+            "A new version of Legion Control is available!\n\n\
+             Installed: v{}\n\
+             Latest:    v{} ({})\n\n\
+             Would you like to open the GitHub release page to download the latest package?",
+            legion_core::update::CURRENT_VERSION,
+            info.version,
+            info.name
+        )),
+    );
+    dialog.add_response("open", "View Release");
+    dialog.add_response("later", "Remind me later");
+    dialog.set_default_response(Some("open"));
+    dialog.set_close_response("later");
+
+    let url = info.html_url.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response == "open" {
+            let _ = gtk4::gio::AppInfo::launch_default_for_uri(
+                &url,
+                None::<&gtk4::gio::AppLaunchContext>,
+            );
+        }
+    });
+
+    dialog.present(None::<&gtk4::Window>);
+}
+
 fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     let installed = kde_widget_installed();
     let group = pref_group("KDE Plasma widget", None);
@@ -5781,6 +5926,7 @@ fn build_about_pages(
     let storage_page = page_lede("");
     let info = legion_core::device::detect();
 
+    setup_page.append(&build_updates_section(toast_overlay));
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
     let (diag_group, diag_consent, diag_share_switch) = build_diagnostics_section(toast_overlay);

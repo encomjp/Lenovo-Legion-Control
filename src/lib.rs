@@ -25,3 +25,4 @@ pub mod selftest;
 pub mod sensors;
 pub mod thermal;
 pub mod undervolt;
+pub mod update;
