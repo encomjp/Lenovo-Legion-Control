@@ -286,7 +286,8 @@ async def dashboard_page() -> HTMLResponse:
         model = r.get("_p", {}).get("device", {}).get("model", "?") if isinstance(r.get("_p"), dict) else "?"
         nf = len(r.get("_fl", []) if isinstance(r.get("_fl"), list) else [])
         badge = "b-crit" if nf else "b-ok"
-        act_rows += f"<tr><td>{esc(ts_str)}</td><td>{esc(model)}</td><td><span class=\"badge {badge}\">{nf}</span></td></tr>"
+        act_badge = f'<span class="badge {badge}">{nf}</span>'
+        act_rows += f"<tr><td>{esc(ts_str)}</td><td>{esc(model)}</td><td>{act_badge}</td></tr>"
     if not act_rows:
         act_rows = '<tr><td colspan="3" class="dim">none</td></tr>'
 
@@ -300,14 +301,16 @@ async def dashboard_page() -> HTMLResponse:
         ]
     )
 
+    no_data = '<span class="dim">No data yet</span>'
+    no_fans = '<span class="dim">No fans detected</span>'
     body = (
         '<p class="tagline">Anonymous diagnostics · alpha · Tailscale-only operator access</p>'
         f'<div class="cards">{cards}</div>'
         '<div class="grid2"><div>'
         "<h2>Sensor Temperatures</h2>"
-        f'<div class="panel">{temp_bars or "<span class=\"dim\">No data yet</span>"}</div>'
+        f'<div class="panel">{temp_bars or no_data}</div>'
         "<h2>Fan Status</h2>"
-        f'<div class="panel">{fan_bars or "<span class=\"dim\">No fans detected</span>"}</div>'
+        f'<div class="panel">{fan_bars or no_fans}</div>'
         "</div><div>"
         "<h2>Fault Distribution</h2>"
         f'<div class="panel" style="display:flex;justify-content:center">{fault_donut}</div>'
