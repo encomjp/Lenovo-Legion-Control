@@ -414,23 +414,25 @@ fn main() {
                     );
                     continue;
                 }
+                struct ActiveClientGuard(Arc<AtomicUsize>);
+                impl Drop for ActiveClientGuard {
+                    fn drop(&mut self) {
+                        let remaining = self.0.fetch_sub(1, Ordering::Relaxed).saturating_sub(1);
+                        log::debug!("client handler exited (active_clients={remaining})");
+                    }
+                }
+
                 let state = client_state.clone();
                 let active = active_clients.clone();
                 active.fetch_add(1, Ordering::Relaxed);
-                let active_inner = active_clients.clone();
+                let guard_counter = active_clients.clone();
                 if let Err(e) = std::thread::Builder::new()
                     .name("client-handler".into())
                     .spawn(move || {
+                        let _guard = ActiveClientGuard(guard_counter);
                         let tid = std::thread::current().id();
-                        log::debug!(
-                            "client handler spawned (thread={tid:?}, active_clients={})",
-                            active_inner.load(Ordering::Relaxed)
-                        );
+                        log::debug!("client handler spawned (thread={tid:?})");
                         handle_client(stream, &state);
-                        let remaining = active_inner.fetch_sub(1, Ordering::Relaxed) - 1;
-                        log::debug!(
-                            "client handler exited (thread={tid:?}, active_clients={remaining})"
-                        );
                     })
                 {
                     log::error!("failed to spawn client handler: {e}");
@@ -482,12 +484,16 @@ fn restore_hardware_on_shutdown() {
 }
 
 fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
-    const CLIENT_READ_TIMEOUT: Duration = Duration::from_secs(5);
-    if let Err(e) = stream.set_read_timeout(Some(CLIENT_READ_TIMEOUT)) {
+    const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(5);
+    if let Err(e) = stream.set_read_timeout(Some(CLIENT_IO_TIMEOUT)) {
         log::debug!("client set_read_timeout failed: {e}");
         return;
     }
-    log::debug!("client read timeout set to {CLIENT_READ_TIMEOUT:?}");
+    if let Err(e) = stream.set_write_timeout(Some(CLIENT_IO_TIMEOUT)) {
+        log::debug!("client set_write_timeout failed: {e}");
+        return;
+    }
+    log::debug!("client I/O timeout set to {CLIENT_IO_TIMEOUT:?}");
 
     // Audit who connected. Kernel socket permissions (0660 root:legion)
     // already gate access; this makes abuse visible in the journal.
@@ -1003,12 +1009,15 @@ fn process_command(
             let was_enabled = config::get().thermal.enabled;
             config::update(|c| c.thermal = ThermalConfig { enabled, max_temp });
             if let Some(shared) = THERMAL_CONFIG.get() {
-                if let Ok(mut g) = shared.write() {
-                    *g = ThermalConfig { enabled, max_temp };
-                    log::debug!(
-                        "shared thermal config updated: enabled={enabled} max_temp={max_temp}"
-                    );
-                }
+                let mut g = match shared.write() {
+                    Ok(g) => g,
+                    Err(p) => {
+                        log::warn!("THERMAL_CONFIG lock was poisoned — recovering inner guard");
+                        p.into_inner()
+                    }
+                };
+                *g = ThermalConfig { enabled, max_temp };
+                log::debug!("shared thermal config updated: enabled={enabled} max_temp={max_temp}");
             }
             // Disabling a mid-throttle governor must not leave CPUs capped:
             // restore full speed immediately.
@@ -1020,11 +1029,16 @@ fn process_command(
             }
             if let Some(notify) = THERMAL_NOTIFY.get() {
                 let (lock, cvar) = &**notify;
-                if let Ok(mut flag) = lock.lock() {
-                    *flag = true;
-                    cvar.notify_one();
-                    log::debug!("thermal governor notified (condvar signal sent)");
-                }
+                let mut flag = match lock.lock() {
+                    Ok(g) => g,
+                    Err(p) => {
+                        log::warn!("THERMAL_NOTIFY lock was poisoned — recovering inner guard");
+                        p.into_inner()
+                    }
+                };
+                *flag = true;
+                cvar.notify_one();
+                log::debug!("thermal governor notified (condvar signal sent)");
             }
             if enabled && !was_enabled {
                 log::debug!("invoking systemctl disable --now cpu95-throttle.service");
@@ -1128,8 +1142,9 @@ fn battery_watchdog(shutdown: Arc<AtomicBool>) {
         std::thread::sleep(Duration::from_millis(100));
     }
     while !shutdown.load(Ordering::Relaxed) {
-        // 300 s in 100 ms slices so shutdown is noticed promptly.
-        for _ in 0..3000 {
+        // 60 s in 100 ms slices so shutdown is noticed promptly, and silent
+        // firmware/EC charge-threshold resets are caught before the battery charges significantly.
+        for _ in 0..600 {
             if shutdown.load(Ordering::Relaxed) {
                 log::info!("battery-watchdog thread stopped");
                 return;

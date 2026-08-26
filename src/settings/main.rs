@@ -1535,15 +1535,16 @@ impl SetupCtx {
         self.present(dialog, move |response| match response {
             "optout" => {
                 // Nudge before actually opting out — telemetry stays on unless
-                // they explicitly confirm.
+                // they explicitly confirm. Route to Done only after the nudge settles.
                 let ctx2 = ctx.clone();
                 let win = ctx2.win.clone();
                 confirm_disable_telemetry(win.as_ref(), move |confirmed| {
                     if confirmed {
                         ctx2.disable_telemetry();
                     }
+                    ctx2.run(SetupStep::Done);
                 });
-                Some(SetupStep::Done)
+                None
             }
             _ => Some(SetupStep::Done),
         });

@@ -155,9 +155,12 @@ impl log::Log for Logger {
             message,
         };
 
-        // ── ring buffer ──
+        // ── ring buffer with poison recovery ──
         {
-            let mut ring = self.ring.lock().unwrap();
+            let mut ring = match self.ring.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             ring.push(entry.clone());
         }
 
@@ -193,9 +196,12 @@ impl log::Log for Logger {
             );
         }
 
-        // ── rotated file ──
+        // ── rotated file with poison recovery ──
         {
-            let mut guard = self.file.lock().unwrap();
+            let mut guard = match self.file.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             if let Some(state) = guard.as_mut() {
                 let today = chrono::Local::now().format("%Y-%m-%d").to_string();
                 if state.date != today {
@@ -249,7 +255,10 @@ impl log::Log for Logger {
     }
 
     fn flush(&self) {
-        let mut guard = self.file.lock().unwrap();
+        let mut guard = match self.file.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         if let Some(state) = guard.as_mut() {
             let _ = state.file.flush();
         }
@@ -430,7 +439,10 @@ pub fn recent_logs(n: usize) -> Vec<LogEntry> {
     LOGGER
         .get()
         .map(|l| {
-            let ring = l.ring.lock().unwrap();
+            let ring = match l.ring.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             ring.tail(n)
         })
         .unwrap_or_default()

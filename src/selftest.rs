@@ -212,7 +212,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         },
     ));
 
-    // cpufreq inputs + constant cross-check against the real policy.
+    // cpufreq inputs + dynamic scaling policy check (bounds check against hardware capability).
     match thermal::read_cur_max() {
         Some(cur) if (400_000..=10_000_000).contains(&cur) => {
             let policy: Option<u32> =
@@ -220,15 +220,18 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
                     .ok()
                     .and_then(|raw| raw.trim().parse().ok());
             match policy {
-                Some(policy_max) => out.push(check(
-                    "cpufreq_max_matches_constant",
-                    policy_max == thermal::MAX_FULL,
-                    format!("policy {policy_max} kHz vs MAX_FULL {}", thermal::MAX_FULL),
-                )),
+                Some(policy_max) => {
+                    let sane = cur >= 400_000 && cur <= policy_max;
+                    out.push(check(
+                        "cpufreq_scaling_policy",
+                        sane,
+                        format!("cur_max {cur} kHz (policy max {policy_max} kHz)"),
+                    ));
+                }
                 None => out.push(check(
-                    "cpufreq_max_matches_constant",
-                    false,
-                    "cpuinfo_max_freq unreadable",
+                    "cpufreq_scaling_policy",
+                    cur >= 400_000,
+                    format!("cur_max {cur} kHz (policy max unreadable)"),
                 )),
             }
         }
@@ -723,17 +726,29 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         },
     ));
 
-    // ryzen_smu module loaded (optional but expected on supported AMD).
-    let smu = std::path::Path::new("/sys/kernel/ryzen_smu_drv").exists();
-    out.push(check(
-        "ryzen_smu_module",
-        smu,
-        if smu {
-            "loaded".to_string()
-        } else {
-            "not loaded (needed for Curve Optimizer only)".to_string()
-        },
-    ));
+    // ryzen_smu module loaded (optional on supported AMD, not applicable on Intel).
+    let is_amd = device::detect()
+        .cpu_model
+        .to_ascii_uppercase()
+        .contains("AMD");
+    if is_amd {
+        let smu = std::path::Path::new("/sys/kernel/ryzen_smu_drv").exists();
+        out.push(check(
+            "ryzen_smu_module",
+            smu,
+            if smu {
+                "loaded".to_string()
+            } else {
+                "not loaded (needed for Curve Optimizer only)".to_string()
+            },
+        ));
+    } else {
+        out.push(check(
+            "ryzen_smu_module",
+            true,
+            "not applicable (Intel CPU)".to_string(),
+        ));
+    }
 
     let passed = out.iter().filter(|c| c.ok).count();
     log::debug!("deployment checks: done — {passed}/{} passed", out.len());

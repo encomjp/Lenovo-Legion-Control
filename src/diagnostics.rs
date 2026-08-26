@@ -307,12 +307,18 @@ fn redact_home_paths(text: &str) -> String {
             }
         }
     }
-    // Generic prefixes last: cover foreign homes and XDG runtime dirs.
-    let run_hits = out.matches("/run/user/").count();
-    let out = rewrite_prefix_to_tilde(&out, "/run/user/");
-    let home_hits = out.matches("/home/").count();
-    let out = rewrite_prefix_to_tilde(&out, "/home/");
-    replacements += run_hits + home_hits;
+    // Generic prefixes: cover foreign homes, immutable distros (/var/home/), and XDG runtime dirs.
+    for prefix in &["/run/user/", "/var/home/", "/home/"] {
+        let hits = out.matches(prefix).count();
+        out = rewrite_prefix_to_tilde(&out, prefix);
+        replacements += hits;
+    }
+    // Scrub root home paths (/root/ -> ~/)
+    if out.contains("/root/") {
+        let hits = out.matches("/root/").count();
+        out = out.replace("/root/", "~/");
+        replacements += hits;
+    }
     log::debug!(
         "redact_home_paths: {} chars in → {replacements} replacement(s)",
         text.len()
@@ -431,7 +437,10 @@ pub fn collect() -> DiagnosticsReport {
         digest.error_count
     );
 
-    let faults = crate::selftest::scan_faults();
+    let mut faults = crate::selftest::scan_faults();
+    for f in &mut faults {
+        f.detail = redact_home_paths(&f.detail);
+    }
     let fault_criticals = faults
         .iter()
         .filter(|f| f.severity == crate::selftest::Severity::Critical)
@@ -530,6 +539,7 @@ pub fn collect() -> DiagnosticsReport {
 /// Parse a single `/proc/cpuinfo` line's `core id` value, tolerating both
 /// single- and double-tab separators (`core id\t: 0` and `core id\t\t: 0`).
 /// Returns the numeric core id, or `None` for any other line shape.
+#[cfg(test)]
 fn core_id_from_line(line: &str) -> Option<u32> {
     let rest = line.strip_prefix("core id")?;
     let rest = rest.trim_start_matches(['\t', ' ']);
@@ -579,36 +589,41 @@ fn parse_display_refresh_hz(edid_path: &std::path::Path) -> Option<u32> {
 /// storage devices, display metrics) from Linux standard sysfs & /proc files.
 /// 100% read-only, bounds-checked, zero unsafe, zero serial numbers.
 fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
-    // 1. CPU topology from /proc/cpuinfo & sysfs
+    // 1. CPU topology from /proc/cpuinfo & sysfs (tracks physical id + core id
+    // pairs so multi-CCD processors like 16-core 7945HX/9955HX do not collapse).
     let mut cpu_name = String::new();
     let mut cpu_vendor = String::new();
     let mut microcode = String::new();
     let mut logical_threads = 0u32;
-    let mut seen_core_ids = std::collections::HashSet::new();
+    let mut current_package = 0u32;
+    let mut seen_cores = std::collections::HashSet::new();
 
     if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
         for line in cpuinfo.lines() {
-            if let Some(v) = line.strip_prefix("model name\t: ") {
-                if cpu_name.is_empty() {
-                    cpu_name = v.trim().to_string();
+            let trimmed = line.trim();
+            if let Some((k, v)) = trimmed.split_once(':') {
+                let key = k.trim();
+                let val = v.trim();
+                match key {
+                    "model name" if cpu_name.is_empty() => cpu_name = val.to_string(),
+                    "vendor_id" if cpu_vendor.is_empty() => cpu_vendor = val.to_string(),
+                    "microcode" if microcode.is_empty() => microcode = val.to_string(),
+                    "processor" => logical_threads += 1,
+                    "physical id" => {
+                        current_package = val.parse::<u32>().unwrap_or(0);
+                    }
+                    "core id" => {
+                        if let Ok(cid) = val.parse::<u32>() {
+                            seen_cores.insert((current_package, cid));
+                        }
+                    }
+                    _ => {}
                 }
-            } else if let Some(v) = line.strip_prefix("vendor_id\t: ") {
-                if cpu_vendor.is_empty() {
-                    cpu_vendor = v.trim().to_string();
-                }
-            } else if let Some(v) = line.strip_prefix("microcode\t: ") {
-                if microcode.is_empty() {
-                    microcode = v.trim().to_string();
-                }
-            } else if line.starts_with("processor\t:") {
-                logical_threads += 1;
-            } else if let Some(id) = core_id_from_line(line) {
-                seen_core_ids.insert(id);
             }
         }
     }
-    let physical_cores = if !seen_core_ids.is_empty() {
-        seen_core_ids.len() as u32
+    let physical_cores = if !seen_cores.is_empty() {
+        seen_cores.len() as u32
     } else {
         logical_threads.max(1)
     };
@@ -1146,7 +1161,8 @@ fn sweep_older_than(dir: &Path, cutoff: SystemTime) -> usize {
     };
     for entry in entries.flatten() {
         let is_payload = entry.file_name().to_str().is_some_and(|n| {
-            n.starts_with("legion-diag-") && (n.ends_with(".json") || n.ends_with(".json.gz"))
+            (n.starts_with("legion-diag-") && (n.ends_with(".json") || n.ends_with(".json.gz")))
+                || (n.starts_with("legion-diag-hdr-") && n.ends_with(".txt"))
         });
         if !is_payload {
             continue;
@@ -1787,5 +1803,86 @@ mod tests {
         assert_eq!(parse_display_refresh_hz(&empty), None);
         let _ = std::fs::remove_file(&good);
         let _ = std::fs::remove_file(&empty);
+    }
+
+    /// Redaction test: immutable distro home paths (/var/home/) and root paths (/root/)
+    /// must be scrubbed alongside standard /home/ and /run/user/ prefixes.
+    #[test]
+    fn redact_home_paths_scrubs_var_home_and_root_prefixes() {
+        let input = "error at /var/home/gamer/.config/app and /root/secret.conf with socket /run/user/1000/x";
+        let out = redact_home_paths(input);
+        assert!(!out.contains("/var/home/"), "leaked /var/home/: {out}");
+        assert!(!out.contains("/root/"), "leaked /root/: {out}");
+        assert!(!out.contains("/run/user/"), "leaked /run/user/: {out}");
+        assert!(out.contains("~/gamer/.config/app") || out.contains("~/.config/app"));
+        assert!(out.contains("~/secret.conf"));
+        assert!(out.contains("~/x"));
+    }
+
+    /// Fault details embedded in diagnostics reports must have home paths redacted.
+    #[test]
+    fn fault_details_in_report_are_redacted() {
+        let mut report = collect();
+        report.faults.push(crate::selftest::Fault {
+            id: "config_dir_unwritable",
+            severity: crate::selftest::Severity::Critical,
+            detail: "cannot write /home/test_user/.config/legion-control: Permission denied".into(),
+        });
+        for f in &mut report.faults {
+            f.detail = redact_home_paths(&f.detail);
+        }
+        let json = serde_json::to_string(&report).expect("serializable");
+        assert!(
+            !json.contains("/home/test_user"),
+            "fault detail leaked home path: {json}"
+        );
+        assert!(
+            !json.contains("test_user"),
+            "fault detail leaked username: {json}"
+        );
+    }
+
+    /// Multi-CCD processor topology test: physical id + core id distinct pairs must
+    /// count all cores without collapsing across packages/CCDs.
+    #[test]
+    fn multi_ccd_topology_counts_all_cores() {
+        let cpuinfo_mock = "\
+processor\t: 0
+physical id\t: 0
+core id\t\t: 0
+
+processor\t: 1
+physical id\t: 0
+core id\t\t: 1
+
+processor\t: 2
+physical id\t: 1
+core id\t\t: 0
+
+processor\t: 3
+physical id\t: 1
+core id\t\t: 1
+";
+        let mut seen = std::collections::HashSet::new();
+        let mut pkg = 0u32;
+        for line in cpuinfo_mock.lines() {
+            let t = line.trim();
+            if let Some((k, v)) = t.split_once(':') {
+                match k.trim() {
+                    "physical id" => pkg = v.trim().parse().unwrap_or(0),
+                    "core id" => {
+                        if let Ok(cid) = v.trim().parse::<u32>() {
+                            seen.insert((pkg, cid));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            seen.len(),
+            4,
+            "failed to distinguish cores across physical IDs/CCDs"
+        );
     }
 }

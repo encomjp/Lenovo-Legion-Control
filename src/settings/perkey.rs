@@ -1751,7 +1751,13 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     area.set_draw_func(move |_, cr, w, h| {
         let keys = layout_keys(layout_d.get());
         let pad = 14.0;
+        if w as f64 <= pad * 2.0 || h as f64 <= pad * 2.0 {
+            return;
+        }
         let scale = ((w as f64 - pad * 2.0) / LAYOUT_W).min((h as f64 - pad * 2.0) / LAYOUT_H);
+        if scale <= 0.001 || !scale.is_finite() {
+            return;
+        }
         let ox = (w as f64 - LAYOUT_W * scale) * 0.5;
         let oy = (h as f64 - LAYOUT_H * scale) * 0.5;
 
@@ -1850,7 +1856,13 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
         let w = area_c.width() as f64;
         let h = area_c.height() as f64;
         let pad = 14.0;
+        if w <= pad * 2.0 || h <= pad * 2.0 {
+            return;
+        }
         let scale = ((w - pad * 2.0) / LAYOUT_W).min((h - pad * 2.0) / LAYOUT_H);
+        if scale <= 0.001 || !scale.is_finite() {
+            return;
+        }
         let ox = (w - LAYOUT_W * scale) * 0.5;
         let oy = (h - LAYOUT_H * scale) * 0.5;
         paint_at_c((x - ox) / scale, (y - oy) / scale);
