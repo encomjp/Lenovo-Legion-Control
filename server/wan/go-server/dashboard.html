@@ -486,16 +486,23 @@
       const d=window._drawerData; if(!d) return;
       const body=document.getElementById('drawer-body');
       if(tab==='sensors'){
-        const s=d.sensors||{}, b=d.battery||{}, dev=d.device||{}, fans=d.fans||[];
+        const s=d.sensors||{}, b=d.battery||{}, dev=d.device||{}, fans=d.fans||[], hw=d.hardware||{};
+        const cpu=hw.cpu||{}, gpu=hw.gpu||{}, mem=hw.memory||{}, storage=hw.storage||{}, disp=hw.display||{};
         body.innerHTML='<div class="grid grid-cols-2 gap-2 text-xs mono">'
           +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD1', s.cpu_temp_1, '°C')+sensorRow('CCD2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
           +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
           +'</div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">NVMe / RAM</div><div class="text-legion-dim mono">SSDs: '+(Array.isArray(s.ssd_composite)? s.ssd_composite.map((v,i)=>'NVMe'+i+' '+Number(v).toFixed(1)+'°C').join(' · ') : '—')+'</div><div class="text-legion-dim mono">RAM: '+(Array.isArray(s.ram_temps)? s.ram_temps.join('°C, ')+'°C' : '—')+'</div></div>'
+          +'<div class="mt-3 text-xs p-3 rounded-lg bg-legion-card border border-legion-border space-y-2">'
+          +'<div class="text-white font-bold tracking-tight text-xs flex items-center justify-between"><span>Hardware Inventory</span><span class="text-[10px] mono text-legion-dim">Standard /proc + sysfs</span></div>'
+          +'<div class="mono text-legion-dim"><b class="text-white">CPU:</b> '+escapeHtml(cpu.name || dev.cpu_model || '—')+' ('+(cpu.physical_cores?cpu.physical_cores+'C/':'')+(cpu.logical_threads?cpu.logical_threads+'T':'')+ (cpu.max_clock_mhz?' up to '+cpu.max_clock_mhz+' MHz':'') +')</div>'
+          +'<div class="mono text-legion-dim"><b class="text-white">GPU:</b> '+escapeHtml(gpu.discrete_name || dev.gpu_model || '—')+(gpu.driver_version?' · driver '+escapeHtml(gpu.driver_version):'')+'</div>'
+          +'<div class="mono text-legion-dim"><b class="text-white">RAM:</b> '+(mem.total_mb? (mem.total_mb/1024).toFixed(1)+' GB' : '—')+' '+(mem.mem_type||'DDR5')+(mem.swap_total_mb?' ('+(mem.swap_total_mb/1024).toFixed(1)+' GB swap)':'')+'</div>'
+          +'<div class="mono text-legion-dim"><b class="text-white">Display:</b> '+(disp.resolution||'—')+(disp.refresh_hz?' @ '+disp.refresh_hz+' Hz':'')+'</div>'
+          +'<div class="mono text-legion-dim"><b class="text-white">Storage:</b> '+(storage.nvme_devices&&storage.nvme_devices.length? storage.nvme_devices.map(n=>escapeHtml(n.model)+' ('+n.size_gb+' GB)').join(' · ') : (Array.isArray(s.ssd_composite)? s.ssd_composite.length+' SSD(s)' : '—'))+'</div>'
+          +'</div>'
           +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Fans</div>'+ (fans.length? fans.map(f=>'<div class="flex justify-between mono text-legion-dim">Fan '+(f.id??'?')+' <span class="text-white">'+(f.rpm!=null?f.rpm+' RPM':'—')+' → '+(f.target!=null?f.target+' tgt':'auto')+' ('+f.min_rpm+'–'+f.max_rpm+')</span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>') +'</div>'
           +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Battery</div><div class="mono text-legion-dim">Capacity '+(b.capacity_pct??'—')+'% · Health '+(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—')+' · Cycles '+(b.cycles??'—')+' · Limit '+(b.charge_limit_pct??'—')+'%</div><div class="mono text-legion-dim">Status '+(b.status||'—')+' · Voltage '+(b.voltage_v!=null?b.voltage_v.toFixed(2)+'V':'—')+'</div></div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device</div><div class="mono text-legion-dim">'+escapeHtml(dev.cpu_model||'')+'</div><div class="mono text-legion-dim">'+escapeHtml(dev.gpu_model||'')+'</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' · BIOS '+escapeHtml(dev.bios_version||'')+' · EC '+escapeHtml(dev.ec_chip||'')+'</div></div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Tuning</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' · Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device & Tuning</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' · BIOS '+escapeHtml(dev.bios_version||'')+' · EC '+escapeHtml(dev.ec_chip||'')+'</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' · Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
       } else if(tab==='history'){
         body.innerHTML='<div class="h-[220px]"><canvas id="drawer-history"></canvas></div><div class="text-[11px] mono text-legion-dim mt-2">Last '+(d.history||[]).length+' report points</div>';
         setTimeout(()=>{

@@ -596,6 +596,7 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 		Keyboard     string             `json:"keyboard_layout"`
 		ChecksPass   int                `json:"checks_passed"`
 		ChecksFail   int                `json:"checks_failed"`
+		Hardware     map[string]interface{} `json:"hardware"`
 		RecentTemps  []float64          `json:"recent_temps"`
 		History      []map[string]interface{} `json:"history"`
 	}
@@ -789,6 +790,9 @@ func (s *Server) handleAPIData(w http.ResponseWriter, r *http.Request) {
 			if kb, ok := st["keyboard_layout"].(string); ok {
 				m.Keyboard = kb
 			}
+		}
+		if hw, ok := rep.Payload["hardware"].(map[string]interface{}); ok {
+			m.Hardware = hw
 		}
 		// self_checks
 		if scs, ok := rep.Payload["self_checks"].([]interface{}); ok {
@@ -1087,7 +1091,7 @@ func (s *Server) handleAPIMachine(w http.ResponseWriter, r *http.Request) {
 		"sensors": latest.Sensors, "battery": latest.Battery, "fans": latest.Fans,
 		"thermal": latest.Payload["thermal"], "profiles": latest.Payload["profiles"],
 		"curve_optimizer": latest.Payload["curve_optimizer"], "settings": latest.Payload["settings"],
-		"system_info": latest.Payload["system_info"],
+		"system_info": latest.Payload["system_info"], "hardware": latest.Payload["hardware"],
 		"history": history, "faults_hist": faultsHist, "checks": checks, "reports": reports,
 	}
 	w.Header().Set("Content-Type", "application/json")
