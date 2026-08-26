@@ -20,7 +20,10 @@ from datetime import datetime, timezone
 import anyio
 from fastapi import FastAPI, HTTPException, Request
 
-from . import db
+try:
+    from . import db
+except ImportError:  # flat Docker layout: `uvicorn app:app` with no parent package
+    import db  # type: ignore[no-redef]
 
 MAX_BODY = 256 * 1024
 RATE_PER_MIN = int(os.environ.get("LEGION_TELEMETRY_RATE_PER_MIN", "30"))
