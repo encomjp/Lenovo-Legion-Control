@@ -4,39 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Legion Telemetry Control Center</title>
-  <!-- Tailwind CDN & Chart.js -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300..800;1,300..800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
-          fontFamily: {
-            sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
+          fontFamily: { sans: ['Plus Jakarta Sans','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] },
           colors: {
             legion: {
-              50: '#ecfdf5',
-              100: '#d1fae5',
-              400: '#34d399',
-              500: '#10b981',
-              accent: '#46f08a',
-              dark: '#0a0e0c',
-              card: '#111714',
-              cardAlt: '#161e1a',
-              border: '#1f2d25',
-              borderLight: '#2e4236',
-              text: '#b7ccb9',
-              dim: '#6f8a77',
-              cyan: '#38bdf8',
-              amber: '#fbbf24',
-              red: '#f87171',
-              purple: '#c084fc',
+              accent: '#46f08a', dark: '#0a0e0c', card: '#111714', cardAlt: '#161e1a',
+              border: '#1f2d25', borderLight: '#2e4236', text: '#b7ccb9', dim: '#6f8a77',
+              cyan: '#38bdf8', amber: '#fbbf24', red: '#f87171', purple: '#c084fc',
             }
           }
         }
@@ -44,739 +27,611 @@
     }
   </script>
   <style>
-    body { background-color: #0a0e0c; color: #b7ccb9; font-family: 'Plus Jakarta Sans', sans-serif; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0a0e0c; }
-    ::-webkit-scrollbar-thumb { background: #1f2d25; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #2e4236; }
-    .glass-card { background: rgba(17, 23, 20, 0.85); backdrop-filter: blur(12px); border: 1px solid #1f2d25; }
-    .glass-card:hover { border-color: rgba(70, 240, 138, 0.25); }
-    .kpi-gradient { background: radial-gradient(circle at top left, rgba(70,240,138,0.08), transparent 70%); }
-    .pulse-dot { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.1); } }
+    body { background:#0a0e0c; color:#b7ccb9; font-family:'Plus Jakarta Sans',sans-serif; }
+    .mono { font-family:'JetBrains Mono',monospace; }
+    ::-webkit-scrollbar{ width:6px; height:6px; } ::-webkit-scrollbar-track{ background:#0a0e0c; }
+    ::-webkit-scrollbar-thumb{ background:#1f2d25; border-radius:3px; } ::-webkit-scrollbar-thumb:hover{ background:#2e4236; }
+    .glass-card{ background:rgba(17,23,20,.88); backdrop-filter:blur(10px); border:1px solid #1f2d25; }
+    .glass-card:hover{ border-color:rgba(70,240,138,.22); }
+    .kpi-gradient{ background:radial-gradient(circle at top left, rgba(70,240,138,.09), transparent 68%); }
+    .pulse-dot{ animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+    @keyframes pulse{ 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.45; transform:scale(1.15);} }
+    .shimmer{ background:linear-gradient(90deg,#111714 25%,#161e1a 50%,#111714 75%); background-size:200% 100%; animation:shimmer 1.3s infinite; }
+    @keyframes shimmer{ 0%{ background-position:200% 0;} 100%{ background-position:-200% 0;} }
+    .toast-enter{ animation:toastIn .22s ease; } @keyframes toastIn{ from{ transform:translateY(10px); opacity:0;} to{ transform:translateY(0); opacity:1;} }
   </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-legion-accent selection:text-black">
-
-  <!-- Top Navigation Bar -->
-  <header class="border-b border-legion-border bg-legion-dark/95 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-8 h-8 rounded-lg bg-legion-accent/10 border border-legion-accent/30 flex items-center justify-center text-legion-accent font-mono font-bold text-sm">
-          &gt;_
-        </div>
+  <header class="border-b border-legion-border bg-legion-dark/95 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-[84rem] mx-auto px-4 sm:px-6 lg:px-8 h-[3.7rem] flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 shrink-0">
+        <div class="w-8 h-8 rounded-lg bg-legion-accent/10 border border-legion-accent/30 flex items-center justify-center text-legion-accent font-mono font-bold text-sm">&gt;_</div>
         <div>
-          <span class="text-white font-bold text-lg tracking-tight">Legion<span class="text-legion-accent">Telemetry</span></span>
+          <span class="text-white font-bold text-[1.05rem] tracking-tight">Legion<span class="text-legion-accent">Telemetry</span></span>
           <span class="ml-2 px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">Fleet Ops</span>
         </div>
       </div>
-
-      <!-- Navigation Tabs -->
-      <nav class="flex items-center space-x-1 sm:space-x-2">
-        <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-btn px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all text-white bg-legion-border border border-legion-accent/40 shadow-sm">
-          📊 Power-BI Analytics
-        </button>
-        <button onclick="switchTab('machines')" id="tab-machines" class="tab-btn px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all text-legion-dim hover:text-white hover:bg-legion-card">
-          💻 Fleet Explorer
-        </button>
-        <button onclick="switchTab('bugs')" id="tab-bugs" class="tab-btn px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all text-legion-dim hover:text-white hover:bg-legion-card flex items-center gap-1">
-          🐞 Bugzilla Triage <span id="badge-bug-count" class="px-1.5 py-0.2 rounded-full text-[9px] bg-red-950 text-red-400 border border-red-800">0</span>
-        </button>
-        <button onclick="switchTab('reports')" id="tab-reports" class="tab-btn px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all text-legion-dim hover:text-white hover:bg-legion-card">
-          📋 Raw Reports
-        </button>
-        <button onclick="switchTab('privacy')" id="tab-privacy" class="tab-btn px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all text-legion-dim hover:text-white hover:bg-legion-card">
-          🛡️ Privacy & GDPR
-        </button>
+      <nav class="flex items-center gap-1 sm:gap-1.5 overflow-x-auto">
+        <button onclick="switchTab('analytics')" id="tab-analytics" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-white bg-legion-border border border-legion-accent/40 shadow-sm">📊 Analytics</button>
+        <button onclick="switchTab('machines')" id="tab-machines" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">💻 Fleet</button>
+        <button onclick="switchTab('bugs')" id="tab-bugs" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card flex items-center gap-1">🐞 Triage <span id="badge-bug-count" class="px-1.5 py-0.5 rounded-full text-[9px] bg-red-950 text-red-400 border border-red-800">0</span></button>
+        <button onclick="switchTab('reports')" id="tab-reports" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">📋 Reports</button>
+        <button onclick="switchTab('privacy')" id="tab-privacy" class="tab-btn whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition text-legion-dim hover:text-white hover:bg-legion-card">🛡️ Privacy</button>
       </nav>
-
-      <!-- Connection / Live badge -->
-      <div class="flex items-center space-x-3 text-xs font-mono">
-        <div class="flex items-center space-x-1.5 bg-legion-card border border-legion-border px-2.5 py-1 rounded-full">
+      <div class="flex items-center gap-2 text-xs font-mono shrink-0">
+        <div class="hidden sm:flex items-center gap-1.5 bg-legion-card border border-legion-border px-2.5 py-1 rounded-full">
           <span class="w-2 h-2 rounded-full bg-legion-accent pulse-dot"></span>
-          <span class="text-emerald-400 font-medium">LIVE CONNECTED</span>
+          <span class="text-emerald-400 font-medium text-[11px]">LIVE</span>
+          <svg id="refresh-ring" class="w-4 h-4 -rotate-90" viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" fill="none" stroke="#1f2d25" stroke-width="3"/><circle id="refresh-ring-fg" cx="18" cy="18" r="14" fill="none" stroke="#46f08a" stroke-width="3" stroke-linecap="round" stroke-dasharray="87.96" stroke-dashoffset="87.96"/></svg>
         </div>
-        <button onclick="fetchData()" class="p-1.5 text-legion-dim hover:text-white hover:bg-legion-card rounded transition" title="Refresh Data">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        </button>
+        <button onclick="fetchData()" class="p-1.5 text-legion-dim hover:text-white hover:bg-legion-card rounded transition" title="Refresh now">↻</button>
       </div>
     </div>
   </header>
 
-  <!-- Main Content Area -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-
-    <!-- KPI Summary Row -->
-    <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-      <div class="glass-card kpi-gradient rounded-xl p-4 flex flex-col justify-between">
-        <span class="text-xs uppercase tracking-wider font-semibold text-legion-dim">Total Reports</span>
-        <div class="flex items-baseline justify-between mt-2">
-          <span class="text-2xl sm:text-3xl font-extrabold text-white font-mono" id="kpi-total-reports">0</span>
-          <span class="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40" id="kpi-24h">+0 (24h)</span>
+  <main class="flex-1 max-w-[84rem] w-full mx-auto p-4 sm:p-6 lg:px-8 lg:py-6 space-y-6">
+    <!-- KPIs -->
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4" id="kpi-row">
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Total Reports</div>
+        <div class="flex items-baseline justify-between mt-2 gap-2">
+          <span class="text-2xl font-extrabold text-white mono" id="kpi-total">—</span>
+          <span class="text-[11px] mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40" id="kpi-24h">+0</span>
         </div>
+        <div class="text-[11px] mono text-legion-dim mt-1" id="kpi-active-hosts">— hosts (24h)</div>
       </div>
-
-      <div class="glass-card kpi-gradient rounded-xl p-4 flex flex-col justify-between">
-        <span class="text-xs uppercase tracking-wider font-semibold text-legion-dim">Managed Fleet</span>
-        <div class="flex items-baseline justify-between mt-2">
-          <span class="text-2xl sm:text-3xl font-extrabold text-legion-cyan font-mono" id="kpi-total-machines">0</span>
-          <span class="text-xs font-mono text-legion-dim">Unique Hosts</span>
-        </div>
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Fleet Size</div>
+        <div class="text-2xl font-extrabold text-legion-cyan mono mt-2" id="kpi-fleet">—</div>
+        <div class="text-[11px] mono text-legion-dim" id="kpi-fleet-sub">unique hosts</div>
       </div>
-
-      <div class="glass-card kpi-gradient rounded-xl p-4 flex flex-col justify-between">
-        <span class="text-xs uppercase tracking-wider font-semibold text-legion-dim">Avg CPU Temp</span>
-        <div class="flex items-baseline justify-between mt-2">
-          <span class="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono" id="kpi-avg-temp">--°C</span>
-          <span class="text-xs font-mono text-legion-dim">Package Max</span>
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Avg CPU Temp</div>
+        <div class="flex items-baseline gap-2 mt-2">
+          <span class="text-2xl font-extrabold text-emerald-400 mono" id="kpi-avg-temp">—°C</span>
+          <canvas id="kpi-spark" width="68" height="18" class="opacity-80"></canvas>
         </div>
+        <div class="text-[11px] mono text-legion-dim">fleet latest</div>
       </div>
-
-      <div class="glass-card kpi-gradient rounded-xl p-4 flex flex-col justify-between">
-        <span class="text-xs uppercase tracking-wider font-semibold text-legion-dim">Hardware Faults</span>
-        <div class="flex items-baseline justify-between mt-2">
-          <span class="text-2xl sm:text-3xl font-extrabold text-legion-amber font-mono" id="kpi-warnings">0</span>
-          <span class="text-xs font-mono text-amber-400/80">Warnings</span>
-        </div>
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Warnings</div>
+        <div class="text-2xl font-extrabold text-legion-amber mono mt-2" id="kpi-warn">0</div>
+        <div class="text-[11px] mono text-amber-400/80">faults</div>
       </div>
-
-      <div class="glass-card kpi-gradient rounded-xl p-4 flex flex-col justify-between">
-        <span class="text-xs uppercase tracking-wider font-semibold text-legion-dim">Critical Issues</span>
-        <div class="flex items-baseline justify-between mt-2">
-          <span class="text-2xl sm:text-3xl font-extrabold text-legion-red font-mono" id="kpi-critical">0</span>
-          <span class="text-xs font-mono text-red-400/80">Action Req</span>
-        </div>
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Critical</div>
+        <div class="text-2xl font-extrabold text-legion-red mono mt-2" id="kpi-crit">0</div>
+        <div class="text-[11px] mono text-red-400/80">needs triage</div>
+      </div>
+      <div class="glass-card kpi-gradient rounded-xl p-4">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-legion-dim">Self-Check Pass</div>
+        <div class="text-2xl font-extrabold text-white mono mt-2" id="kpi-pass">—%</div>
+        <div class="w-full h-1.5 bg-legion-border rounded-full mt-1 overflow-hidden"><div id="kpi-pass-bar" class="h-full bg-legion-accent" style="width:0%"></div></div>
       </div>
     </div>
 
-    <!-- ==================== TAB 1: POWER-BI ANALYTICS ==================== -->
+    <!-- ANALYTICS -->
     <div id="view-analytics" class="space-y-6">
-      <!-- Filter Bar -->
-      <div class="glass-card rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div class="flex items-center space-x-3 flex-wrap gap-y-2">
-          <span class="text-white font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5 text-legion-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
-            Slicers:
-          </span>
-          <select id="filter-model" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent">
-            <option value="ALL">All Hardware Models</option>
-          </select>
-          <select id="filter-distro" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent">
-            <option value="ALL">All Linux Distributions</option>
-          </select>
-        </div>
-        <div class="text-legion-dim font-mono text-[11px]">
-          Showing dynamic aggregate slices
-        </div>
+      <div class="glass-card rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-white font-bold uppercase tracking-wider text-[11px]">Slicers:</span>
+        <select id="filter-model" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Models</option></select>
+        <select id="filter-distro" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Distros</option></select>
+        <select id="filter-version" onchange="renderCharts()" class="bg-legion-cardAlt border border-legion-border text-white rounded px-2.5 py-1 text-xs focus:outline-none focus:border-legion-accent"><option value="ALL">All Versions</option></select>
+        <span class="ml-auto text-legion-dim mono text-[11px]" id="slicer-info"></span>
       </div>
-
-      <!-- Power BI Visual Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Main Thermal Trend Chart -->
-        <div class="glass-card rounded-xl p-5 lg:col-span-2 flex flex-col justify-between">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-white font-bold text-sm tracking-tight">Thermal Profile & Frequency Stability</h2>
-              <p class="text-xs text-legion-dim mt-0.5">CPU Package & dGPU Hotspot readings over time</p>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-legion-card border border-legion-border text-emerald-400">Line Plot</span>
-          </div>
-          <div class="h-64 relative">
-            <canvas id="chart-thermal"></canvas>
-          </div>
+        <div class="glass-card rounded-xl p-5 lg:col-span-2">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Thermal Timeline</div><div class="text-xs text-legion-dim">CPU & dGPU °C over ingest time (slicer-filtered)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Line</span></div>
+          <div class="h-[260px]"><canvas id="chart-thermal"></canvas></div>
         </div>
-
-        <!-- Hardware Model Breakdown -->
-        <div class="glass-card rounded-xl p-5 flex flex-col justify-between">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-white font-bold text-sm tracking-tight">Hardware Distribution</h2>
-              <p class="text-xs text-legion-dim mt-0.5">Fleet by Legion generation & SKU</p>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-legion-card border border-legion-border text-cyan-400">Donut</span>
-          </div>
-          <div class="h-64 relative flex items-center justify-center">
-            <canvas id="chart-models"></canvas>
-          </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Hardware Fleet</div><div class="text-xs text-legion-dim">By Legion model</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Donut</span></div>
+          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-models"></canvas></div>
         </div>
-
-        <!-- Distro Breakdown -->
-        <div class="glass-card rounded-xl p-5 flex flex-col justify-between">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-white font-bold text-sm tracking-tight">Linux Ecosystem Breakdown</h2>
-              <p class="text-xs text-legion-dim mt-0.5">Kernels & Distribution platforms</p>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-legion-card border border-legion-border text-purple-400">Bar</span>
-          </div>
-          <div class="h-64 relative">
-            <canvas id="chart-distros"></canvas>
-          </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Ingest Volume</div><div class="text-xs text-legion-dim">Reports per hour (48h)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-emerald-400">Bar</span></div>
+          <div class="h-[260px]"><canvas id="chart-ingest"></canvas></div>
         </div>
-
-        <!-- Platform Profiles & Modes -->
-        <div class="glass-card rounded-xl p-5 flex flex-col justify-between">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-white font-bold text-sm tracking-tight">Active Power Profiles</h2>
-              <p class="text-xs text-legion-dim mt-0.5">ACPI platform power modes in use</p>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-legion-card border border-legion-border text-amber-400">Radar</span>
-          </div>
-          <div class="h-64 relative flex items-center justify-center">
-            <canvas id="chart-profiles"></canvas>
-          </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Linux Distros</div><div class="text-xs text-legion-dim">Nodes per distro</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-purple-400">Bar H</span></div>
+          <div class="h-[260px]"><canvas id="chart-distros"></canvas></div>
         </div>
-
-        <!-- Fault Severity Matrix -->
-        <div class="glass-card rounded-xl p-5 flex flex-col justify-between">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-white font-bold text-sm tracking-tight">Fault Severity Slices</h2>
-              <p class="text-xs text-legion-dim mt-0.5">Diagnostics & sensor anomaly metrics</p>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-legion-card border border-legion-border text-red-400">Polar</span>
-          </div>
-          <div class="h-64 relative flex items-center justify-center">
-            <canvas id="chart-faults"></canvas>
-          </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Battery Health</div><div class="text-xs text-legion-dim">Fleet health % buckets</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Hist</span></div>
+          <div class="h-[260px]"><canvas id="chart-battery"></canvas></div>
         </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Power Profiles</div><div class="text-xs text-legion-dim">ACPI platform profile</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-amber-400">Donut</span></div>
+          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-profiles"></canvas></div>
+        </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Fault Severity</div><div class="text-xs text-legion-dim">Diagnostics anomalies</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-red-400">Pie</span></div>
+          <div class="h-[260px] flex items-center justify-center"><canvas id="chart-faults"></canvas></div>
+        </div>
+        <div class="glass-card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">App Versions</div><div class="text-xs text-legion-dim">Adoption by build</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-cyan-400">Bar H</span></div>
+          <div class="h-[260px]"><canvas id="chart-versions"></canvas></div>
+        </div>
+      </div>
+      <div class="glass-card rounded-xl p-5" id="checks-card" style="display:none">
+        <div class="flex items-center justify-between mb-3"><div><div class="text-white font-bold text-sm">Self-Check Fleet Health</div><div class="text-xs text-legion-dim">Pass / fail per diagnostic check (latest report per host)</div></div><span class="px-2 py-0.5 rounded text-[10px] mono bg-legion-card border border-legion-border text-legion-accent">Checks</span></div>
+        <div class="h-[220px]"><canvas id="chart-checks"></canvas></div>
       </div>
     </div>
 
-    <!-- ==================== TAB 2: FLEET EXPLORER ==================== -->
-    <div id="view-machines" class="space-y-6 hidden">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 class="text-white font-bold text-lg">Machine Fleet Explorer</h2>
-          <p class="text-xs text-legion-dim">Deep telemetry inspection per individual Legion device</p>
-        </div>
-        <div class="flex items-center space-x-2">
-          <input type="text" id="machine-search" oninput="filterMachines()" placeholder="Search machine, model, distro..." class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none focus:border-legion-accent w-64">
+    <!-- FLEET -->
+    <div id="view-machines" class="space-y-4 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div><div class="text-white font-bold">Machine Fleet Explorer</div><div class="text-xs text-legion-dim">Click a card for sensor drill-down • history sparklines inline</div></div>
+        <div class="flex items-center gap-2">
+          <input id="fleet-q" oninput="renderFleet()" placeholder="Search id / model / distro / kernel" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none focus:border-legion-accent w-64">
+          <select id="fleet-status" onchange="renderFleet()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Status</option><option value="Healthy">Healthy</option><option value="Degraded">Degraded</option><option value="Critical">Critical</option></select>
+          <select id="fleet-sort" onchange="renderFleet()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="last">Last seen</option><option value="reports">Reports</option><option value="temp">CPU Temp</option><option value="faults">Faults</option></select>
         </div>
       </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="machines-grid">
-        <!-- Machine cards generated via JS -->
-      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="machines-grid"></div>
     </div>
 
-    <!-- ==================== TAB 3: BUGZILLA TRIAGE ==================== -->
-    <div id="view-bugs" class="space-y-6 hidden">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 class="text-white font-bold text-lg flex items-center gap-2">
-            <span>Bugzilla Telemetry Issue Tracker</span>
-            <span class="text-xs font-mono font-normal px-2 py-0.5 rounded bg-legion-cardAlt border border-legion-border text-legion-accent">v0.1.0-alpha Triage</span>
-          </h2>
-          <p class="text-xs text-legion-dim">Aggregated error signatures, kernel panics, fan stalls, and module exceptions</p>
-        </div>
-        <div class="flex items-center space-x-2">
-          <select id="bug-status-filter" onchange="renderBugs()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white">
-            <option value="ALL">All Statuses (NEW, TRIAGED, RESOLVED)</option>
-            <option value="NEW">Status: NEW Only</option>
-            <option value="TRIAGED">Status: TRIAGED</option>
-            <option value="RESOLVED">Status: RESOLVED</option>
-          </select>
+    <!-- BUGS -->
+    <div id="view-bugs" class="space-y-4 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div><div class="text-white font-bold flex items-center gap-2">Bugzilla Triage <span class="text-xs mono px-2 py-0.5 rounded bg-legion-cardAlt border border-legion-border text-legion-accent">v0.1.0-alpha</span></div><div class="text-xs text-legion-dim">Aggregated signatures • expandable detail • notes & triage state persisted</div></div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input id="bug-q" oninput="renderBugs()" placeholder="Search title / module / detail" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim focus:outline-none w-52">
+          <select id="bug-sev" onchange="renderBugs()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Severities</option><option value="Critical">Critical</option><option value="Warning">Warning</option><option value="Info">Info</option><option value="Error">Error</option></select>
+          <select id="bug-status" onchange="renderBugs()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All Status</option><option value="NEW">NEW</option><option value="TRIAGED">TRIAGED</option><option value="RESOLVED">RESOLVED</option></select>
         </div>
       </div>
-
-      <!-- Bugzilla Table -->
-      <div class="glass-card rounded-xl overflow-hidden">
-        <table class="min-w-full divide-y divide-legion-border text-left text-xs">
-          <thead class="bg-legion-cardAlt/80 text-legion-dim font-mono uppercase text-[11px]">
-            <tr>
-              <th class="px-4 py-3">ID / Signature</th>
-              <th class="px-4 py-3">Severity</th>
-              <th class="px-4 py-3">Module</th>
-              <th class="px-4 py-3">Occurrences</th>
-              <th class="px-4 py-3">Affected Hosts</th>
-              <th class="px-4 py-3">Last Seen</th>
-              <th class="px-4 py-3">Status</th>
-              <th class="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="bugs-table-body" class="divide-y divide-legion-border font-mono text-[11.5px]">
-            <!-- Bugzilla rows -->
-          </tbody>
+      <div class="flex gap-2 text-[11px] mono" id="bug-counts"></div>
+      <div class="glass-card rounded-xl overflow-hidden overflow-x-auto">
+        <table class="min-w-[900px] w-full divide-y divide-legion-border text-left text-xs">
+          <thead class="bg-legion-cardAlt/80 text-legion-dim mono uppercase text-[11px]"><tr><th class="px-3 py-2 w-6"></th><th class="px-3 py-2">Signature</th><th class="px-3 py-2">Sev</th><th class="px-3 py-2">Module</th><th class="px-3 py-2">Count</th><th class="px-3 py-2">Hosts</th><th class="px-3 py-2">Last Seen</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Triage</th></tr></thead>
+          <tbody id="bugs-body" class="divide-y divide-legion-border mono text-[11.5px]"></tbody>
         </table>
       </div>
     </div>
 
-    <!-- ==================== TAB 4: RAW REPORTS ==================== -->
-    <div id="view-reports" class="space-y-6 hidden">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 class="text-white font-bold text-lg">Diagnostics Ingest Stream</h2>
-          <p class="text-xs text-legion-dim">Historical immutable report payloads</p>
+    <!-- REPORTS -->
+    <div id="view-reports" class="space-y-4 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div><div class="text-white font-bold">Diagnostics Ingest Stream</div><div class="text-xs text-legion-dim">Newest first • filtered view keeps payload links</div></div>
+        <div class="flex items-center gap-2">
+          <input id="reports-q" oninput="renderReports()" placeholder="Search model / distro / machine" class="bg-legion-card border border-legion-border rounded-lg px-3 py-1.5 text-xs text-white placeholder-legion-dim w-56">
+          <select id="reports-fault" onchange="renderReports()" class="bg-legion-card border border-legion-border text-xs rounded-lg px-3 py-1.5 text-white"><option value="ALL">All</option><option value="FAULT">With faults</option><option value="CLEAN">Clean</option></select>
         </div>
       </div>
-
-      <div class="glass-card rounded-xl overflow-hidden">
-        <table class="min-w-full divide-y divide-legion-border text-left text-xs">
-          <thead class="bg-legion-cardAlt/80 text-legion-dim font-mono uppercase text-[11px]">
-            <tr>
-              <th class="px-4 py-3">Report ID</th>
-              <th class="px-4 py-3">Timestamp (UTC)</th>
-              <th class="px-4 py-3">Machine ID</th>
-              <th class="px-4 py-3">Model</th>
-              <th class="px-4 py-3">Distro</th>
-              <th class="px-4 py-3">App Ver</th>
-              <th class="px-4 py-3">Faults</th>
-              <th class="px-4 py-3 text-right">Payload</th>
-            </tr>
-          </thead>
-          <tbody id="reports-table-body" class="divide-y divide-legion-border font-mono text-xs">
-            <!-- Reports rows -->
-          </tbody>
+      <div class="glass-card rounded-xl overflow-hidden overflow-x-auto">
+        <table class="min-w-[800px] w-full divide-y divide-legion-border text-left text-xs">
+          <thead class="bg-legion-cardAlt/80 text-legion-dim mono uppercase text-[11px]"><tr><th class="px-3 py-2">#</th><th class="px-3 py-2">Timestamp</th><th class="px-3 py-2">Machine</th><th class="px-3 py-2">Model</th><th class="px-3 py-2">Distro</th><th class="px-3 py-2">Ver</th><th class="px-3 py-2">Faults</th><th class="px-3 py-2 text-right">Payload</th></tr></thead>
+          <tbody id="reports-body" class="divide-y divide-legion-border mono text-xs"></tbody>
         </table>
       </div>
+      <div class="flex justify-center"><button id="reports-more" onclick="reportsLimit+=50;renderReports()" class="hidden px-4 py-1.5 rounded-lg bg-legion-card border border-legion-border text-xs text-white hover:bg-legion-border">Load 50 more</button></div>
     </div>
 
-    <!-- ==================== TAB 5: PRIVACY & GDPR ==================== -->
+    <!-- PRIVACY -->
     <div id="view-privacy" class="space-y-6 hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="glass-card rounded-xl p-6 prose prose-invert max-w-none text-xs leading-relaxed">
-          <div id="privacy-de"></div>
-        </div>
-        <div class="glass-card rounded-xl p-6 prose prose-invert max-w-none text-xs leading-relaxed">
-          <div id="privacy-en"></div>
-        </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="privacy-grid">
+        <div class="glass-card rounded-xl p-6 text-xs leading-relaxed"><div id="privacy-de" class="space-y-2"><div class="shimmer h-6 w-40 rounded"></div><div class="shimmer h-4 w-full rounded"></div><div class="shimmer h-4 w-5/6 rounded"></div></div></div>
+        <div class="glass-card rounded-xl p-6 text-xs leading-relaxed"><div id="privacy-en" class="space-y-2"><div class="shimmer h-6 w-40 rounded"></div><div class="shimmer h-4 w-full rounded"></div><div class="shimmer h-4 w-5/6 rounded"></div></div></div>
       </div>
     </div>
-
   </main>
 
-  <!-- Modal for JSON Payload Inspection -->
-  <div id="modal-json" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="glass-card max-w-4xl w-full max-h-[85vh] rounded-2xl flex flex-col overflow-hidden border border-legion-borderLight shadow-2xl">
-      <div class="p-4 border-b border-legion-border flex items-center justify-between bg-legion-cardAlt">
-        <h3 class="text-white font-bold text-sm font-mono flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-legion-accent"></span>
-          <span id="modal-title">Report Details</span>
-        </h3>
-        <button onclick="closeModal()" class="text-legion-dim hover:text-white text-lg font-mono">&times;</button>
+  <!-- Machine Drawer -->
+  <div id="drawer" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onclick="closeDrawer()"></div>
+    <div class="absolute right-0 top-0 h-full w-full max-w-[560px] bg-[#0f1411] border-l border-legion-border shadow-2xl flex flex-col overflow-hidden">
+      <div class="p-5 border-b border-legion-border flex items-start justify-between gap-3">
+        <div><div class="text-white font-bold text-sm" id="drawer-title">Machine</div><div class="text-[11px] mono text-legion-dim" id="drawer-sub">—</div></div>
+        <button onclick="closeDrawer()" class="text-legion-dim hover:text-white text-xl leading-none">×</button>
       </div>
-      <div class="p-4 overflow-y-auto flex-1 bg-black/40">
-        <pre id="modal-content" class="text-[11.5px] font-mono text-emerald-300 whitespace-pre-wrap select-all"></pre>
+      <div class="flex gap-1 p-2 border-b border-legion-border bg-legion-card/50">
+        <button onclick="drawerTab('sensors')" id="dtab-sensors" class="px-3 py-1 rounded text-xs font-semibold bg-legion-border text-white border border-legion-accent/30">Sensors</button>
+        <button onclick="drawerTab('history')" id="dtab-history" class="px-3 py-1 rounded text-xs font-semibold text-legion-dim hover:text-white">History</button>
+        <button onclick="drawerTab('checks')" id="dtab-checks" class="px-3 py-1 rounded text-xs font-semibold text-legion-dim hover:text-white">Checks</button>
+        <button onclick="drawerTab('faults')" id="dtab-faults" class="px-3 py-1 rounded text-xs font-semibold text-legion-dim hover:text-white">Faults</button>
+        <button onclick="drawerTab('reports')" id="dtab-reports" class="px-3 py-1 rounded text-xs font-semibold text-legion-dim hover:text-white">Reports</button>
       </div>
-      <div class="p-3 border-t border-legion-border bg-legion-card flex justify-end gap-2">
-        <button onclick="copyModalContent()" class="px-3 py-1.5 bg-legion-border hover:bg-legion-borderLight text-white rounded text-xs font-mono transition">Copy JSON</button>
-        <button onclick="closeModal()" class="px-4 py-1.5 bg-legion-accent text-black font-semibold rounded text-xs transition">Close</button>
-      </div>
+      <div class="flex-1 overflow-y-auto p-5 space-y-4" id="drawer-body"></div>
     </div>
   </div>
 
-  <!-- JavaScript logic for Dashboard & Charts -->
+  <!-- JSON Modal -->
+  <div id="modal-json" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] hidden flex items-center justify-center p-4">
+    <div class="glass-card max-w-4xl w-full max-h-[85vh] rounded-2xl flex flex-col overflow-hidden border border-legion-borderLight shadow-2xl">
+      <div class="p-4 border-b border-legion-border flex items-center justify-between bg-legion-cardAlt"><h3 class="text-white font-bold text-sm mono flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-legion-accent"></span><span id="modal-title">Report</span></h3><button onclick="closeModal()" class="text-legion-dim hover:text-white text-xl">×</button></div>
+      <div class="p-4 overflow-y-auto flex-1 bg-black/40"><pre id="modal-content" class="text-[11.5px] mono text-emerald-300 whitespace-pre-wrap break-words select-all"></pre></div>
+      <div class="p-3 border-t border-legion-border bg-legion-card flex justify-end gap-2"><button onclick="copyModalContent()" class="px-3 py-1.5 bg-legion-border hover:bg-legion-borderLight text-white rounded text-xs mono">Copy JSON</button><button onclick="closeModal()" class="px-4 py-1.5 bg-legion-accent text-black font-semibold rounded text-xs">Close</button></div>
+    </div>
+  </div>
+
+  <div id="toasts" class="fixed bottom-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none"></div>
+
   <script>
-    let globalData = null;
-    let charts = {};
+    let globalData=null, charts={}, reportsLimit=50, drawerMachineId=null, refreshTimer=null, ringTimer=null, ringElapsed=0;
+    const REFRESH_MS=15000;
 
-    async function fetchData() {
-      try {
-        const res = await fetch('/api/data');
-        if (!res.ok) throw new Error('API request failed');
-        globalData = await res.json();
-        updateUI();
-      } catch (err) {
-        console.error('Fetch error:', err);
-      }
+    function toast(msg, type='info'){
+      const el=document.createElement('div');
+      el.className='toast-enter pointer-events-auto px-3 py-2 rounded-lg text-xs font-medium border shadow-lg '+(type==='ok'?'bg-emerald-950 text-emerald-300 border-emerald-800':type==='err'?'bg-red-950 text-red-300 border-red-800':'bg-legion-card text-white border-legion-border');
+      el.textContent=msg;
+      document.getElementById('toasts').appendChild(el);
+      setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(6px)'; setTimeout(()=>el.remove(),200); }, 2600);
+    }
+    function escapeHtml(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function relTime(iso){
+      if(!iso) return '—';
+      const d=new Date(iso); if(isNaN(d)) return iso;
+      const s=Math.floor((Date.now()-d.getTime())/1000);
+      if(s<60) return 'just now';
+      if(s<3600) return Math.floor(s/60)+'m ago';
+      if(s<86400) return Math.floor(s/3600)+'h ago';
+      return d.toLocaleString('en-GB',{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }
+    function miniSpark(canvas, data, color){
+      if(!canvas || !data || data.length<2) return;
+      const ctx=canvas.getContext('2d'); const w=canvas.width, h=canvas.height;
+      ctx.clearRect(0,0,w,h);
+      const min=Math.min(...data), max=Math.max(...data), range=(max-min)||1;
+      ctx.strokeStyle=color; ctx.lineWidth=1.4; ctx.beginPath();
+      data.forEach((v,i)=>{ const x=i/(data.length-1)*w; const y=h - (v-min)/range*h; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+      ctx.stroke();
+      // fill
+      ctx.lineTo(w,h); ctx.lineTo(0,h); ctx.closePath(); ctx.fillStyle=color+'22'; ctx.fill();
     }
 
-    function switchTab(tabId) {
-      document.querySelectorAll('main > div[id^="view-"]').forEach(el => el.classList.add('hidden'));
-      document.getElementById('view-' + tabId).classList.remove('hidden');
-
-      document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('text-white', 'bg-legion-border', 'border', 'border-legion-accent/40', 'shadow-sm');
-        btn.classList.add('text-legion-dim');
-      });
-      const activeBtn = document.getElementById('tab-' + tabId);
-      activeBtn.classList.add('text-white', 'bg-legion-border', 'border', 'border-legion-accent/40', 'shadow-sm');
-      activeBtn.classList.remove('text-legion-dim');
-
-      if (tabId === 'analytics') {
-        setTimeout(renderCharts, 50);
+    async function fetchData(){
+      try{
+        const res=await fetch('/api/data'); if(!res.ok) throw new Error(res.status);
+        globalData=await res.json(); updateUI(); ringElapsed=0;
+      }catch(e){ console.error(e); toast('Failed to fetch telemetry','err'); }
+    }
+    function startRefreshLoop(){
+      clearInterval(refreshTimer); clearInterval(ringTimer); ringElapsed=0;
+      refreshTimer=setInterval(fetchData, REFRESH_MS);
+      ringTimer=setInterval(()=>{
+        if(document.hidden) return;
+        ringElapsed+=100; const pct=Math.min(ringElapsed/REFRESH_MS,1);
+        const off=87.96*(1-pct);
+        const fg=document.getElementById('refresh-ring-fg'); if(fg) fg.setAttribute('stroke-dashoffset', String(87.96 - 87.96*pct));
+      },100);
+    }
+    function switchTab(id){
+      document.querySelectorAll('main > div[id^="view-"]').forEach(el=>el.classList.add('hidden'));
+      document.getElementById('view-'+id).classList.remove('hidden');
+      document.querySelectorAll('.tab-btn').forEach(b=>{ b.classList.remove('text-white','bg-legion-border','border','border-legion-accent/40','shadow-sm'); b.classList.add('text-legion-dim'); });
+      const a=document.getElementById('tab-'+id); a.classList.add('text-white','bg-legion-border','border','border-legion-accent/40','shadow-sm'); a.classList.remove('text-legion-dim');
+      if(id==='analytics') setTimeout(renderCharts,40);
+      if(id==='privacy' && !window._privacyLoaded) loadPrivacy();
+    }
+    async function loadPrivacy(){
+      try{
+        const r=await fetch('/api/privacy'); const j=await r.json();
+        document.getElementById('privacy-de').innerHTML=j.de_html||'<p class="text-legion-dim">Not available.</p>';
+        document.getElementById('privacy-en').innerHTML=j.en_html||'<p class="text-legion-dim">Not available.</p>';
+        window._privacyLoaded=true;
+      }catch(e){
+        document.getElementById('privacy-de').innerHTML='<p class="text-legion-dim">Failed to load privacy docs.</p>';
+        document.getElementById('privacy-en').innerHTML='<p class="text-legion-dim">Failed to load privacy docs.</p>';
       }
     }
-
-    function updateUI() {
-      if (!globalData) return;
-
-      // KPIs
-      document.getElementById('kpi-total-reports').textContent = globalData.total_reports;
-      document.getElementById('kpi-24h').textContent = "+" + globalData.reports_24h + " (24h)";
-      document.getElementById('kpi-total-machines').textContent = globalData.total_machines;
-      
-      let sumTemp = 0, countTemp = 0;
-      globalData.machines.forEach(m => {
-        if (m.cpu_temp > 0) { sumTemp += m.cpu_temp; countTemp++; }
-      });
-      document.getElementById('kpi-avg-temp').textContent = countTemp > 0 ? (sumTemp / countTemp).toFixed(1) + '°C' : '--°C';
-      document.getElementById('kpi-warnings').textContent = globalData.fault_severity.Warning || 0;
-      document.getElementById('kpi-critical').textContent = globalData.fault_severity.Critical || 0;
-      document.getElementById('badge-bug-count').textContent = globalData.bugs.length;
-
-      // Populate filter dropdowns
-      const modelSelect = document.getElementById('filter-model');
-      const distroSelect = document.getElementById('filter-distro');
-      const curModel = modelSelect.value;
-      const curDistro = distroSelect.value;
-
-      modelSelect.innerHTML = '<option value="ALL">All Hardware Models</option>';
-      for (const m in globalData.model_stats) {
-        modelSelect.innerHTML += '<option value="' + m + '">' + m + ' (' + globalData.model_stats[m] + ')</option>';
-      }
-      modelSelect.value = curModel || 'ALL';
-
-      distroSelect.innerHTML = '<option value="ALL">All Linux Distributions</option>';
-      for (const d in globalData.distro_stats) {
-        distroSelect.innerHTML += '<option value="' + d + '">' + d + ' (' + globalData.distro_stats[d] + ')</option>';
-      }
-      distroSelect.value = curDistro || 'ALL';
-
-      renderCharts();
-      renderMachines();
-      renderBugs();
-      renderReports();
-      renderPrivacy();
+    function updateUI(){
+      if(!globalData) return;
+      const kpis=globalData;
+      document.getElementById('kpi-total').textContent=kpis.total_reports;
+      document.getElementById('kpi-24h').textContent='+'+kpis.reports_24h;
+      document.getElementById('kpi-active-hosts').textContent=kpis.active_machines_24h+' hosts (24h)';
+      document.getElementById('kpi-fleet').textContent=kpis.total_machines;
+      document.getElementById('kpi-fleet-sub').textContent=kpis.total_machines===1?'unique host':'unique hosts';
+      const avg=kpis.avg_cpu_temp||0;
+      document.getElementById('kpi-avg-temp').textContent=avg?avg.toFixed(1)+'°C':'—°C';
+      // spark from timeline_temps last 24 points
+      const temps=(kpis.timeline_temps||[]).slice(-24).map(x=>x.cpu).filter(v=>v>0);
+      miniSpark(document.getElementById('kpi-spark'), temps, '#46f08a');
+      document.getElementById('kpi-warn').textContent=kpis.fault_severity?.Warning||0;
+      document.getElementById('kpi-crit').textContent=kpis.fault_severity?.Critical||0;
+      const rate=kpis.checks_pass_rate||0;
+      document.getElementById('kpi-pass').textContent=rate.toFixed(1)+'%';
+      document.getElementById('kpi-pass-bar').style.width=rate.toFixed(1)+'%';
+      document.getElementById('badge-bug-count').textContent=(kpis.bugs||[]).length;
+      // slicers
+      const ms=document.getElementById('filter-model'), ds=document.getElementById('filter-distro'), vs=document.getElementById('filter-version');
+      const curM=ms.value, curD=ds.value, curV=vs.value;
+      ms.innerHTML='<option value="ALL">All Models</option>'; for(const k in (kpis.model_stats||{})) ms.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.model_stats[k]+')</option>';
+      ds.innerHTML='<option value="ALL">All Distros</option>'; for(const k in (kpis.distro_stats||{})) ds.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.distro_stats[k]+')</option>';
+      vs.innerHTML='<option value="ALL">All Versions</option>'; for(const k in (kpis.version_stats||{})) vs.innerHTML+='<option value="'+escapeHtml(k)+'">'+escapeHtml(k)+' ('+kpis.version_stats[k]+')</option>';
+      ms.value=curM||'ALL'; ds.value=curD||'ALL'; vs.value=curV||'ALL';
+      const filtCount=[curM,curD,curV].filter(v=>v&&v!=='ALL').length;
+      document.getElementById('slicer-info').textContent=filtCount? filtCount+' slicer(s) active • '+(kpis.timeline_temps||[]).length+' points':'No slicer • '+(kpis.timeline_temps||[]).length+' points';
+      renderCharts(); renderFleet(); renderBugs(); renderReports();
     }
-
-    function renderCharts() {
-      if (!globalData) return;
-
-      const selModel = document.getElementById('filter-model').value;
-      const selDistro = document.getElementById('filter-distro').value;
-
-      // Filtered Timeline
-      const filteredTimeline = globalData.timeline_temps.filter(t => {
-        const m = globalData.machines.find(x => x.id === t.host);
-        if (!m) return true;
-        if (selModel !== 'ALL' && m.model !== selModel) return false;
-        if (selDistro !== 'ALL' && m.distro !== selDistro) return false;
+    function filteredTimeline(){
+      const selM=document.getElementById('filter-model').value;
+      const selD=document.getElementById('filter-distro').value;
+      const selV=document.getElementById('filter-version').value;
+      return (globalData.timeline_temps||[]).filter(t=>{
+        const m=(globalData.machines||[]).find(x=>x.id===t.host);
+        if(!m) return true;
+        if(selM!=='ALL' && m.model!==selM) return false;
+        if(selD!=='ALL' && m.distro!==selD) return false;
+        if(selV!=='ALL' && m.app_version!==selV) return false;
         return true;
       });
-
-      // 1. Thermal Timeline Chart
-      const ctxThermal = document.getElementById('chart-thermal').getContext('2d');
-      if (charts.thermal) charts.thermal.destroy();
-      charts.thermal = new Chart(ctxThermal, {
-        type: 'line',
-        data: {
-          labels: filteredTimeline.map(t => t.ts),
-          datasets: [
-            {
-              label: 'CPU Temp (°C)',
-              data: filteredTimeline.map(t => t.cpu > 0 ? t.cpu : null),
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16, 185, 129, 0.1)',
-              tension: 0.3,
-              fill: true,
-              borderWidth: 2,
-              pointRadius: 2,
-            },
-            {
-              label: 'dGPU Temp (°C)',
-              data: filteredTimeline.map(t => t.dgpu > 0 ? t.dgpu : null),
-              borderColor: '#38bdf8',
-              backgroundColor: 'rgba(56, 189, 248, 0.05)',
-              tension: 0.3,
-              fill: true,
-              borderWidth: 2,
-              pointRadius: 2,
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { labels: { color: '#b7ccb9', font: { family: 'JetBrains Mono', size: 11 } } } },
-          scales: {
-            x: { ticks: { color: '#6f8a77', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#1e2b23' } },
-            y: { min: 20, max: 100, ticks: { color: '#6f8a77', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#1e2b23' } }
-          }
-        }
-      });
-
-      // 2. Hardware Models Donut
-      const ctxModels = document.getElementById('chart-models').getContext('2d');
-      if (charts.models) charts.models.destroy();
-      charts.models = new Chart(ctxModels, {
-        type: 'doughnut',
-        data: {
-          labels: Object.keys(globalData.model_stats),
-          datasets: [{
-            data: Object.values(globalData.model_stats),
-            backgroundColor: ['#46f08a', '#38bdf8', '#fbbf24', '#f87171', '#c084fc'],
-            borderWidth: 1,
-            borderColor: '#111714'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom', labels: { color: '#b7ccb9', font: { size: 10 } } } }
-        }
-      });
-
-      // 3. Distro Bar Chart
-      const ctxDistros = document.getElementById('chart-distros').getContext('2d');
-      if (charts.distros) charts.distros.destroy();
-      charts.distros = new Chart(ctxDistros, {
-        type: 'bar',
-        data: {
-          labels: Object.keys(globalData.distro_stats),
-          datasets: [{
-            label: 'Nodes',
-            data: Object.values(globalData.distro_stats),
-            backgroundColor: 'rgba(56, 189, 248, 0.6)',
-            borderColor: '#38bdf8',
-            borderWidth: 1,
-            borderRadius: 4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { ticks: { color: '#6f8a77', font: { size: 10 } }, grid: { display: false } },
-            y: { ticks: { color: '#6f8a77', stepSize: 1 }, grid: { color: '#1e2b23' } }
-          }
-        }
-      });
-
-      // 4. Platform Profiles Radar
-      const ctxProfiles = document.getElementById('chart-profiles').getContext('2d');
-      if (charts.profiles) charts.profiles.destroy();
-      charts.profiles = new Chart(ctxProfiles, {
-        type: 'polarArea',
-        data: {
-          labels: Object.keys(globalData.profile_stats).length ? Object.keys(globalData.profile_stats) : ['quiet', 'balanced', 'performance', 'custom'],
-          datasets: [{
-            data: Object.keys(globalData.profile_stats).length ? Object.values(globalData.profile_stats) : [0, 0, 0, 0],
-            backgroundColor: ['rgba(56, 189, 248, 0.5)', 'rgba(70, 240, 138, 0.5)', 'rgba(251, 191, 36, 0.5)', 'rgba(248, 113, 113, 0.5)']
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom', labels: { color: '#b7ccb9', font: { size: 10 } } } }
-        }
-      });
-
-      // 5. Fault Severity
-      const ctxFaults = document.getElementById('chart-faults').getContext('2d');
-      if (charts.faults) charts.faults.destroy();
-      charts.faults = new Chart(ctxFaults, {
-        type: 'pie',
-        data: {
-          labels: ['Critical', 'Warning', 'Info'],
-          datasets: [{
-            data: [globalData.fault_severity.Critical, globalData.fault_severity.Warning, globalData.fault_severity.Info],
-            backgroundColor: ['#e85c5c', '#ffb454', '#46f08a'],
-            borderColor: '#111714'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom', labels: { color: '#b7ccb9', font: { size: 10 } } } }
-        }
-      });
+    }
+    function renderCharts(){
+      if(!globalData) return;
+      const tl=filteredTimeline();
+      // thermal
+      const ctxT=document.getElementById('chart-thermal')?.getContext('2d'); if(ctxT){
+        if(charts.thermal) charts.thermal.destroy();
+        charts.thermal=new Chart(ctxT,{ type:'line', data:{ labels: tl.map(t=>t.ts), datasets:[
+          { label:'CPU °C', data: tl.map(t=>t.cpu>0?t.cpu:null), borderColor:'#46f08a', backgroundColor:'rgba(70,240,138,.10)', tension:.32, fill:true, borderWidth:1.7, pointRadius:0 },
+          { label:'dGPU °C', data: tl.map(t=>t.dgpu>0?t.dgpu:null), borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,.07)', tension:.32, fill:true, borderWidth:1.7, pointRadius:0 }
+        ]}, options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:11}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}, maxTicksLimit:10 }, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77', font:{family:'JetBrains Mono',size:10}}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+      }
+      // ingest per hour
+      const ctxI=document.getElementById('chart-ingest')?.getContext('2d'); if(ctxI){
+        const buckets=globalData.timeline_reports||[];
+        if(charts.ingest) charts.ingest.destroy();
+        charts.ingest=new Chart(ctxI,{ type:'bar', data:{ labels: buckets.map(b=>b.hour), datasets:[{ label:'Reports', data: buckets.map(b=>b.count), backgroundColor:'rgba(70,240,138,.55)', borderColor:'#46f08a', borderWidth:1, borderRadius:3 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:10}, maxTicksLimit:8}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1 }, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+      }
+      // models donut
+      const ctxM=document.getElementById('chart-models')?.getContext('2d'); if(ctxM){
+        if(charts.models) charts.models.destroy();
+        const labels=Object.keys(globalData.model_stats||{}), vals=Object.values(globalData.model_stats||{});
+        charts.models=new Chart(ctxM,{ type:'doughnut', data:{ labels: labels.length?labels:['No data'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#46f08a','#38bdf8','#fbbf24','#f87171','#c084fc','#94a3b8'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}, padding:10}}} } });
+      }
+      // distros horizontal
+      const ctxD=document.getElementById('chart-distros')?.getContext('2d'); if(ctxD){
+        if(charts.distros) charts.distros.destroy();
+        const labels=Object.keys(globalData.distro_stats||{}), vals=Object.values(globalData.distro_stats||{});
+        charts.distros=new Chart(ctxD,{ type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:'rgba(56,189,248,.55)', borderColor:'#38bdf8', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
+      }
+      // battery hist
+      const ctxB=document.getElementById('chart-battery')?.getContext('2d'); if(ctxB){
+        if(charts.battery) charts.battery.destroy();
+        const bh=globalData.battery_hist||{"0-20":0,"20-40":0,"40-60":0,"60-80":0,"80-100":0};
+        charts.battery=new Chart(ctxB,{ type:'bar', data:{ labels:Object.keys(bh), datasets:[{ data:Object.values(bh), backgroundColor:['#f87171','#fbbf24','#38bdf8','#46f08a','#10b981'], borderWidth:1, borderColor:'#111714', borderRadius:4 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{display:false}}, y:{ ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+      }
+      // profiles
+      const ctxP=document.getElementById('chart-profiles')?.getContext('2d'); if(ctxP){
+        if(charts.profiles) charts.profiles.destroy();
+        const labels=Object.keys(globalData.profile_stats||{}), vals=Object.values(globalData.profile_stats||{});
+        charts.profiles=new Chart(ctxP,{ type:'doughnut', data:{ labels: labels.length?labels:['(no data)'], datasets:[{ data: vals.length?vals:[1], backgroundColor:['#38bdf8','#46f08a','#fbbf24','#f87171'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
+      }
+      // faults
+      const ctxF=document.getElementById('chart-faults')?.getContext('2d'); if(ctxF){
+        if(charts.faults) charts.faults.destroy();
+        const fs=globalData.fault_severity||{Critical:0,Warning:0,Info:0};
+        charts.faults=new Chart(ctxF,{ type:'doughnut', data:{ labels:['Critical','Warning','Info'], datasets:[{ data:[fs.Critical||0,fs.Warning||0,fs.Info||0], backgroundColor:['#f87171','#fbbf24','#46f08a'], borderWidth:1, borderColor:'#111714' }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#b7ccb9', font:{size:10}}}} } });
+      }
+      // versions
+      const ctxV=document.getElementById('chart-versions')?.getContext('2d'); if(ctxV){
+        if(charts.versions) charts.versions.destroy();
+        const labels=Object.keys(globalData.version_stats||{}), vals=Object.values(globalData.version_stats||{});
+        charts.versions=new Chart(ctxV,{ type:'bar', data:{ labels: labels.length?labels:['—'], datasets:[{ data: vals.length?vals:[0], backgroundColor:'rgba(192,132,252,.55)', borderColor:'#c084fc', borderWidth:1, borderRadius:4 }]}, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}}, scales:{ x:{ ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.6)'}}, y:{ ticks:{ color:'#b7ccb9', font:{size:10}}, grid:{display:false}}} } });
+      }
+      // checks
+      const card=document.getElementById('checks-card'), ctxC=document.getElementById('chart-checks')?.getContext('2d');
+      const checks=globalData.checks_summary||[];
+      if(checks.length && ctxC){
+        card.style.display='';
+        if(charts.checks) charts.checks.destroy();
+        charts.checks=new Chart(ctxC,{ type:'bar', data:{ labels: checks.map(c=>c.name), datasets:[
+          { label:'Pass', data: checks.map(c=>c.pass), backgroundColor:'rgba(70,240,138,.55)', borderColor:'#46f08a', borderWidth:1 },
+          { label:'Fail', data: checks.map(c=>c.fail), backgroundColor:'rgba(248,113,113,.55)', borderColor:'#f87171', borderWidth:1 }
+        ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{size:11}}}}, scales:{ x:{ stacked:true, ticks:{ color:'#6f8a77', font:{size:10}, maxRotation:45}, grid:{display:false}}, y:{ stacked:true, ticks:{ color:'#6f8a77', stepSize:1}, grid:{ color:'rgba(31,45,37,.6)'}}} } });
+      } else if(card){ card.style.display='none'; }
     }
 
-    function renderMachines() {
-      const grid = document.getElementById('machines-grid');
-      const q = (document.getElementById('machine-search').value || '').toLowerCase();
-      grid.innerHTML = '';
-
-      globalData.machines.forEach(m => {
-        if (q && !m.id.toLowerCase().includes(q) && !m.model.toLowerCase().includes(q) && !m.distro.toLowerCase().includes(q)) return;
-
-        let badgeBg = 'bg-emerald-950 text-emerald-400 border-emerald-800';
-        if (m.status === 'Critical') badgeBg = 'bg-red-950 text-red-400 border-red-800';
-        else if (m.status === 'Degraded') badgeBg = 'bg-amber-950 text-amber-400 border-amber-800';
-
-        const card = 
-          '<div class="glass-card rounded-xl p-5 flex flex-col justify-between space-y-4 hover:border-legion-accent/40 transition">' +
-            '<div>' +
-              '<div class="flex items-start justify-between">' +
-                '<div>' +
-                  '<h3 class="text-white font-bold text-sm tracking-tight">' + (m.model || 'Unknown Legion') + '</h3>' +
-                  '<p class="text-[11px] font-mono text-legion-dim">' + m.id + '</p>' +
-                '</div>' +
-                '<span class="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-semibold border ' + badgeBg + '">' + m.status + '</span>' +
-              '</div>' +
-              '<div class="grid grid-cols-2 gap-2 mt-4 text-xs font-mono">' +
-                '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border">' +
-                  '<span class="text-legion-dim text-[10px] block">OS / KERNEL</span>' +
-                  '<span class="text-white truncate block text-[11px]" title="' + m.distro + '">' + (m.distro || 'Linux') + '</span>' +
-                '</div>' +
-                '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border">' +
-                  '<span class="text-legion-dim text-[10px] block">THERMALS</span>' +
-                  '<span class="text-emerald-400 block text-[11px]">' + (m.cpu_temp ? m.cpu_temp.toFixed(1) + '°C' : 'N/A') + ' (CPU)</span>' +
-                '</div>' +
-                '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border">' +
-                  '<span class="text-legion-dim text-[10px] block">FAN SPEED</span>' +
-                  '<span class="text-legion-cyan block text-[11px]">' + (m.fan_rpm ? m.fan_rpm + ' RPM' : 'Auto / 0') + '</span>' +
-                '</div>' +
-                '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border">' +
-                  '<span class="text-legion-dim text-[10px] block">BATTERY LIFE</span>' +
-                  '<span class="text-white block text-[11px]">' + (m.battery_life ? m.battery_life.toFixed(0) + '%' : '100%') + ' (' + m.battery_cycle + ' cyc)</span>' +
-                '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="border-t border-legion-border pt-3 flex items-center justify-between text-xs text-legion-dim font-mono">' +
-              '<span>Reports: <b class="text-white">' + m.report_count + '</b></span>' +
-              '<span>Last: ' + m.last_seen.substring(5, 16) + '</span>' +
-            '</div>' +
-          '</div>';
-        grid.innerHTML += card;
+    function renderFleet(){
+      const grid=document.getElementById('machines-grid');
+      const q=(document.getElementById('fleet-q').value||'').toLowerCase();
+      const st=document.getElementById('fleet-status').value;
+      const sort=document.getElementById('fleet-sort').value;
+      let list=[...(globalData.machines||[])];
+      if(q) list=list.filter(m=> (m.id+m.model+m.distro+m.kernel).toLowerCase().includes(q));
+      if(st!=='ALL') list=list.filter(m=>m.status===st);
+      if(sort==='reports') list.sort((a,b)=>b.report_count-a.report_count);
+      else if(sort==='temp') list.sort((a,b)=>(b.cpu_temp||0)-(a.cpu_temp||0));
+      else if(sort==='faults') list.sort((a,b)=>(b.fault_count+b.error_count)-(a.fault_count+a.error_count));
+      else list.sort((a,b)=> new Date(b.last_seen)-new Date(a.last_seen));
+      grid.innerHTML='';
+      list.forEach((m,i)=>{
+        let badge='bg-emerald-950 text-emerald-400 border-emerald-800'; if(m.status==='Critical') badge='bg-red-950 text-red-400 border-red-800'; else if(m.status==='Degraded') badge='bg-amber-950 text-amber-400 border-amber-800';
+        const border = m.status==='Critical'?'border-l-red-500': m.status==='Degraded'?'border-l-amber-500':'border-l-emerald-500';
+        const card=document.createElement('div');
+        card.className='glass-card rounded-xl p-4 flex flex-col gap-3 cursor-pointer hover:border-legion-accent/30 transition border-l-2 '+border;
+        card.onclick=()=>openDrawer(m.id);
+        card.innerHTML='<div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-white font-bold text-sm truncate" title="'+escapeHtml(m.model||'Unknown')+'">'+escapeHtml((m.model||'Unknown').slice(0,28))+'</div><div class="text-[11px] mono text-legion-dim truncate">'+escapeHtml(m.id)+'</div></div><span class="shrink-0 px-2 py-0.5 rounded text-[10px] mono uppercase font-semibold border '+badge+'">'+escapeHtml(m.status)+'</span></div>'
+          +'<div class="grid grid-cols-2 gap-2 text-[11px] mono">'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">OS / KERNEL</div><div class="text-white truncate">'+escapeHtml(m.distro||'—')+'</div><div class="text-legion-dim truncate">'+escapeHtml((m.kernel||'').slice(0,22))+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">THERMALS</div><div class="text-emerald-400">'+(m.cpu_temp?m.cpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">CPU</span> • '+(m.dgpu_temp?m.dgpu_temp.toFixed(1)+'°C':'—')+' <span class="text-legion-dim">dGPU</span></div><div class="text-legion-dim">'+(m.thermal_limit? 'limit '+m.thermal_limit+'°C':'')+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">FANS / PROFILE</div><div class="text-legion-cyan">'+(m.fan_details&&m.fan_details.length? m.fan_details.map(f=> (f.rpm!=null?f.rpm+' RPM':'—')).join(' • ') : (m.fan_rpm?m.fan_rpm+' RPM':'Auto'))+'</div><div class="text-white">'+escapeHtml(m.platform_profile||'—')+'</div></div>'
+          +'<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">BATTERY</div><div class="text-white">'+(m.battery_pct?m.battery_pct+'%':'—')+' <span class="text-legion-dim">'+(m.battery_life? '('+m.battery_life.toFixed(0)+'% health)':'')+'</span></div><div class="text-legion-dim">'+(m.battery_cycle?m.battery_cycle+' cycles':'')+' '+(m.charge_limit?'• lim '+m.charge_limit+'%':'')+'</div></div>'
+          +'</div>'
+          +'<canvas id="spark-'+i+'" width="280" height="28" class="w-full opacity-80"></canvas>'
+          +'<div class="flex items-center justify-between text-[11px] mono text-legion-dim border-t border-legion-border pt-2"><span>Reports <b class="text-white">'+m.report_count+'</b> • Faults <b class="'+(m.fault_count?'text-red-400':'text-white')+'">'+m.fault_count+'</b> • Errs <b class="'+(m.error_count?'text-red-400':'text-white')+'">'+m.error_count+'</b></span><span>'+relTime(m.last_seen)+' →</span></div>';
+        grid.appendChild(card);
+        setTimeout(()=> miniSpark(document.getElementById('spark-'+i), m.recent_temps||[], m.status==='Critical'?'#f87171':m.status==='Degraded'?'#fbbf24':'#46f08a'), 30);
       });
+      if(!list.length) grid.innerHTML='<div class="col-span-3 text-center py-10 text-legion-dim text-sm">No machines match filters.</div>';
+    }
 
-      if (!grid.innerHTML) {
-        grid.innerHTML = '<p class="text-legion-dim text-xs col-span-3 text-center py-10 font-mono">No machines matching criteria.</p>';
+    // Drawer
+    let drawerChart=null;
+    async function openDrawer(mid){
+      drawerMachineId=mid;
+      document.getElementById('drawer').classList.remove('hidden');
+      document.getElementById('drawer-title').textContent=mid;
+      document.getElementById('drawer-sub').textContent='Loading…';
+      try{
+        const r=await fetch('/api/machine/'+encodeURIComponent(mid));
+        if(!r.ok) throw new Error(r.status);
+        const d=await r.json();
+        document.getElementById('drawer-title').textContent=(d.device&&d.device.model)||d.model||mid;
+        document.getElementById('drawer-sub').textContent=(d.device&&d.device.machine_type?d.device.machine_type+' • ':'')+ (d.os&&d.os.distro?d.os.distro:'') + (d.os&&d.os.kernel?' • '+d.os.kernel:'');
+        window._drawerData=d;
+        drawerTab('sensors');
+      }catch(e){ document.getElementById('drawer-body').innerHTML='<div class="text-red-400 text-xs">Failed to load machine.</div>'; }
+    }
+    function closeDrawer(){ document.getElementById('drawer').classList.add('hidden'); if(drawerChart){ drawerChart.destroy(); drawerChart=null; } }
+    function drawerTab(tab){
+      document.querySelectorAll('[id^="dtab-"]').forEach(b=>{ b.classList.remove('bg-legion-border','text-white','border','border-legion-accent/30'); b.classList.add('text-legion-dim'); });
+      document.getElementById('dtab-'+tab).classList.add('bg-legion-border','text-white','border','border-legion-accent/30'); document.getElementById('dtab-'+tab).classList.remove('text-legion-dim');
+      const d=window._drawerData; if(!d) return;
+      const body=document.getElementById('drawer-body');
+      if(tab==='sensors'){
+        const s=d.sensors||{}, b=d.battery||{}, dev=d.device||{}, fans=d.fans||[];
+        body.innerHTML='<div class="grid grid-cols-2 gap-2 text-xs mono">'
+          +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD1', s.cpu_temp_1, '°C')+sensorRow('CCD2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
+          +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
+          +'</div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">NVMe / RAM</div><div class="text-legion-dim mono">SSDs: '+(Array.isArray(s.ssd_composite)? s.ssd_composite.map((v,i)=>'NVMe'+i+' '+Number(v).toFixed(1)+'°C').join(' • ') : '—')+'</div><div class="text-legion-dim mono">RAM: '+(Array.isArray(s.ram_temps)? s.ram_temps.join('°C, ')+'°C' : '—')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Fans</div>'+ (fans.length? fans.map(f=>'<div class="flex justify-between mono text-legion-dim">Fan '+(f.id??'?')+' <span class="text-white">'+(f.rpm!=null?f.rpm+' RPM':'—')+' → '+(f.target!=null?f.target+' tgt':'auto')+' ('+f.min_rpm+'–'+f.max_rpm+')</span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>') +'</div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Battery</div><div class="mono text-legion-dim">Capacity '+(b.capacity_pct??'—')+'% • Health '+(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—')+' • Cycles '+(b.cycles??'—')+' • Limit '+(b.charge_limit_pct??'—')+'%</div><div class="mono text-legion-dim">Status '+(b.status||'—')+' • Voltage '+(b.voltage_v!=null?b.voltage_v.toFixed(2)+'V':'—')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device</div><div class="mono text-legion-dim">'+escapeHtml(dev.cpu_model||'')+'</div><div class="mono text-legion-dim">'+escapeHtml(dev.gpu_model||'')+'</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' • BIOS '+escapeHtml(dev.bios_version||'')+' • EC '+escapeHtml(dev.ec_chip||'')+'</div></div>'
+          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Tuning</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' • Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
+      } else if(tab==='history'){
+        body.innerHTML='<div class="h-[220px]"><canvas id="drawer-history"></canvas></div><div class="text-[11px] mono text-legion-dim mt-2">Last '+(d.history||[]).length+' report points</div>';
+        setTimeout(()=>{
+          const ctx=document.getElementById('drawer-history')?.getContext('2d'); if(!ctx) return;
+          if(drawerChart) drawerChart.destroy();
+          const hist=d.history||[];
+          drawerChart=new Chart(ctx,{ type:'line', data:{ labels: hist.map(h=> new Date(h.ts).toLocaleTimeString()), datasets:[
+            { label:'CPU °C', data: hist.map(h=>h.cpu>0?h.cpu:null), borderColor:'#46f08a', backgroundColor:'rgba(70,240,138,.10)', tension:.3, fill:true, pointRadius:0, borderWidth:1.6 },
+            { label:'dGPU °C', data: hist.map(h=>h.dgpu>0?h.dgpu:null), borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,.07)', tension:.3, fill:true, pointRadius:0, borderWidth:1.6 }
+          ]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#b7ccb9', font:{family:'JetBrains Mono',size:10}}}}, scales:{ x:{ ticks:{ color:'#6f8a77', font:{size:9}, maxTicksLimit:8}, grid:{ color:'rgba(31,45,37,.5)'}}, y:{ min:20, max:100, ticks:{ color:'#6f8a77'}, grid:{ color:'rgba(31,45,37,.5)'}}} } });
+        },40);
+      } else if(tab==='checks'){
+        const checks=d.checks||[];
+        body.innerHTML= checks.length? checks.map(c=>'<div class="flex gap-2 text-xs p-2 rounded border '+(c.ok?'bg-emerald-950/30 border-emerald-900/50':'bg-red-950/30 border-red-900/50')+'"><span class="shrink-0 mt-0.5 '+(c.ok?'text-emerald-400':'text-red-400')+'">'+(c.ok?'✓':'✗')+'</span><div><div class="font-semibold '+(c.ok?'text-emerald-300':'text-red-300')+'">'+escapeHtml(c.name)+'</div><div class="text-legion-dim mono text-[11px]">'+escapeHtml(c.detail||'')+'</div></div></div>').join('') : '<div class="text-legion-dim text-xs">No self-checks in latest report.</div>';
+      } else if(tab==='faults'){
+        const fh=d.faults_hist||[];
+        body.innerHTML= fh.length? fh.slice(-20).reverse().map(f=>'<div class="p-2 rounded border border-legion-border bg-legion-cardAlt text-xs"><div class="flex items-center gap-2"><span class="px-1.5 py-0.5 rounded text-[10px] border '+(f.severity==='Critical'?'bg-red-950 text-red-400 border-red-800':f.severity==='Warning'?'bg-amber-950 text-amber-400 border-amber-800':'bg-blue-950 text-blue-400 border-blue-800')+'">'+escapeHtml(f.severity)+'</span><span class="text-white font-semibold">'+escapeHtml(f.id)+'</span><span class="ml-auto text-legion-dim mono text-[11px]">'+relTime(f.ts)+'</span></div><div class="text-legion-dim mono mt-1">'+escapeHtml(f.detail||'')+'</div><div class="text-legion-dim mono text-[11px]">Report #'+f.report_id+'</div></div>').join('') : '<div class="text-legion-dim text-xs">No faults recorded for this host.</div>';
+      } else if(tab==='reports'){
+        const reps=d.reports||[];
+        body.innerHTML= reps.slice().reverse().map(r=>'<div class="flex items-center justify-between p-2 rounded border border-legion-border bg-legion-cardAlt text-xs mono"><span>#'+r.id+' • '+relTime(r.ts)+' • Faults '+r.faults+'</span><button onclick="openJson('+r.id+')" class="px-2 py-1 rounded bg-legion-border text-white text-xs">View JSON</button></div>').join('') || '<div class="text-legion-dim text-xs">No reports.</div>';
       }
     }
-
-    function filterMachines() {
-      renderMachines();
+    function sensorRow(label, val, unit){
+      const ok = typeof val==='number' && isFinite(val) && val>-20 && val<200;
+      return '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">'+escapeHtml(label)+'</div><div class="'+(ok?'text-white':'text-legion-dim')+'">'+(ok? Number(val).toFixed(1)+unit : '—')+'</div></div>';
     }
 
-    function renderBugs() {
-      const tbody = document.getElementById('bugs-table-body');
-      const filter = document.getElementById('bug-status-filter').value;
-      tbody.innerHTML = '';
-
-      globalData.bugs.forEach(b => {
-        if (filter !== 'ALL' && b.status !== filter) return;
-
-        let sevBadge = 'bg-blue-950 text-blue-400 border-blue-800';
-        if (b.severity === 'Critical' || b.severity === 'Error') sevBadge = 'bg-red-950 text-red-400 border-red-800';
-        else if (b.severity === 'Warning') sevBadge = 'bg-amber-950 text-amber-400 border-amber-800';
-
-        let stBadge = 'bg-emerald-950 text-emerald-400 border-emerald-800';
-        if (b.status === 'NEW') stBadge = 'bg-purple-950 text-purple-400 border-purple-800';
-        else if (b.status === 'TRIAGED') stBadge = 'bg-amber-950 text-amber-400 border-amber-800';
-
-        const row = 
-          '<tr class="hover:bg-legion-cardAlt/40 transition">' +
-            '<td class="px-4 py-3 text-white font-semibold flex flex-col">' +
-              '<span>' + b.title + '</span>' +
-              '<span class="text-[10px] text-legion-dim">' + b.detail + '</span>' +
-            '</td>' +
-            '<td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] border font-semibold ' + sevBadge + '">' + b.severity + '</span></td>' +
-            '<td class="px-4 py-3 text-legion-cyan">' + b.module + '</td>' +
-            '<td class="px-4 py-3 font-bold text-white">' + b.count + '</td>' +
-            '<td class="px-4 py-3 text-legion-dim">' + b.affected_hosts + ' host(s)</td>' +
-            '<td class="px-4 py-3 text-legion-dim text-[11px]">' + b.last_seen + '</td>' +
-            '<td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] border font-semibold ' + stBadge + '">' + b.status + '</span></td>' +
-            '<td class="px-4 py-3 text-right">' +
-              '<select onchange="updateBugStatus(\'' + b.id + '\', this.value)" class="bg-legion-card border border-legion-border rounded px-2 py-1 text-[10.5px] text-white focus:outline-none">' +
-                '<option value="NEW" ' + (b.status === 'NEW' ? 'selected' : '') + '>NEW</option>' +
-                '<option value="TRIAGED" ' + (b.status === 'TRIAGED' ? 'selected' : '') + '>TRIAGED</option>' +
-                '<option value="RESOLVED" ' + (b.status === 'RESOLVED' ? 'selected' : '') + '>RESOLVED</option>' +
-              '</select>' +
-            '</td>' +
-          '</tr>';
-        tbody.innerHTML += row;
+    function renderBugs(){
+      const tbody=document.getElementById('bugs-body');
+      const q=(document.getElementById('bug-q').value||'').toLowerCase();
+      const sevF=document.getElementById('bug-sev').value;
+      const stF=document.getElementById('bug-status').value;
+      let list=[...(globalData.bugs||[])];
+      if(q) list=list.filter(b=> (b.title+b.module+b.detail+(b.last_error||'')).toLowerCase().includes(q));
+      if(sevF!=='ALL') list=list.filter(b=>b.severity===sevF);
+      if(stF!=='ALL') list=list.filter(b=>b.status===stF);
+      // counts pills
+      const counts={NEW:0,TRIAGED:0,RESOLVED:0}; (globalData.bugs||[]).forEach(b=>{ if(counts[b.status]!=null) counts[b.status]++; });
+      document.getElementById('bug-counts').innerHTML='<span class="px-2 py-1 rounded bg-purple-950 text-purple-300 border border-purple-800">NEW '+counts.NEW+'</span><span class="px-2 py-1 rounded bg-amber-950 text-amber-300 border border-amber-800">TRIAGED '+counts.TRIAGED+'</span><span class="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">RESOLVED '+counts.RESOLVED+'</span><span class="ml-auto text-legion-dim">'+list.length+' shown / '+(globalData.bugs||[]).length+' total</span>';
+      tbody.innerHTML='';
+      list.forEach(b=>{
+        let sevCls='bg-blue-950 text-blue-400 border-blue-800'; if(b.severity==='Critical'||b.severity==='Error') sevCls='bg-red-950 text-red-400 border-red-800'; else if(b.severity==='Warning') sevCls='bg-amber-950 text-amber-400 border-amber-800';
+        let stCls='bg-emerald-950 text-emerald-400 border-emerald-800'; if(b.status==='NEW') stCls='bg-purple-950 text-purple-400 border-purple-800'; else if(b.status==='TRIAGED') stCls='bg-amber-950 text-amber-400 border-amber-800';
+        const left = b.severity==='Critical'||b.severity==='Error'?'border-l-red-500': b.severity==='Warning'?'border-l-amber-500':'border-l-blue-500';
+        const tr=document.createElement('tr'); tr.className='hover:bg-legion-cardAlt/40 border-l-2 '+left;
+        tr.innerHTML='<td class="px-2 py-2 text-center"><button onclick="toggleBug(this)" class="text-legion-dim hover:text-white">▸</button></td>'
+          +'<td class="px-3 py-2"><div class="text-white font-semibold">'+escapeHtml(b.title)+'</div><div class="text-[11px] text-legion-dim max-w-[260px] truncate" title="'+escapeHtml(b.detail)+'">'+escapeHtml(b.detail)+'</div></td>'
+          +'<td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-[10px] border font-semibold '+sevCls+'">'+escapeHtml(b.severity)+'</span></td>'
+          +'<td class="px-3 py-2 text-legion-cyan">'+escapeHtml(b.module)+'</td>'
+          +'<td class="px-3 py-2 font-bold text-white">'+b.count+'</td>'
+          +'<td class="px-3 py-2 text-legion-dim">'+b.affected_hosts+' host(s)</td>'
+          +'<td class="px-3 py-2 text-legion-dim text-[11px]">'+relTime(b.last_seen)+'</td>'
+          +'<td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-[10px] border font-semibold '+stCls+'">'+escapeHtml(b.status)+'</span></td>'
+          +'<td class="px-3 py-2 text-right"><select onchange="updateBugStatus(\''+escapeHtml(b.id)+'\', this.value, this.closest(\'tr\'))" class="bg-legion-card border border-legion-border rounded px-2 py-1 text-[11px] text-white focus:outline-none"><option value="NEW" '+(b.status==='NEW'?'selected':'')+'>NEW</option><option value="TRIAGED" '+(b.status==='TRIAGED'?'selected':'')+'>TRIAGED</option><option value="RESOLVED" '+(b.status==='RESOLVED'?'selected':'')+'>RESOLVED</option></select></td>';
+        tbody.appendChild(tr);
+        const detail=document.createElement('tr'); detail.className='hidden bg-black/20'; detail.innerHTML='<td colspan="9" class="px-4 py-3 text-xs">'
+          +'<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">'
+          +'<div><div class="text-white font-semibold mb-1">Details</div><div class="text-legion-dim mono">'+escapeHtml(b.detail)+'</div>'+(b.last_error?'<div class="mt-2"><div class="text-white font-semibold mb-1">Last Error</div><pre class="bg-black/40 border border-legion-border rounded p-2 text-[11px] mono text-red-300 whitespace-pre-wrap">'+escapeHtml(b.last_error)+'</pre></div>':'')+'</div>'
+          +'<div><div class="text-white font-semibold mb-1">Affected Hosts</div><div class="flex flex-wrap gap-1">'+(b.machines||[]).map(m=>'<span class="px-2 py-0.5 rounded bg-legion-card border border-legion-border text-[11px] mono">'+escapeHtml(m.slice(0,12))+'</span>').join('')+'</div>'
+          +'<div class="mt-3"><div class="text-white font-semibold mb-1">Triage Notes</div><textarea data-bug-id="'+escapeHtml(b.id)+'" rows="3" placeholder="Add investigator notes..." class="w-full bg-legion-card border border-legion-border rounded p-2 text-xs mono text-white placeholder-legion-dim focus:outline-none focus:border-legion-accent">'+escapeHtml(b.notes||'')+'</textarea><div class="flex justify-end mt-2"><button onclick="saveBugNotes(this)" class="px-3 py-1 rounded bg-legion-accent text-black text-xs font-semibold">Save Notes</button></div></div>'
+          +'</div></div></td>';
+        tbody.appendChild(detail);
       });
-
-      if (!tbody.innerHTML) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-legion-dim">No bugs found.</td></tr>';
+      if(!list.length) tbody.innerHTML='<tr><td colspan="9" class="text-center py-8 text-legion-dim">No bugs match filters.</td></tr>';
+    }
+    function toggleBug(btn){
+      const tr=btn.closest('tr'); const detail=tr.nextElementSibling;
+      const open=detail.classList.contains('hidden');
+      detail.classList.toggle('hidden'); btn.textContent=open?'▾':'▸';
+    }
+    async function updateBugStatus(bugId, status, tr){
+      // if called from select, also grab notes from detail row textarea
+      let notes='';
+      if(tr){
+        const detail=tr.nextElementSibling; const ta=detail?.querySelector('textarea[data-bug-id]');
+        if(ta) notes=ta.value;
       }
+      try{
+        const r=await fetch('/api/bug/status',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bug_id: bugId, status, notes }) });
+        if(!r.ok) throw new Error(r.status);
+        toast('Bug '+bugId+' → '+status,'ok'); fetchData();
+      }catch(e){ toast('Failed to update bug','err'); }
+    }
+    async function saveBugNotes(btn){
+      const ta=btn.closest('td')?.querySelector('textarea') || btn.parentElement.previousElementSibling;
+      // simpler: find textarea in same detail row
+      const detailRow=btn.closest('tr');
+      const ta2=detailRow.querySelector('textarea');
+      const bugId=ta2.getAttribute('data-bug-id');
+      const curStatus=(globalData.bugs||[]).find(b=>b.id===bugId)?.status||'NEW';
+      try{
+        const r=await fetch('/api/bug/status',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bug_id: bugId, status: curStatus, notes: ta2.value }) });
+        if(!r.ok) throw new Error(r.status);
+        toast('Notes saved','ok'); fetchData();
+      }catch(e){ toast('Failed to save notes','err'); }
     }
 
-    async function updateBugStatus(bugID, newStatus) {
-      try {
-        await fetch('/api/bug/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bug_id: bugID, status: newStatus })
-        });
-        fetchData();
-      } catch (err) {
-        console.error('Update status failed:', err);
-      }
-    }
-
-    function renderReports() {
-      const tbody = document.getElementById('reports-table-body');
-      tbody.innerHTML = '';
-
-      globalData.recent_reports.forEach(r => {
-        const fcBadge = r.faults > 0 ? '<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800">' + r.faults + '</span>' : '<span class="text-legion-dim">0</span>';
-        const row = 
-          '<tr class="hover:bg-legion-cardAlt/40 transition">' +
-            '<td class="px-4 py-2.5 font-bold text-white">#' + r.id + '</td>' +
-            '<td class="px-4 py-2.5 text-legion-dim">' + r.ts + '</td>' +
-            '<td class="px-4 py-2.5 text-legion-cyan truncate max-w-[120px]">' + (r.machine_id ? r.machine_id.substring(0, 8) + '…' : '—') + '</td>' +
-            '<td class="px-4 py-2.5 text-white">' + (r.model || '?') + '</td>' +
-            '<td class="px-4 py-2.5 text-legion-dim">' + (r.distro || '?') + '</td>' +
-            '<td class="px-4 py-2.5 text-legion-dim">' + (r.app_version || '0.1.0') + '</td>' +
-            '<td class="px-4 py-2.5">' + fcBadge + '</td>' +
-            '<td class="px-4 py-2.5 text-right">' +
-              '<button onclick="inspectReport(' + r.id + ')" class="px-2.5 py-1 bg-legion-cardAlt hover:bg-legion-border border border-legion-border rounded text-[11px] text-white font-mono transition">View JSON</button>' +
-            '</td>' +
-          '</tr>';
-        tbody.innerHTML += row;
+    function renderReports(){
+      const tbody=document.getElementById('reports-body');
+      const q=(document.getElementById('reports-q').value||'').toLowerCase();
+      const f=document.getElementById('reports-fault').value;
+      let list=[...(globalData.recent_reports||[])];
+      if(q) list=list.filter(r=> (r.model+r.distro+r.machine_id).toLowerCase().includes(q));
+      if(f==='FAULT') list=list.filter(r=>r.faults>0);
+      if(f==='CLEAN') list=list.filter(r=>r.faults===0);
+      const shown=list.slice(0, reportsLimit);
+      tbody.innerHTML='';
+      shown.forEach(r=>{
+        const badge=r.faults>0? '<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800">'+r.faults+'</span>' : '<span class="text-legion-dim">0</span>';
+        const tr=document.createElement('tr'); tr.className='hover:bg-legion-cardAlt/40';
+        tr.innerHTML='<td class="px-3 py-2 font-bold text-white">#'+r.id+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.ts)+' <span class="text-[11px]">('+relTime(r.ts)+')</span></td><td class="px-3 py-2 text-legion-cyan truncate max-w-[110px]" title="'+escapeHtml(r.machine_id||'')+'">'+escapeHtml((r.machine_id||'').slice(0,8)||'—')+'</td><td class="px-3 py-2 text-white">'+escapeHtml(r.model||'?')+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.distro||'?')+'</td><td class="px-3 py-2 text-legion-dim">'+escapeHtml(r.app_version||'')+'</td><td class="px-3 py-2">'+badge+'</td><td class="px-3 py-2 text-right"><button onclick="openJson('+r.id+')" class="px-2.5 py-1 bg-legion-cardAlt hover:bg-legion-border border border-legion-border rounded text-[11px] text-white mono">View JSON</button></td>';
+        tbody.appendChild(tr);
       });
+      const more=document.getElementById('reports-more');
+      if(list.length>reportsLimit) more.classList.remove('hidden'); else more.classList.add('hidden');
+      if(!shown.length) tbody.innerHTML='<tr><td colspan="8" class="text-center py-8 text-legion-dim">No reports match.</td></tr>';
     }
-
-    function renderPrivacy() {
-      document.getElementById('privacy-de').innerHTML = 
-        '<h2 class="text-white text-base font-bold mb-3">Datenschutzerklärung — Telemetrie</h2>' +
-        '<p class="text-legion-dim mb-2">Die Telemetrie-Funktion von Legion Control ist standardmäßig <strong>vollständig deaktiviert (Opt-in)</strong>.</p>' +
-        '<ul class="list-disc pl-4 text-legion-text space-y-1 mb-4">' +
-          '<li><strong>Gerät:</strong> Modellbezeichnung, Maschinentyp, BIOS-Version, CPU-/GPU-Modell, EC-Chip</li>' +
-          '<li><strong>Betriebssystem:</strong> Distribution und Kernel-Version</li>' +
-          '<li><strong>Sensoren:</strong> Temperaturen, Lüfter-Drehzahlen, Akkuzustand (ohne Seriennummer)</li>' +
-          '<li><strong>Konfiguration:</strong> Thermallimit, Curve Optimizer Offsets, Energieschema</li>' +
-          '<li><strong>Fehlerberichte:</strong> Redigierte Log-Zähler & Fehlersignaturen</li>' +
-        '</ul>' +
-        '<p class="text-legion-accent font-semibold">Keine Erfassung von Hostname, Benutzername, IP-Adresse oder persönlichen Daten.</p>';
-
-      document.getElementById('privacy-en').innerHTML = 
-        '<h2 class="text-white text-base font-bold mb-3">Privacy & GDPR Statement</h2>' +
-        '<p class="text-legion-dim mb-2">Telemetry in Legion Control is <strong>strictly opt-in (disabled by default)</strong>.</p>' +
-        '<ul class="list-disc pl-4 text-legion-text space-y-1 mb-4">' +
-          '<li><strong>Hardware:</strong> Device SKU, CPU/GPU, EC Chip, BIOS Revision</li>' +
-          '<li><strong>OS:</strong> Distribution and Linux kernel release</li>' +
-          '<li><strong>Sensors:</strong> Temperatures, fan RPMs, battery health % (no serial)</li>' +
-          '<li><strong>Tuning:</strong> Thermal target, Curve Optimizer offset tables</li>' +
-          '<li><strong>Anomalies:</strong> Redacted module log counts & diagnostic self-tests</li>' +
-        '</ul>' +
-        '<p class="text-legion-accent font-semibold">IP addresses and hostnames are discarded upon ingress and never written to disk.</p>';
-    }
-
-    async function inspectReport(id) {
-      document.getElementById('modal-title').textContent = 'Report #' + id + ' (Full Payload)';
-      document.getElementById('modal-content').textContent = 'Loading payload...';
+    async function openJson(id){
+      document.getElementById('modal-title').textContent='Report #'+id;
+      document.getElementById('modal-content').textContent='Loading…';
       document.getElementById('modal-json').classList.remove('hidden');
-
-      try {
-        const res = await fetch('/reports/' + id);
-        const data = await res.json();
-        document.getElementById('modal-content').textContent = JSON.stringify(data, null, 2);
-      } catch (err) {
-        document.getElementById('modal-content').textContent = 'Failed to load report payload.';
-      }
+      try{
+        const r=await fetch('/reports/'+id); const j=await r.json();
+        const pretty=JSON.stringify(j,null,2);
+        // simple highlight: escape then color keys
+        const esc=escapeHtml(pretty);
+        const hl=esc.replace(/"([^"]+)":/g,'<span style="color:#38bdf8">"$1"</span>:')
+                    .replace(/: "([^"]*)"/g,': <span style="color:#86efac">"$1"</span>')
+                    .replace(/: (\d+\.?\d*)/g,': <span style="color:#fbbf24">$1</span>');
+        document.getElementById('modal-content').innerHTML=hl;
+        window._modalRaw=pretty;
+      }catch(e){ document.getElementById('modal-content').textContent='Failed to load.'; }
     }
+    function closeModal(){ document.getElementById('modal-json').classList.add('hidden'); }
+    function copyModalContent(){ const t=window._modalRaw||document.getElementById('modal-content').textContent; navigator.clipboard.writeText(t); toast('JSON copied','ok'); }
 
-    function closeModal() {
-      document.getElementById('modal-json').classList.add('hidden');
-    }
-
-    function copyModalContent() {
-      const txt = document.getElementById('modal-content').textContent;
-      navigator.clipboard.writeText(txt);
-      alert('JSON payload copied to clipboard!');
-    }
-
-    fetchData();
-    setInterval(fetchData, 10000);
+    // init
+    fetchData(); startRefreshLoop();
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) fetchData(); });
   </script>
 </body>
 </html>
