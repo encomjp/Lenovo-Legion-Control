@@ -243,26 +243,28 @@ impl DiagnosticsConfig {
     pub fn ensure_machine_id(&mut self) {
         if self.machine_id.is_empty() {
             log::debug!("config::DiagnosticsConfig::ensure_machine_id — no machine_id present, generating one");
-            // 16 bytes from /dev/urandom, formatted as canonical UUID v4.
+            use std::io::Read;
             let mut b = [0u8; 16];
-            match std::fs::read("/dev/urandom") {
-                Ok(raw) => {
-                    for (i, byte) in raw.iter().take(16).enumerate() {
-                        b[i] = *byte;
-                    }
-                }
-                Err(e) => {
-                    log::warn!(
-                        "config::DiagnosticsConfig::ensure_machine_id — /dev/urandom read failed: {e} (falling back to zeroed entropy)"
-                    );
-                }
+            if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+                let _ = f.read_exact(&mut b);
+            } else {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                let pid = std::process::id() as u128;
+                let val = now ^ (pid << 64);
+                b = val.to_be_bytes();
             }
-            b[6] = (b[6] & 0x0F) | 0x40;
-            b[8] = (b[8] & 0x3F) | 0x80;
+            b[6] = (b[6] & 0x0f) | 0x40;
+            b[8] = (b[8] & 0x3f) | 0x80;
             self.machine_id = format!(
                 "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-                b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+                b[0], b[1], b[2], b[3],
+                b[4], b[5],
+                b[6], b[7],
+                b[8], b[9],
+                b[10], b[11], b[12], b[13], b[14], b[15]
             );
             log::info!(
                 "config::DiagnosticsConfig::ensure_machine_id — generated new machine_id {}",

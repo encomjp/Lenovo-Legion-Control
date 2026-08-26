@@ -367,7 +367,13 @@ pub fn collect() -> DiagnosticsReport {
         s.ssd_composite.len(),
         s.ram_temps.len()
     );
-    let cfg = config::get();
+    let app_cfg = config::get();
+    let mut machine_id = app_cfg.diagnostics.machine_id.clone();
+    if machine_id.is_empty() {
+        let mut dc = app_cfg.diagnostics.clone();
+        dc.ensure_machine_id();
+        machine_id = dc.machine_id;
+    }
 
     let battery_summary = BatterySummary {
         capacity_pct: battery::capacity(),
@@ -398,7 +404,7 @@ pub fn collect() -> DiagnosticsReport {
     log::debug!("diag fans: {} channel(s)", fan_list.len());
 
     let thermal_digest = ThermalDigest {
-        config: cfg.thermal.clone(),
+        config: app_cfg.thermal.clone(),
         cur_max_freq: thermal::read_cur_max(),
     };
     log::debug!(
@@ -448,7 +454,7 @@ pub fn collect() -> DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
         generated_at,
         app_version: env!("CARGO_PKG_VERSION"),
-        machine_id: cfg.diagnostics.machine_id.clone(),
+        machine_id,
         device: device::detect(),
         os: read_os_release(),
         sensors: s,
@@ -461,9 +467,9 @@ pub fn collect() -> DiagnosticsReport {
         },
         curve_optimizer: undervolt::status(),
         settings: SettingsDigest {
-            lighting_mode: cfg.lighting_mode.clone(),
-            keyboard_layout: cfg.keyboard_layout.clone(),
-            restore_on_launch: cfg.restore_on_launch,
+            lighting_mode: app_cfg.lighting_mode.clone(),
+            keyboard_layout: app_cfg.keyboard_layout.clone(),
+            restore_on_launch: app_cfg.restore_on_launch,
         },
         log_digest: digest,
         faults,
@@ -524,7 +530,7 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
     let mut cpu_vendor = String::new();
     let mut microcode = String::new();
     let mut logical_threads = 0u32;
-    let mut physical_cores = 0u32;
+    let physical_cores;
     let mut seen_core_ids = std::collections::HashSet::new();
 
     if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
