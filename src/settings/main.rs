@@ -1196,19 +1196,19 @@ fn show_welcome_if_needed(
              Not affiliated with Lenovo. Use at your own risk.\n\n\
              Choose optional components now, or change them later under About.\n\n\
              ── Alpha telemetry ──\n\
-             Share ONE anonymized report occasionally (hardware model, distro,\n\
-             sensors, fan/battery stats, self-check results)?\n\
+             ON by default: one anonymized report per minute (hardware model, distro,\n\
+             sensors, fan/battery stats, self-check results).\n\
              Never: hostname · username · serials · MACs · IPs · key colors · custom profile names.\n\
-             Full details under Setup → Alpha diagnostics.",
+             You can opt out any time under Setup → Alpha diagnostics.",
         ),
     );
     dialog.add_response("ok", "Not now");
     dialog.add_response("donate", "Donate");
     dialog.add_response("issues", "Report an issue");
     dialog.add_response("setup", "First-time setup");
-    dialog.add_response("share", "Share ✓");
+    dialog.add_response("optout", "Opt out");
     dialog.set_response_appearance("donate", adw::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("share", adw::ResponseAppearance::Suggested);
+    dialog.set_response_appearance("optout", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("setup"));
     dialog.set_close_response("ok");
     let stack = stack.clone();
@@ -1218,16 +1218,13 @@ fn show_welcome_if_needed(
     dialog.connect_response(None, move |_, response| {
         legion_core::config::mark_welcome_seen();
         match response {
-            "share" => {
-                legion_core::config::update(|c| c.diagnostics.enabled = true);
-                // The Setup-page diagnostics widgets are built once at
-                // startup, so writing config alone would leave the switch
-                // OFF until the next launch — flip the live controls too.
-                // set_active runs the normal debounced persist path (the
-                // extra write is an idempotent no-op).
-                consent.set(true);
+            "optout" => {
+                legion_core::config::update(|c| c.diagnostics.enabled = false);
+                // Mirror the opt-out to the live Setup-page widgets (they are
+                // built once at startup), so the switch shows OFF immediately.
+                consent.set(false);
                 if let Some(row) = share_switch.as_ref() {
-                    row.set_active(true);
+                    row.set_active(false);
                 }
             }
             "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
@@ -1517,55 +1514,32 @@ impl SetupCtx {
         let dialog = setup_step_dialog(
             SetupStep::Telemetry,
             "Anonymous diagnostics",
-            "Share ONE anonymized report occasionally?\n\n\
+            "ON by default: one anonymized report per minute.\n\n\
              Included: hardware model, distro/kernel, sensors,\n\
              fan/battery stats, self-check results.\n\
              Never: hostname · username · serials · MACs · IPs · key colors.\n\n\
-             Off by default — sending happens only on demand or schedule.",
-            [("enable", "Enable"), ("skip", "Skip")],
-            "enable",
+             Turn it off now to opt out, or later under Setup → Alpha diagnostics.",
+            [("keep", "Keep on"), ("optout", "Opt out")],
+            "keep",
         );
         let ctx = self.clone();
         self.present(dialog, move |response| match response {
-            "enable" => {
-                ctx.enable_telemetry();
-                ctx.telemetry_enabled_step();
-                None // confirmation dialog chains into Done itself
+            "optout" => {
+                ctx.disable_telemetry();
+                Some(SetupStep::Done)
             }
             _ => Some(SetupStep::Done),
         });
     }
 
-    /// Flip every telemetry surface at once: persisted config, the shared
-    /// consent cell gating Send-now, and the live Setup-page switch
-    /// (set_active runs the normal debounced persist path — the extra write
-    /// is an idempotent no-op).
-    fn enable_telemetry(&self) {
-        legion_core::config::update(|c| c.diagnostics.enabled = true);
-        self.consent.set(true);
+    /// Flip every telemetry surface off at once: persisted config, the
+    /// shared consent cell gating Send-now, and the live Setup-page switch.
+    fn disable_telemetry(&self) {
+        legion_core::config::update(|c| c.diagnostics.enabled = false);
+        self.consent.set(false);
         if let Some(row) = self.share_switch.as_ref() {
-            row.set_active(true);
+            row.set_active(false);
         }
-    }
-
-    /// Confirmation half of the telemetry step. The anonymous machine id is
-    /// minted lazily on first send, so it is shown only when already there.
-    fn telemetry_enabled_step(&self) {
-        let machine_id = legion_core::config::get().diagnostics.machine_id;
-        let id_note = if machine_id.is_empty() {
-            String::new()
-        } else {
-            format!("\n\nYour anonymous ID: {machine_id}")
-        };
-        let body = format!("✓ Anonymous diagnostics enabled.{id_note}");
-        let dialog = setup_step_dialog(
-            SetupStep::Telemetry,
-            "Anonymous diagnostics",
-            &body,
-            [("continue", "Continue")],
-            "continue",
-        );
-        self.present(dialog, |_| Some(SetupStep::Done));
     }
 
     /// Step 5 — farewell. Close returns to the main view; the secondary
@@ -5366,11 +5340,12 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     group
 }
 
-/// Alpha diagnostics opt-in — privacy disclosure, consent switch, self-check
-/// runner, and on-demand send. All of it works without the daemon running.
+/// Alpha diagnostics (opt-out) — privacy disclosure, telemetry switch,
+/// self-check runner, and on-demand send. All of it works without the
+/// daemon running.
 ///
 /// Returns live handles alongside the group: a `Cell<bool>` mirroring the
-/// consent switch (shared with the welcome dialog so "Share ✓" can flip it)
+/// telemetry switch (shared with the welcome dialog so "Opt out" can flip it)
 /// and the switch itself.
 fn build_diagnostics_section(
     toast_overlay: &adw::ToastOverlay,
@@ -5385,23 +5360,23 @@ fn build_diagnostics_section(
     let disclosure = adw::ActionRow::builder()
         .activatable(false)
         .subtitle(
-            "Alpha program: with your consent, one anonymized JSON report is sent per click/schedule — \
+            "Alpha program: one anonymized JSON report is sent per minute — \
              hardware model, distro/kernel, sensor readings, fan states, battery health stats, thermal & \
              Curve Optimizer settings, a settings digest, a log summary (warn/error counts + last error, home paths redacted), and self-check results. \
              NEVER included: hostname, username, serials, MACs, IPs, per-key colors, custom profile names. \
-             Off by default.",
+             ON by default — you can opt out here.",
         )
         .build();
     group.add(&disclosure);
 
     let share_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
-        .subtitle("Off by default · sends only on demand or schedule")
+        .subtitle("On by default · one report per minute · turn off to opt out")
         .active(legion_core::config::get().diagnostics.enabled)
         .build();
     tip(
         &share_row,
-        "Consent switch — nothing is collected or sent while this is off · Send now requires this to be ON",
+        "Opt-out switch — telemetry is on by default · turn off to stop automatic sending · Send now requires this to be ON",
     );
     group.add(&share_row);
 

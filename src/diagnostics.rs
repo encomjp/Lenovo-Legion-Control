@@ -1,4 +1,4 @@
-//! Anonymous diagnostics dump (alpha) + opt-in transport.
+//! Anonymous diagnostics dump (alpha) + opt-out transport.
 //!
 //! PRIVACY CONTRACT — enforced by the unit test in this file:
 //! The report is built from a field whitelist; nothing identifying is ever
@@ -1112,9 +1112,10 @@ fn sweep_older_than(dir: &Path, cutoff: SystemTime) -> usize {
     removed
 }
 
-/// Opt-in state for diagnostics collection. GUI/background callers must
-/// check this before sending anything autonomously; explicit sends go
-/// through [`collect_and_send`], which treats the call itself as consent.
+/// Opt-out state for diagnostics collection: enabled by default, `false`
+/// once the user turns it off. GUI/background callers check this before
+/// sending anything autonomously; explicit sends go through
+/// [`collect_and_send`], which treats the call itself as consent.
 pub fn is_opted_in() -> bool {
     config::get().diagnostics.enabled
 }
@@ -1126,9 +1127,9 @@ pub fn is_opted_in() -> bool {
 ///
 /// Calling this function IS the consent. It deliberately does **not** gate
 /// on [`is_opted_in`]: an explicit user action (button click, `legion-cli
-/// diagnose send`) constitutes opt-in for that single send. Callers own the
-/// consent decision — use [`is_opted_in`] only to decide whether automatic
-/// or background sending may happen at all.
+/// diagnose send`) constitutes a send regardless of the opt-out state.
+/// Callers own the consent decision — use [`is_opted_in`] only to decide
+/// whether automatic or background sending may happen at all.
 /// Process-level dedup: millis of the last send attempt. 0 = never sent.
 static LAST_SEND_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 

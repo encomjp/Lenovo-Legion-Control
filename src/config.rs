@@ -211,11 +211,13 @@ pub struct AppConfig {
     pub diagnostics: DiagnosticsConfig,
 }
 
-/// Alpha telemetry settings. Nothing is collected or sent unless `enabled`
-/// is explicitly turned on by the user.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Alpha telemetry settings. Enabled by default (opt-out): one anonymized
+/// report is sent on schedule unless the user turns `enabled` off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsConfig {
-    #[serde(default)]
+    /// Telemetry is ON by default; set `false` to opt out. A user-facing
+    /// warning offers opt-out wherever the setting is shown.
+    #[serde(default = "default_diagnostics_enabled")]
     pub enabled: bool,
     /// Empty string = use the built-in default collector URL.
     #[serde(default)]
@@ -228,7 +230,7 @@ pub struct DiagnosticsConfig {
     /// RFC3339 timestamp of the last successful send (informational).
     #[serde(default)]
     pub last_sent: Option<String>,
-    /// Pseudonymous machine ID (UUID v4) generated at first opt-in. Lets
+    /// Pseudonymous machine ID (UUID v4) generated on first send. Lets
     /// the operator correlate reports from the same machine over time.
     #[serde(default)]
     pub machine_id: String,
@@ -237,9 +239,23 @@ pub struct DiagnosticsConfig {
     pub auto_period_hours: u32,
 }
 
+impl Default for DiagnosticsConfig {
+    /// Opt-out default: telemetry starts enabled at 60 s cadence.
+    fn default() -> Self {
+        Self {
+            enabled: default_diagnostics_enabled(),
+            endpoint: String::new(),
+            auto_interval_secs: default_auto_interval_secs(),
+            last_sent: None,
+            machine_id: String::new(),
+            auto_period_hours: 0,
+        }
+    }
+}
+
 impl DiagnosticsConfig {
-    /// Generate a machine_id if one doesn't exist yet. Called when the user
-    /// opts in so the ID is stable from the first send onward.
+    /// Generate a machine_id if one doesn't exist yet. Called on the first
+    /// send so the ID is stable from the first report onward.
     pub fn ensure_machine_id(&mut self) {
         if self.machine_id.is_empty() {
             log::debug!("config::DiagnosticsConfig::ensure_machine_id — no machine_id present, generating one");
@@ -288,6 +304,11 @@ fn default_charge_limit() -> u32 {
 
 fn default_auto_interval_secs() -> u32 {
     60
+}
+
+/// Opt-out default: telemetry is enabled unless the user disables it.
+fn default_diagnostics_enabled() -> bool {
+    true
 }
 fn default_keyboard_layout() -> String {
     "de".into()
@@ -1049,6 +1070,34 @@ mod tests {
             write_disk(&cfg);
             let loaded = load_from_disk();
             assert_eq!(loaded.diagnostics.auto_interval_secs, 30);
+        });
+    }
+
+    /// Opt-out contract: telemetry must default to ENABLED at the 60 s
+    /// cadence, and an explicit opt-out (enabled:false) must survive a
+    /// round-trip. New installs report by default; users turn it off.
+    #[test]
+    fn diagnostics_defaults_to_enabled_opt_out() {
+        let d = DiagnosticsConfig::default();
+        assert!(d.enabled, "telemetry should default to enabled (opt-out)");
+        assert_eq!(d.auto_interval_secs, default_auto_interval_secs());
+        with_isolated_config_dir(|_| {
+            // A config written from the default round-trips to enabled:true.
+            write_disk(&AppConfig::default());
+            let loaded = load_from_disk();
+            assert!(loaded.diagnostics.enabled);
+            assert_eq!(
+                loaded.diagnostics.auto_interval_secs,
+                default_auto_interval_secs()
+            );
+        });
+        with_isolated_config_dir(|_| {
+            // An explicit opt-out persists and is honored on reload.
+            let mut cfg = AppConfig::default();
+            cfg.diagnostics.enabled = false;
+            write_disk(&cfg);
+            let loaded = load_from_disk();
+            assert!(!loaded.diagnostics.enabled, "opt-out must be preserved");
         });
     }
 

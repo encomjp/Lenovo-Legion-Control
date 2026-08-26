@@ -364,9 +364,8 @@ fn main() {
     }
 
     // Telemetry push scheduler: gzipped diagnostics push every
-    // auto_interval_secs (default 60 s) while the user has opted in.
-    // Off by default — nothing leaves the machine until Settings →
-    // "Share anonymous diagnostics" is switched on. NAT-friendly:
+    // auto_interval_secs (default 60 s) while telemetry is enabled
+    // (on by default; the user can opt out in Settings). NAT-friendly:
     // outbound HTTPS only, no inbound reachability required.
     {
         let shutdown_tel = shutdown.clone();
