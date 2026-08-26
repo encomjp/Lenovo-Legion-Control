@@ -4,6 +4,8 @@
 
 [![License: GPL-2.0-only](https://img.shields.io/badge/license-GPL--2.0--only-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) [![Rust 1.87+](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](https://www.rust-lang.org/)
 
+<p align="center"><img src="docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="320"></p>
+
 Linux control software for Lenovo Legion laptops: a GTK4/libadwaita app, CLI, privileged hardware daemon, and optional KDE Plasma 6 widget.
 
 [Install](docs/INSTALLATION.md) · [Usage](docs/USAGE.md) · [Hardware & HID](docs/HARDWARE-AND-HID.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Report an issue](https://github.com/encomjp/lenovo-legion-tool/issues)
