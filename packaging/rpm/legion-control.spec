@@ -85,6 +85,7 @@ fi
 %{_datadir}/polkit-1/actions/com.encomjp.legion-control.policy
 %{_prefix}/lib/legion-control/ryzen_smu/
 %{_unitdir}/legion-control.service
+%{_sysusersdir}/legion-control.conf
 /usr/lib/udev/rules.d/99-legion.rules
 %{_datadir}/applications/com.encomjp.legion-settings.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg

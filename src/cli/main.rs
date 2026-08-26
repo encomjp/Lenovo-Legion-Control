@@ -316,19 +316,24 @@ fn main() {
                 };
                 println!("backlight: {label} ({b})");
             }
-            Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
-            Err(e) => eprintln!("error: {e}"),
-            _ => eprintln!("error: cannot read keyboard brightness"),
+            Ok(DaemonResponse::Error(e)) => fail(e),
+            Err(e) => fail(e),
+            _ => fail("cannot read keyboard brightness"),
         },
-        Commands::SetKbd { level } => match send_command(DaemonCommand::SetKbdBrightness(level)) {
-            Ok(DaemonResponse::Ok) => println!("backlight → {level}"),
-            Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
-            Err(e) => eprintln!("error: {e}"),
-            _ => eprintln!("error: unexpected response"),
-        },
+        Commands::SetKbd { level } => {
+            if level > 9 {
+                usage_fail(format!("backlight level '{level}' out of range (0-2 for white/4-zone, 0-9 for Spectrum)"));
+            }
+            match send_command(DaemonCommand::SetKbdBrightness(level)) {
+                Ok(DaemonResponse::Ok) => println!("backlight → {level}"),
+                Ok(DaemonResponse::Error(e)) => fail(e),
+                Err(e) => fail(e),
+                _ => fail("unexpected response from service"),
+            }
+        }
         Commands::Rgb { r, g, b } => match legion_core::keyboard::set_rgb_static(r, g, b) {
             Ok(()) => println!("rgb → #{r:02X}{g:02X}{b:02X}"),
-            Err(e) => eprintln!("error: {e}"),
+            Err(e) => fail(e),
         },
         Commands::Effect {
             name,
@@ -768,6 +773,11 @@ fn main() {
             offset,
             i_understand_instability_risk,
         } => {
+            if !(-30..=0).contains(&offset) {
+                usage_fail(format!(
+                    "offset '{offset}' is out of range. Curve Optimizer offsets must be between -30 and 0"
+                ));
+            }
             if !i_understand_instability_risk {
                 eprintln!(
                     "error: pass --i-understand-instability-risk after testing a conservative value"
@@ -779,14 +789,8 @@ fn main() {
                 acknowledge: true,
             }) {
                 Ok(DaemonResponse::CurveOptimizer(status)) => print_curve_optimizer(&status),
-                Ok(DaemonResponse::Error(e)) | Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
-                }
-                _ => {
-                    eprintln!("error: unexpected response");
-                    std::process::exit(1);
-                }
+                Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+                _ => fail("unexpected response from service"),
             }
         }
         Commands::ResetUndervolt {

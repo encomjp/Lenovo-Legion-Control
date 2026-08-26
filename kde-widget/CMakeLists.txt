@@ -4,8 +4,9 @@ project(legioncontrol-widget)
 find_package(ECM REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 
+include(KDEInstallDirs)
+include(KDECMakeSettings)
+
 find_package(KF6 REQUIRED COMPONENTS Package)
 
-install(DIRECTORY package/
-    DESTINATION ${KDE_INSTALL_DATADIR}/plasma/plasmoids/com.github.encomjp.legioncontrol
-)
+kpackage_install_package(package com.github.encomjp.legioncontrol plasmoids)

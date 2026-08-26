@@ -7,12 +7,17 @@
 # kbd/logo were dropped entirely (the widget never displayed them).
 # Optional values are allowed to be absent.
 set -u
+export LC_ALL=C
 
-# Find legion-cli: check common install paths (widget runs in Plasma env, not user shell).
+# Find legion-cli: check PATH first, then common install paths.
 CLI=""
-for p in "$HOME/.local/bin/legion-cli" /usr/local/bin/legion-cli /usr/bin/legion-cli; do
-  [[ -x "$p" ]] && CLI="$p" && break
-done
+if command -v legion-cli >/dev/null 2>&1; then
+  CLI="$(command -v legion-cli)"
+else
+  for p in "${HOME:-}/.local/bin/legion-cli" /usr/local/bin/legion-cli /usr/bin/legion-cli; do
+    [[ -x "$p" ]] && CLI="$p" && break
+  done
+fi
 [[ -z "$CLI" ]] && { echo "LEGION_CLI_NOT_FOUND=1"; exit 0; }
 
 status="$(timeout 3 "$CLI" status 2>/dev/null || true)"
@@ -21,7 +26,7 @@ if [[ -z "$status" ]]; then
   exit 0
 fi
 printf 'LEGION_OK=1\n'
-profile="$(timeout 3 "$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' | head -1 | xargs || true)"
+profile="$(timeout 3 "$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
 battery="$(timeout 2 "$CLI" battery 2>/dev/null || true)"
 
 value() {
@@ -36,8 +41,8 @@ cpu_t="$(printf '%s\n' "$status" | grep -oP '(Tctl|CPU)\s+\K[0-9.]+(?=°C)' | he
 value CPU_TEMP "$cpu_t"
 value CPU_POWER "$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
 value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[-0-9.]+' | head -1 || true)"
-value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[0-9.]+\s+W' | head -1 | grep -oP '[0-9.]+' || true)"
-fans_line="$(printf '%s\n' "$status" | grep -Ei 'CPU.*[0-9]+.*GPU.*[0-9]+' | head -1 || true)"
+value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[-0-9.]+(?=\s+W)' | head -1 || true)"
+fans_line="$(printf '%s\n' "$status" | grep -Ei 'rpm' | grep -Ei 'CPU|GPU|Aux' | head -1 || true)"
 value FAN_CPU "$(printf '%s\n' "$fans_line" | grep -oP 'CPU\s+\K[0-9]+' | head -1 || true)"
 value FAN_GPU "$(printf '%s\n' "$fans_line" | grep -oP 'GPU\s+\K[0-9]+' | head -1 || true)"
 value FAN_AUX "$(printf '%s\n' "$fans_line" | grep -oP 'Aux\s+\K[0-9]+' | head -1 || true)"
@@ -76,14 +81,14 @@ bat_power() {
   for bat in /sys/class/power_supply/BAT*; do
     [[ -d "$bat" ]] || continue
     if [[ -r "$bat/power_now" ]]; then
-      awk '{printf "%.1f", $1/1000000}' "$bat/power_now" 2>/dev/null && return
+      LC_ALL=C awk '{printf "%.1f", $1/1000000}' "$bat/power_now" 2>/dev/null && return
     fi
     if [[ -r "$bat/current_now" && -r "$bat/voltage_now" ]]; then
       local cur vol
       cur="$(cat "$bat/current_now" 2>/dev/null || true)"
       vol="$(cat "$bat/voltage_now" 2>/dev/null || true)"
       if [[ -n "$cur" && -n "$vol" ]]; then
-        awk -v c="$cur" -v v="$vol" 'BEGIN {printf "%.1f", (c*v)/1000000000000}' 2>/dev/null && return
+        LC_ALL=C awk -v c="$cur" -v v="$vol" 'BEGIN {printf "%.1f", (c*v)/1000000000000}' 2>/dev/null && return
       fi
     fi
   done

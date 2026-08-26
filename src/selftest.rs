@@ -375,7 +375,7 @@ pub fn scan_faults() -> Vec<Fault> {
     let limit = battery::charge_limit_pct();
     if limit < 100 {
         if let (Some(pct), Some(status)) = (battery::capacity(), battery::status()) {
-            if status == "Charging" && pct as i32 >= limit as i32 - 2 && pct < 100 {
+            if status == "Charging" && pct > limit && pct < 100 {
                 out.push(fault(
                     "charging_past_limiter",
                     Severity::Warning,

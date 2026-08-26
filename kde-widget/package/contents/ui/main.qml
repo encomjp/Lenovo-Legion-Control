@@ -47,8 +47,8 @@ PlasmoidItem {
     }
 
     function profileTitle(name) {
-        var key = (name || "").toLowerCase().replace(/\s+/g, "-")
-        if (key === "quiet" || key === "low-power") return "Quiet"
+        var key = (name || "").toLowerCase().replace(/[\s\(\)]+/g, "-").replace(/-+$/, "")
+        if (key === "quiet" || key === "low-power" || key === "quiet-low-power") return "Quiet"
         if (key === "balanced") return "Balanced"
         if (key === "performance") return "Performance"
         if (key === "max-power") return "Max Power"
@@ -59,27 +59,26 @@ PlasmoidItem {
     switchWidth: Kirigami.Units.gridUnit * 18
     switchHeight: Kirigami.Units.gridUnit * 16
 
+    Plasmoid.toolTipMainText: "Legion Control"
+    Plasmoid.toolTipSubText: {
+        var l = []
+        if (root.cpuTemp !== "--") l.push("CPU: " + root.cpuTemp + "°C")
+        if (root.gpuTemp !== "--" && parseFloat(root.gpuTemp) >= 0) l.push("dGPU: " + root.gpuTemp + "°C" + (root.gpuPower !== "--" && parseFloat(root.gpuPower) >= 0 ? " · " + root.gpuPower + " W" : ""))
+        if (root.fanCpu !== "--") l.push("Fan CPU: " + (root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"))
+        if (root.fanGpu !== "--") l.push("Fan GPU: " + (root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"))
+        if (root.batteryPct !== "--") l.push("Battery: " + root.batteryPct + "%" + (root.batWatts !== "--" && root.batWatts !== "0.0" ? " (" + root.batWatts + " W)" : ""))
+        if (root.profile !== "--") l.push("Profile: " + root.profile)
+        return l.join("\n")
+    }
+
     // ── Compact: bench readout — temp + live status dot ────────────
-    compactRepresentation: PlasmaCore.ToolTipArea {
+    compactRepresentation: Item {
         id: compact
         anchors.fill: parent
         Layout.minimumWidth: compactRow.implicitWidth + Kirigami.Units.smallSpacing * 3
         Layout.minimumHeight: Kirigami.Units.iconSizes.smallMedium
         Layout.preferredWidth: compactRow.implicitWidth + Kirigami.Units.smallSpacing * 3
         Layout.fillHeight: true
-        mainText: "Legion Control"
-        subText: {
-            var l = []
-            if (root.cpuTemp !== "--") l.push("CPU: " + root.cpuTemp + "°C")
-            if (root.gpuTemp !== "--" && parseFloat(root.gpuTemp) >= 0) l.push("dGPU: " + root.gpuTemp + "°C" + (root.gpuPower !== "--" && parseFloat(root.gpuPower) >= 0 ? " · " + root.gpuPower + " W" : ""))
-            if (root.fanCpu !== "--") l.push("Fan CPU: " + (root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"))
-            if (root.fanGpu !== "--") l.push("Fan GPU: " + (root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"))
-            if (root.batteryPct !== "--") l.push("Battery: " + root.batteryPct + "%" + (root.batWatts !== "--" && root.batWatts !== "0.0" ? " (" + root.batWatts + " W)" : ""))
-            if (root.profile !== "--") l.push("Profile: " + root.profile)
-            return l.join("\n")
-        }
-        location: Plasmoid.location
-        active: !root.expanded
 
         readonly property color tempColor: {
             var t = parseFloat(root.cpuTemp)
@@ -311,59 +310,78 @@ PlasmoidItem {
                     rowSpacing: 6
                     QuickControl {
                         Layout.fillWidth: true
+                        enabled: root.daemonOnline
+                        opacity: root.daemonOnline ? 1.0 : 0.5
                         iconSource: Qt.resolvedUrl("icons/profile.svg"); label: "Profile"; valueText: root.profileDisplay; valueColor: Kirigami.Theme.textColor
                         onClicked: {
-                            var p=["quiet","balanced","performance","max-power","custom"]
-                            var current=(root.profile || "").toLowerCase().replace(/\s+/g, "-")
-                            var i=p.indexOf(current); if(i<0)i=0
-                            var next=p[(i+1)%p.length]
-                            root.profile=next
-                            root._lastWriteTime=Date.now()
-                            executable.exec(root.cliCommand+" set-profile "+next)
+                            var p = ["quiet", "balanced", "performance", "max-power", "custom"]
+                            var current = (root.profile || "").toLowerCase().replace(/[\s\(\)]+/g, "-").replace(/-+$/, "")
+                            if (current === "low-power" || current === "quiet-low-power") current = "quiet"
+                            var i = p.indexOf(current)
+                            if (i < 0) i = 0
+                            var next = p[(i + 1) % p.length]
+                            root.profile = next
+                            root._lastWriteTime = Date.now()
+                            executable.exec(root.cliCommand + " set-profile " + next)
                             refreshTimer.restart()
                         }
                     }
                     QuickControl {
                         Layout.fillWidth: true
+                        enabled: root.daemonOnline
+                        opacity: root.daemonOnline ? 1.0 : 0.5
                         iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "CPU Fan"; valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
                         onClicked: {
-                            var pr=[0,3000,3500,4000,4500]
-                            var c=parseInt(root.fanCpu)||0
-                            var i=pr.indexOf(c); if(i<0)i=0
-                            var next=pr[(i+1)%pr.length]
-                            // Optimistic: show the new value NOW; the write
-                            // guard keeps the next poll from staling it.
-                            root.fanCpu=String(next)
-                            root._lastWriteTime=Date.now()
-                            executable.exec(root.cliCommand+" set-fan 1 "+next)
+                            var pr = [0, 3000, 3500, 4000, 4500]
+                            var c = parseInt(root.fanCpu) || 0
+                            var next = pr[0]
+                            for (var idx = 0; idx < pr.length; idx++) {
+                                if (pr[idx] > c) {
+                                    next = pr[idx]
+                                    break
+                                }
+                            }
+                            root.fanCpu = String(next)
+                            root._lastWriteTime = Date.now()
+                            executable.exec(root.cliCommand + " set-fan 1 " + next)
                             refreshTimer.restart()
                         }
                     }
                     QuickControl {
                         Layout.fillWidth: true
+                        enabled: root.daemonOnline
+                        opacity: root.daemonOnline ? 1.0 : 0.5
                         iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "GPU Fan"; valueText: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
                         onClicked: {
-                            var pr=[0,3000,3500,4000,4500]
-                            var c=parseInt(root.fanGpu)||0
-                            var i=pr.indexOf(c); if(i<0)i=0
-                            var next=pr[(i+1)%pr.length]
-                            root.fanGpu=String(next)
-                            root._lastWriteTime=Date.now()
-                            executable.exec(root.cliCommand+" set-fan 2 "+next)
+                            var pr = [0, 3000, 3500, 4000, 4500]
+                            var c = parseInt(root.fanGpu) || 0
+                            var next = pr[0]
+                            for (var idx = 0; idx < pr.length; idx++) {
+                                if (pr[idx] > c) {
+                                    next = pr[idx]
+                                    break
+                                }
+                            }
+                            root.fanGpu = String(next)
+                            root._lastWriteTime = Date.now()
+                            executable.exec(root.cliCommand + " set-fan 2 " + next)
                             refreshTimer.restart()
                         }
                     }
                     QuickControl {
                         Layout.fillWidth: true
-                        iconSource: Qt.resolvedUrl("icons/charge-limit.svg"); label: "Charge Limit"; valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit+"%"; valueColor: root.chargeLimit!==""?Kirigami.Theme.textColor:Kirigami.Theme.disabledTextColor
+                        enabled: root.daemonOnline
+                        opacity: root.daemonOnline ? 1.0 : 0.5
+                        iconSource: Qt.resolvedUrl("icons/charge-limit.svg"); label: "Charge Limit"; valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit + "%"; valueColor: root.chargeLimit !== "" ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
                         onClicked: {
-                            var L=[100,80,60]
-                            var c=parseInt(root.chargeLimit)||100
-                            var i=L.indexOf(c); if(i<0)i=0
-                            var next=L[(i+1)%L.length]
-                            root.chargeLimit=next===100?"":String(next)
-                            root._lastWriteTime=Date.now()
-                            executable.exec(root.cliCommand+" charge-limit "+next)
+                            var L = [100, 80, 60]
+                            var c = parseInt(root.chargeLimit) || 100
+                            var i = L.indexOf(c)
+                            if (i < 0) i = 0
+                            var next = L[(i + 1) % L.length]
+                            root.chargeLimit = next === 100 ? "" : String(next)
+                            root._lastWriteTime = Date.now()
+                            executable.exec(root.cliCommand + " charge-limit " + next)
                             refreshTimer.restart()
                         }
                     }
@@ -432,9 +450,35 @@ PlasmoidItem {
         onNewData: function(sourceName, data){
             var stdout=data["stdout"]; if(!stdout||stdout.trim()===""){root.daemonOnline=false;return}
             var lines=stdout.split("\n"); var pollSucceeded=false
-            for(var i=0;i<lines.length;i++){var line=lines[i].trim(); if(!line)continue; var eq=line.indexOf("="); if(eq<1)continue; var key=line.substring(0,eq); var val=line.substring(eq+1).trim(); if(!val)continue; var writeGuard=(Date.now()-root._lastWriteTime)<2500; switch(key){case "LEGION_OK":pollSucceeded=val==="1";break;case "LEGION_DAEMON_OFFLINE":case "LEGION_CLI_NOT_FOUND":pollSucceeded=false;break;case "CPU_TEMP":if(!writeGuard)cpuTemp=val;break;case "CPU_POWER":cpuPower=val;break;case "DGPU_TEMP":if(!writeGuard)gpuTemp=val;break;case "DGPU_POWER":gpuPower=val;break;case "FAN_CPU":if(!writeGuard)fanCpu=val;break;case "FAN_GPU":if(!writeGuard)fanGpu=val;break;case "FAN_AUX":if(!writeGuard)fanAux=val;break;case "BATTERY":batteryPct=val;break;case "BAT_STATUS":batteryStatus=val;break;case "CHARGE_LIMIT":chargeLimit=val==="100"?"":val;break;case "BAT_POWER":batWatts=val;break;case "PROFILE":if(!writeGuard)profile=val;break;}}
+            var writeGuard=(Date.now()-root._lastWriteTime)<2500;
+            for(var i=0;i<lines.length;i++){
+                var line=lines[i].trim(); if(!line)continue;
+                var eq=line.indexOf("="); if(eq<1)continue;
+                var key=line.substring(0,eq); var val=line.substring(eq+1).trim(); if(!val)continue;
+                switch(key){
+                    case "LEGION_OK":pollSucceeded=val==="1";break;
+                    case "LEGION_DAEMON_OFFLINE":case "LEGION_CLI_NOT_FOUND":pollSucceeded=false;break;
+                    case "CPU_TEMP":cpuTemp=val;break;
+                    case "CPU_POWER":cpuPower=val;break;
+                    case "DGPU_TEMP":gpuTemp=val;break;
+                    case "DGPU_POWER":gpuPower=val;break;
+                    case "FAN_CPU":if(!writeGuard)fanCpu=val;break;
+                    case "FAN_GPU":if(!writeGuard)fanGpu=val;break;
+                    case "FAN_AUX":fanAux=val;break;
+                    case "BATTERY":batteryPct=val;break;
+                    case "BAT_STATUS":batteryStatus=val;break;
+                    case "CHARGE_LIMIT":if(!writeGuard)chargeLimit=val==="100"?"":val;break;
+                    case "BAT_POWER":batWatts=val;break;
+                    case "PROFILE":if(!writeGuard)profile=val;break;
+                }
+            }
             root.daemonOnline=pollSucceeded
-            if(cpuTemp!=="--"){var h=root.tempHistory.slice(); h.push(parseFloat(cpuTemp)); if(h.length>30)h.shift(); root.tempHistory=h}
+            if(cpuTemp!=="--"){
+                var valTemp=parseFloat(cpuTemp);
+                if(!isNaN(valTemp)){
+                    var h=root.tempHistory.slice(); h.push(valTemp); if(h.length>30)h.shift(); root.tempHistory=h
+                }
+            }
         }
     }
     Plasma5Support.DataSource {
