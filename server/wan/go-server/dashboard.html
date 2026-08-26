@@ -490,21 +490,24 @@
         const s=d.sensors||{}, b=d.battery||{}, dev=d.device||{}, fans=d.fans||[], hw=d.hardware||{};
         const cpu=hw.cpu||{}, gpu=hw.gpu||{}, mem=hw.memory||{}, storage=hw.storage||{}, disp=hw.display||{};
         const cpuName=escapeHtml(cpu.name||dev.cpu_model||'—');
-        const cpuSub=(cpu.physical_cores||cpu.logical_threads)? ' <span class="text-legion-dim">'+(cpu.physical_cores?cpu.physical_cores+'C/':'')+(cpu.logical_threads||'?')+'T</span>':'';
-        const cpuClk=cpu.max_clock_mhz? ' <span class="text-legion-dim">· up to '+cpu.max_clock_mhz+' MHz</span>':'';
+        const cpuBadges=[];
+        if(cpu.physical_cores||cpu.logical_threads) cpuBadges.push((cpu.physical_cores?cpu.physical_cores+'C/':'')+(cpu.logical_threads||'?')+'T');
+        if(cpu.max_clock_mhz) cpuBadges.push('up to '+cpu.max_clock_mhz+' MHz');
+        const cpuDesc=cpuName+(cpuBadges.length? ' <span class="inline-flex gap-1 align-middle">'+cpuBadges.map(b=>'<span class="px-1.5 py-0.5 rounded bg-legion-card border border-legion-border text-[10px] mono text-legion-accent">'+escapeHtml(b)+'</span>').join('')+'</span>':'');
         const gpuDesc=escapeHtml(gpu.discrete_name||dev.gpu_model||'—')+(gpu.driver_version? ' <span class="text-legion-dim">· '+escapeHtml(String(gpu.driver_version))+'</span>':'');
         const ramDesc=(mem.total_mb? (mem.total_mb/1024).toFixed(1)+' GB':'—')+(mem.mem_type? ' <span class="text-legion-dim">'+escapeHtml(mem.mem_type)+'</span>':'')+(mem.swap_total_mb? ' <span class="text-legion-dim">· '+(mem.swap_total_mb/1024).toFixed(1)+' GB swap</span>':'');
         const dispDesc=(disp.resolution? escapeHtml(String(disp.resolution)):'—')+(disp.refresh_hz? ' <span class="text-legion-dim">@ '+escapeHtml(String(disp.refresh_hz))+' Hz</span>':'');
-        const storageDesc=(storage.nvme_devices&&storage.nvme_devices.length? storage.nvme_devices.map(n=>escapeHtml(n.model)+' <span class="text-legion-dim">('+n.size_gb+' GB)</span>').join(' · '):(Array.isArray(s.ssd_composite)? s.ssd_composite.length+' SSD(s)':'—'));
-        const fanHtml=fans.length? fans.map(f=>'<div class="flex items-center justify-between py-1 border-b border-legion-border/50 last:border-0"><span class="text-legion-dim">Fan '+(f.id??'?')+'</span><span class="mono text-white">'+(f.rpm!=null?f.rpm.toFixed(0)+' RPM':'—')+(f.target>0? ' → '+f.target+' tgt':' · auto')+' <span class="text-legion-dim">('+f.min_rpm+'–'+f.max_rpm+')</span></span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>';
+        // One storage device per line instead of joining with ' · '.
+        const storageItems=(storage.nvme_devices&&storage.nvme_devices.length)? storage.nvme_devices.map(n=>'<div>'+escapeHtml(n.model)+' <span class="text-legion-dim">('+n.size_gb+' GB)</span></div>').join('') : (Array.isArray(s.ssd_composite)? s.ssd_composite.length+' SSD(s)':'—');
+        const fanHtml=fans.length? fans.map(fanRow).join('') : '<div class="text-legion-dim">No fan entries</div>';
         const battGrid='<div class="grid grid-cols-2 gap-x-6 gap-y-1">'+kvRow('Capacity',(b.capacity_pct??'—')+'%')+kvRow('Health',(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—'))+kvRow('Cycles',b.cycles??'—')+kvRow('Charge limit',(b.charge_limit_pct??'—')+'%')+kvRow('Status',escapeHtml(b.status||'—'))+kvRow('Voltage',(b.voltage_v!=null?b.voltage_v.toFixed(2)+' V':'—'))+'</div>';
         const devHtml=kvRow('Series',escapeHtml(dev.series||'—'))+kvRow('BIOS',escapeHtml(dev.bios_version||'—'))+kvRow('EC',escapeHtml(dev.ec_chip||'—'))+kvRow('Profile',escapeHtml(d.profiles&&d.profiles.current?d.profiles.current:'—'))+kvRow('Thermal',d.thermal&&d.thermal.config? (d.thermal.config.enabled?'On @ '+d.thermal.config.max_temp+'°C':'Off'):'—');
         body.innerHTML=
           '<div class="grid grid-cols-2 gap-2">'
-            +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD 1', s.cpu_temp_1, '°C')+sensorRow('CCD 2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
-            +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
+            +sensorRow('CPU', s.cpu_temp, '°C', true)+sensorRow('CCD 1', s.cpu_temp_1, '°C', true)+sensorRow('CCD 2', s.cpu_temp_2, '°C', true)+sensorRow('EC CPU', s.ec_cpu, '°C', true)
+            +sensorRow('dGPU', s.dgpu_temp, '°C', true)+sensorRow('dGPU Power', s.dgpu_power, ' W', false)+sensorRow('iGPU Edge', s.igpu_edge, '°C', true)+sensorRow('WiFi', s.wifi_temp, '°C', true)
           +'</div>'
-          +section('Hardware Inventory', kvRow('CPU',cpuName+cpuSub+cpuClk)+kvRow('GPU',gpuDesc)+kvRow('RAM',ramDesc)+kvRow('Display',dispDesc)+kvRow('Storage',storageDesc))
+          +section('Hardware Inventory', kvRow('CPU',cpuDesc)+kvRow('GPU',gpuDesc)+kvRow('RAM',ramDesc)+kvRow('Display',dispDesc)+kvRow('Storage',storageItems))
           +section('Fans', fanHtml)
           +section('Battery', battGrid)
           +section('Device & Tuning', devHtml);
@@ -530,9 +533,23 @@
         body.innerHTML= reps.slice().reverse().map(r=>'<div class="flex items-center justify-between p-2 rounded border border-legion-border bg-legion-cardAlt text-xs mono"><span>#'+r.id+' · '+relTime(r.ts)+' · Faults '+r.faults+'</span><button onclick="openJson('+r.id+')" class="px-2 py-1 rounded bg-legion-border text-white text-xs">View JSON</button></div>').join('') || '<div class="text-legion-dim text-xs">No reports.</div>';
       }
     }
-    function sensorRow(label, val, unit){
-      const ok = typeof val==='number' && isFinite(val) && val>-20 && val<200;
+    function sensorRow(label, val, unit, hideZero){
+      // A temperature of exactly 0 is a "not read" sentinel (e.g. EC CPU) —
+      // hide it rather than show a bogus 0.0°C.
+      const zero = hideZero && (val===0 || val===0.0);
+      const ok = !zero && typeof val==='number' && isFinite(val) && val>-20 && val<200;
       return '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px] uppercase tracking-wider">'+escapeHtml(label)+'</div><div class="'+(ok?'text-white':'text-legion-dim')+' text-sm mono">'+(ok? Number(val).toFixed(1)+unit : '—')+'</div></div>';
+    }
+    // One fan: current RPM with a position bar between min and max.
+    function fanRow(f){
+      const min=f.min_rpm||0, max=f.max_rpm||0, rpm=f.rpm;
+      const ranged = min>0 && max>min;
+      const pct = ranged && rpm!=null ? Math.min(100,Math.max(0,((rpm-min)/(max-min))*100)) : 0;
+      return '<div class="py-1.5 border-b border-legion-border/50 last:border-0">'
+        +'<div class="flex items-center justify-between"><span class="text-legion-dim">Fan '+(f.id??'?')+'</span><span class="mono text-white">'+(rpm!=null?rpm.toFixed(0)+' RPM':'—')+(f.target>0? ' → '+f.target+' RPM':' · auto')+'</span></div>'
+        +(ranged? '<div class="h-1.5 mt-1.5 rounded-full bg-legion-border overflow-hidden"><div class="h-full rounded-full bg-legion-accent" style="width:'+pct.toFixed(0)+'%"></div></div>':'')
+        +(ranged? '<div class="flex justify-between text-[10px] mono text-legion-dim mt-1"><span>min '+min+'</span><span>max '+max+'</span></div>':'')
+        +'</div>';
     }
     // A titled card wrapping a set of key/value rows.
     function section(title, inner){
