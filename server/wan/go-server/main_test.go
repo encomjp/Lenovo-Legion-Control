@@ -332,3 +332,81 @@ func TestMdToHTMLEscapes(t *testing.T) {
 		t.Fatalf("expected escaped script tag, got: %s", out)
 	}
 }
+
+// Regression: mdToHTML must still render headings, list items and paragraphs
+// while escaping any markup embedded in the source line text.
+func TestMdToHTMLRendersBlocksAndEscapesText(t *testing.T) {
+	out := mdToHTML("# Title\n- item1\n- <b>x</b>\nplain")
+	if !strings.Contains(out, "<h2") || !strings.Contains(out, "Title") {
+		t.Errorf("heading not rendered: %s", out)
+	}
+	if !strings.Contains(out, "<li") || !strings.Contains(out, "item1") {
+		t.Errorf("list not rendered: %s", out)
+	}
+	// Embedded markup inside a list item must be escaped, not passed through.
+	if strings.Contains(out, "<b>") {
+		t.Errorf("markup inside list item not escaped: %s", out)
+	}
+	if !strings.Contains(out, "&lt;b&gt;") {
+		t.Errorf("expected escaped <b>, got: %s", out)
+	}
+	if !strings.Contains(out, "<p") || !strings.Contains(out, "plain") {
+		t.Errorf("paragraph not rendered: %s", out)
+	}
+}
+
+// Regression: an advertised compressed size above maxBodyBytes is rejected by
+// the Content-Length gate before the body is ever read (defense in depth on
+// top of the decompressed-size cap).
+func TestIngestRejectsOversizedContentLength(t *testing.T) {
+	s := testServer(t, "secret")
+	raw, _ := json.Marshal(validReport("cl-big"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/diagnostics", bytes.NewReader(raw))
+	req.Header.Set("X-Legion-Telemetry-Key", "secret")
+	req.Header.Set("Content-Length", "999999999")
+	rr := httptest.NewRecorder()
+	s.handleIngest(rr, req)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized Content-Length: got %d want 413, body=%s", rr.Code, rr.Body.String())
+	}
+	if n, _ := s.db.Count(); n != 0 {
+		t.Fatalf("oversized Content-Length: %d rows stored, want 0", n)
+	}
+}
+
+// Bug-status round-trip: a POST persists a status+notes, and GetBugDetails
+// returns them for later reads (the Triage tab depends on this).
+func TestBugStatusRoundTrip(t *testing.T) {
+	s := testServer(t, "secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/bug/status",
+		strings.NewReader(`{"bug_id":"FAULT:1","status":"TRIAGED","notes":"looking into it"}`))
+	rr := httptest.NewRecorder()
+	s.handleAPIBugStatus(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("set status: got %d want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	details, err := s.db.GetBugDetails()
+	if err != nil {
+		t.Fatalf("GetBugDetails: %v", err)
+	}
+	d, ok := details["FAULT:1"]
+	if !ok {
+		t.Fatalf("bug FAULT:1 not persisted, got %v", details)
+	}
+	if d.Status != "TRIAGED" || d.Notes != "looking into it" {
+		t.Fatalf("round-trip mismatch: %+v", d)
+	}
+	// Upsert (same id) overwrites rather than duplicating.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/bug/status",
+		strings.NewReader(`{"bug_id":"FAULT:1","status":"RESOLVED","notes":""}`))
+	rr2 := httptest.NewRecorder()
+	s.handleAPIBugStatus(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("update status: got %d want 200", rr2.Code)
+	}
+	details, _ = s.db.GetBugDetails()
+	if d := details["FAULT:1"]; d.Status != "RESOLVED" {
+		t.Fatalf("upsert did not overwrite status: %+v", d)
+	}
+}
+
