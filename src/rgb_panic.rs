@@ -384,7 +384,7 @@ pub fn troubleshoot() -> FixReport {
                         steps.extend(s);
                     }
                     Err(e) => {
-                        log::error!(
+                        log::warn!(
                             "rgb-panic: ladder 5/5 lighting still dead after USB reset: {e}"
                         );
                         errors.push(format!("Lighting still dead after USB reset: {e}"));
@@ -447,7 +447,7 @@ pub fn troubleshoot() -> FixReport {
                         }
                     }
                     Err(e) => {
-                        log::error!("rgb-panic: escalated USB reset failed: {e}");
+                        log::warn!("rgb-panic: escalated USB reset attempt failed: {e}");
                         errors.push(e);
                     }
                 }
@@ -673,36 +673,47 @@ fn fix_permissions(path: &Path) -> Result<String, String> {
 
 fn usb_reset(usb: &Path) -> Result<(), String> {
     log::info!(
-        "rgb-panic: usb_reset: device {} — writing 1 to its USB reset attribute",
+        "rgb-panic: usb_reset: device {} — attempting port reset / re-authorization",
         usb.display()
     );
     let reset = usb.join("reset");
-    if !reset.exists() {
-        log::error!(
-            "rgb-panic: usb_reset: no reset attribute at {}",
-            reset.display()
-        );
-        return Err(format!("no reset attribute at {}", reset.display()));
+    if reset.exists() {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .open(&reset)
+            .map_err(|e| format!("Cannot write {}: {e} (needs root daemon)", reset.display()))?;
+        f.write_all(b"1")
+            .map_err(|e| format!("USB reset failed: {e}"))?;
+        log::info!("rgb-panic: usb_reset: {} accepted the reset", usb.display());
+        return Ok(());
     }
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .open(&reset)
-        .map_err(|e| {
-            log::error!(
-                "rgb-panic: usb_reset: cannot open {}: {e} (needs root daemon)",
-                reset.display()
-            );
-            format!("Cannot write {}: {e} (needs root daemon)", reset.display())
-        })?;
-    f.write_all(b"1").map_err(|e| {
-        log::error!(
-            "rgb-panic: usb_reset: write to {} failed: {e}",
-            reset.display()
+
+    // Modern kernels / hubs often don't expose a 'reset' attribute directly on composite child nodes.
+    // Fallback: toggle 'authorized' (0 -> 1) which forces USB kernel re-enumeration and port reset.
+    let auth = usb.join("authorized");
+    if auth.exists() {
+        log::info!(
+            "rgb-panic: toggling authorized attribute at {}",
+            auth.display()
         );
-        format!("USB reset failed: {e}")
-    })?;
-    log::info!("rgb-panic: usb_reset: {} accepted the reset", usb.display());
-    Ok(())
+        let _ = fs::write(&auth, b"0");
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = fs::write(&auth, b"1");
+        log::info!(
+            "rgb-panic: USB re-authorization completed at {}",
+            usb.display()
+        );
+        return Ok(());
+    }
+
+    log::debug!(
+        "rgb-panic: usb_reset: neither reset nor authorized attribute found at {}",
+        usb.display()
+    );
+    Err(format!(
+        "no reset or authorization attribute at {}",
+        usb.display()
+    ))
 }
 
 /// Resolve `<iface>/driver` (a sysfs symlink) to the symlink path plus the
