@@ -1100,7 +1100,7 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
         let interval = cfg.auto_interval_secs.clamp(15, 3600) as u64;
         match legion_core::diagnostics::collect_and_send(None) {
             Ok(_) => log::debug!("telemetry push sent (interval {interval}s, gzip)"),
-            Err(e) if e.contains("less than a minute ago") => {
+            Err(e) if e.contains("skipping duplicate send") => {
                 log::trace!("telemetry push dedup-skipped: {e}");
             }
             Err(e) => log::warn!("telemetry push failed: {e}"),

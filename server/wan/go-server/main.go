@@ -46,7 +46,11 @@ type DB struct {
 }
 
 func initDB(dbPath string) (*DB, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil && !os.IsExist(err) {
+	// MkdirAll is idempotent: it returns nil when the directory already
+	// exists, so surfacing any other error here is correct — a DB whose
+	// parent directory cannot be created must fail fast instead of hiding.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL")
 	if err != nil {
@@ -1227,10 +1231,6 @@ func (s *Server) handleAPIBugStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReportDetail(w http.ResponseWriter, r *http.Request) {
 	trim := strings.TrimPrefix(r.URL.Path, "/reports/")
 	trim = strings.TrimPrefix(trim, "/api/report/")
-	// also handle /api/report/{id} without extra prefix handling above
-	if strings.HasPrefix(r.URL.Path, "/api/report/") {
-		trim = strings.TrimPrefix(r.URL.Path, "/api/report/")
-	}
 	parts := strings.Split(strings.Trim(trim, "/"), "/")
 	idStr := parts[0]
 	id, err := strconv.ParseInt(idStr, 10, 64)

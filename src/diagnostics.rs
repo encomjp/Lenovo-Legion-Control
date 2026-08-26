@@ -975,6 +975,9 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
         // Write raw bytes (gzipped or plain) to a 0600 temp file via create_private_temp helper.
         let tmp_name = temp_name("legion-diag", if use_gzip { "json.gz" } else { "json" });
         let tmp_path = std::env::temp_dir().join(&tmp_name);
+        // Track the path BEFORE writing: if a write below fails and we return
+        // early, the cleanup list already holds it so the file cannot leak.
+        temps.push(tmp_path.clone());
         {
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
             let mut f = std::fs::OpenOptions::new()
