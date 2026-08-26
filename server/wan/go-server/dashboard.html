@@ -489,21 +489,25 @@
       if(tab==='sensors'){
         const s=d.sensors||{}, b=d.battery||{}, dev=d.device||{}, fans=d.fans||[], hw=d.hardware||{};
         const cpu=hw.cpu||{}, gpu=hw.gpu||{}, mem=hw.memory||{}, storage=hw.storage||{}, disp=hw.display||{};
-        body.innerHTML='<div class="grid grid-cols-2 gap-2 text-xs mono">'
-          +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD1', s.cpu_temp_1, '°C')+sensorRow('CCD2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
-          +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
+        const cpuName=escapeHtml(cpu.name||dev.cpu_model||'—');
+        const cpuSub=(cpu.physical_cores||cpu.logical_threads)? ' <span class="text-legion-dim">'+(cpu.physical_cores?cpu.physical_cores+'C/':'')+(cpu.logical_threads||'?')+'T</span>':'';
+        const cpuClk=cpu.max_clock_mhz? ' <span class="text-legion-dim">· up to '+cpu.max_clock_mhz+' MHz</span>':'';
+        const gpuDesc=escapeHtml(gpu.discrete_name||dev.gpu_model||'—')+(gpu.driver_version? ' <span class="text-legion-dim">· '+escapeHtml(String(gpu.driver_version))+'</span>':'');
+        const ramDesc=(mem.total_mb? (mem.total_mb/1024).toFixed(1)+' GB':'—')+(mem.mem_type? ' <span class="text-legion-dim">'+escapeHtml(mem.mem_type)+'</span>':'')+(mem.swap_total_mb? ' <span class="text-legion-dim">· '+(mem.swap_total_mb/1024).toFixed(1)+' GB swap</span>':'');
+        const dispDesc=(disp.resolution? escapeHtml(String(disp.resolution)):'—')+(disp.refresh_hz? ' <span class="text-legion-dim">@ '+escapeHtml(String(disp.refresh_hz))+' Hz</span>':'');
+        const storageDesc=(storage.nvme_devices&&storage.nvme_devices.length? storage.nvme_devices.map(n=>escapeHtml(n.model)+' <span class="text-legion-dim">('+n.size_gb+' GB)</span>').join(' · '):(Array.isArray(s.ssd_composite)? s.ssd_composite.length+' SSD(s)':'—'));
+        const fanHtml=fans.length? fans.map(f=>'<div class="flex items-center justify-between py-1 border-b border-legion-border/50 last:border-0"><span class="text-legion-dim">Fan '+(f.id??'?')+'</span><span class="mono text-white">'+(f.rpm!=null?f.rpm.toFixed(0)+' RPM':'—')+(f.target>0? ' → '+f.target+' tgt':' · auto')+' <span class="text-legion-dim">('+f.min_rpm+'–'+f.max_rpm+')</span></span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>';
+        const battGrid='<div class="grid grid-cols-2 gap-x-6 gap-y-1">'+kvRow('Capacity',(b.capacity_pct??'—')+'%')+kvRow('Health',(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—'))+kvRow('Cycles',b.cycles??'—')+kvRow('Charge limit',(b.charge_limit_pct??'—')+'%')+kvRow('Status',escapeHtml(b.status||'—'))+kvRow('Voltage',(b.voltage_v!=null?b.voltage_v.toFixed(2)+' V':'—'))+'</div>';
+        const devHtml=kvRow('Series',escapeHtml(dev.series||'—'))+kvRow('BIOS',escapeHtml(dev.bios_version||'—'))+kvRow('EC',escapeHtml(dev.ec_chip||'—'))+kvRow('Profile',escapeHtml(d.profiles&&d.profiles.current?d.profiles.current:'—'))+kvRow('Thermal',d.thermal&&d.thermal.config? (d.thermal.config.enabled?'On @ '+d.thermal.config.max_temp+'°C':'Off'):'—');
+        body.innerHTML=
+          '<div class="grid grid-cols-2 gap-2">'
+            +sensorRow('CPU', s.cpu_temp, '°C')+sensorRow('CCD 1', s.cpu_temp_1, '°C')+sensorRow('CCD 2', s.cpu_temp_2, '°C')+sensorRow('EC CPU', s.ec_cpu, '°C')
+            +sensorRow('dGPU', s.dgpu_temp, '°C')+sensorRow('dGPU Power', s.dgpu_power, ' W')+sensorRow('iGPU Edge', s.igpu_edge, '°C')+sensorRow('WiFi', s.wifi_temp, '°C')
           +'</div>'
-          +'<div class="mt-3 text-xs p-3 rounded-lg bg-legion-card border border-legion-border space-y-2">'
-          +'<div class="text-white font-bold tracking-tight text-xs flex items-center justify-between"><span>Hardware Inventory</span><span class="text-[10px] mono text-legion-dim">Standard /proc + sysfs</span></div>'
-          +'<div class="mono text-legion-dim"><b class="text-white">CPU:</b> '+escapeHtml(cpu.name || dev.cpu_model || '—')+' ('+(cpu.physical_cores?cpu.physical_cores+'C/':'')+(cpu.logical_threads?cpu.logical_threads+'T':'')+ (cpu.max_clock_mhz?' up to '+cpu.max_clock_mhz+' MHz':'') +')</div>'
-          +'<div class="mono text-legion-dim"><b class="text-white">GPU:</b> '+escapeHtml(gpu.discrete_name || dev.gpu_model || '—')+(gpu.driver_version?' · driver '+escapeHtml(String(gpu.driver_version)):'')+'</div>'
-          +'<div class="mono text-legion-dim"><b class="text-white">RAM:</b> '+(mem.total_mb? (mem.total_mb/1024).toFixed(1)+' GB' : '—')+' '+(mem.mem_type||'DDR5')+(mem.swap_total_mb?' ('+(mem.swap_total_mb/1024).toFixed(1)+' GB swap)':'')+'</div>'
-          +'<div class="mono text-legion-dim"><b class="text-white">Display:</b> '+(disp.resolution||'—')+(disp.refresh_hz?' @ '+disp.refresh_hz+' Hz':'')+'</div>'
-          +'<div class="mono text-legion-dim"><b class="text-white">Storage:</b> '+(storage.nvme_devices&&storage.nvme_devices.length? storage.nvme_devices.map(n=>escapeHtml(n.model)+' ('+n.size_gb+' GB)').join(' · ') : (Array.isArray(s.ssd_composite)? s.ssd_composite.length+' SSD(s)' : '—'))+'</div>'
-          +'</div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Fans</div>'+ (fans.length? fans.map(f=>'<div class="flex justify-between mono text-legion-dim">Fan '+(f.id??'?')+' <span class="text-white">'+(f.rpm!=null?f.rpm+' RPM':'—')+' → '+(f.target!=null?f.target+' tgt':'auto')+' ('+f.min_rpm+'–'+f.max_rpm+')</span></div>').join('') : '<div class="text-legion-dim">No fan entries</div>') +'</div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Battery</div><div class="mono text-legion-dim">Capacity '+(b.capacity_pct??'—')+'% · Health '+(b.health_pct!=null?Number(b.health_pct).toFixed(0)+'%':'—')+' · Cycles '+(b.cycles??'—')+' · Limit '+(b.charge_limit_pct??'—')+'%</div><div class="mono text-legion-dim">Status '+(b.status||'—')+' · Voltage '+(b.voltage_v!=null?b.voltage_v.toFixed(2)+'V':'—')+'</div></div>'
-          +'<div class="mt-3 text-xs"><div class="text-white font-semibold mb-1">Device & Tuning</div><div class="mono text-legion-dim">Series '+escapeHtml(dev.series||'')+' · BIOS '+escapeHtml(dev.bios_version||'')+' · EC '+escapeHtml(dev.ec_chip||'')+'</div><div class="mono text-legion-dim">Profile '+(d.profiles&&d.profiles.current?d.profiles.current:'—')+' · Thermal '+(d.thermal&&d.thermal.config? (d.thermal.config.enabled?'on @ '+d.thermal.config.max_temp+'°C':'off'):'—')+'</div></div>';
+          +section('Hardware Inventory', kvRow('CPU',cpuName+cpuSub+cpuClk)+kvRow('GPU',gpuDesc)+kvRow('RAM',ramDesc)+kvRow('Display',dispDesc)+kvRow('Storage',storageDesc))
+          +section('Fans', fanHtml)
+          +section('Battery', battGrid)
+          +section('Device & Tuning', devHtml);
       } else if(tab==='history'){
         body.innerHTML='<div class="h-[220px]"><canvas id="drawer-history"></canvas></div><div class="text-[11px] mono text-legion-dim mt-2">Last '+(d.history||[]).length+' report points</div>';
         setTimeout(()=>{
@@ -528,7 +532,15 @@
     }
     function sensorRow(label, val, unit){
       const ok = typeof val==='number' && isFinite(val) && val>-20 && val<200;
-      return '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px]">'+escapeHtml(label)+'</div><div class="'+(ok?'text-white':'text-legion-dim')+'">'+(ok? Number(val).toFixed(1)+unit : '—')+'</div></div>';
+      return '<div class="bg-legion-cardAlt p-2 rounded border border-legion-border"><div class="text-legion-dim text-[10px] uppercase tracking-wider">'+escapeHtml(label)+'</div><div class="'+(ok?'text-white':'text-legion-dim')+' text-sm mono">'+(ok? Number(val).toFixed(1)+unit : '—')+'</div></div>';
+    }
+    // A titled card wrapping a set of key/value rows.
+    function section(title, inner){
+      return '<div class="mt-4"><div class="text-[11px] uppercase tracking-wider text-legion-dim font-bold mb-1.5">'+escapeHtml(title)+'</div><div class="p-3 rounded-lg bg-legion-cardAlt border border-legion-border text-xs">'+inner+'</div></div>';
+    }
+    // A divider row: fixed label left, value right, wrapped so long values wrap.
+    function kvRow(label, value){
+      return '<div class="flex items-baseline gap-3 py-1 border-b border-legion-border/40 last:border-0"><span class="text-legion-dim shrink-0 w-20">'+escapeHtml(label)+'</span><span class="text-white break-words">'+value+'</span></div>';
     }
 
     function renderBugs(){
