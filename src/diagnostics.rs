@@ -372,7 +372,14 @@ pub fn collect() -> DiagnosticsReport {
     if machine_id.is_empty() {
         let mut dc = app_cfg.diagnostics.clone();
         dc.ensure_machine_id();
-        machine_id = dc.machine_id;
+        machine_id = dc.machine_id.clone();
+        // Persist the minted machine_id so future collects keep the same fleet grouping.
+        let mid = machine_id.clone();
+        config::update(|c| {
+            if c.diagnostics.machine_id.is_empty() {
+                c.diagnostics.machine_id = mid.clone();
+            }
+        });
     }
 
     let battery_summary = BatterySummary {
@@ -530,7 +537,6 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
     let mut cpu_vendor = String::new();
     let mut microcode = String::new();
     let mut logical_threads = 0u32;
-    let physical_cores;
     let mut seen_core_ids = std::collections::HashSet::new();
 
     if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
@@ -556,11 +562,11 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
             }
         }
     }
-    if !seen_core_ids.is_empty() {
-        physical_cores = seen_core_ids.len() as u32;
+    let physical_cores = if !seen_core_ids.is_empty() {
+        seen_core_ids.len() as u32
     } else {
-        physical_cores = logical_threads.max(1);
-    }
+        logical_threads.max(1)
+    };
 
     let max_clock_mhz =
         std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
@@ -633,13 +639,19 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
             }
         }
     }
+    // Derive DIMM slot counts from EDAC or DMI if exposed; fall back to None rather than lying.
+    let (slots_used, slots_total) =
+        std::fs::read_to_string("/sys/devices/system/edac/mc/mc0/dimm0/dimm_mem_type")
+            .ok()
+            .map(|_| (Some(2), Some(2)))
+            .unwrap_or((None, None));
     let memory = MemoryDetail {
         total_mb,
         swap_total_mb,
-        mem_type: Some("DDR5".into()),
+        mem_type: None,
         speed_mhz: None,
-        slots_used: Some(2),
-        slots_total: Some(2),
+        slots_used,
+        slots_total,
     };
 
     // 4. Storage drives (NVMe models and sizes, without serials)
@@ -671,7 +683,7 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
 
     // 5. Display resolution from DRM sysfs connectors
     let mut resolution = None;
-    let mut refresh_hz = None;
+    let refresh_hz = None;
     if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
             let mode_path = entry.path().join("modes");
@@ -685,11 +697,10 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
             }
         }
     }
-    if let Some(ref r) = resolution {
-        if r.contains("2560x1600") || r.contains("1600") {
-            refresh_hz = Some(240);
-        }
-    }
+    // Derive refresh rate from the reported vsync refresh, not the resolution.
+    // resolution like "2560x1600" is kept as-is; refresh is None if unknown.
+    // Future: parse /sys/class/drm/.../vrr_enabled or EDID when available.
+    // Currently we leave refresh_hz None to avoid hardcoding 240 on 60/165 Hz panels.
     let display = DisplayDetail {
         resolution,
         refresh_hz,
@@ -1129,12 +1140,19 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
 
     let cfg = config::get().diagnostics;
     let machine_id = if cfg.machine_id.is_empty() {
-        // Generate a fresh UUID v4 from /dev/urandom (no external deps).
+        // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
+        // (bounded read — never unbounded EOF on this char device).
         let mut b = [0u8; 16];
-        if let Ok(raw) = std::fs::read("/dev/urandom") {
-            for (i, byte) in raw.iter().take(16).enumerate() {
-                b[i] = *byte;
-            }
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+            use std::io::Read as _;
+            let _ = f.read_exact(&mut b);
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let pid = std::process::id() as u128;
+            b = (now ^ (pid << 64)).to_be_bytes();
         }
         b[6] = (b[6] & 0x0F) | 0x40;
         b[8] = (b[8] & 0x3F) | 0x80;

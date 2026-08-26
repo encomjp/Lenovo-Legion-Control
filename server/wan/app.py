@@ -157,6 +157,15 @@ def ingest(request: Request) -> dict:
     raw = anyio.from_thread.run(_read_capped_body, request, MAX_BODY)
     if raw is None:
         raise HTTPException(status_code=413, detail="payload too large")
+    if request.headers.get("content-encoding", "").lower() == "gzip":
+        import gzip as _gz  # stdlib, stdlib only
+
+        try:
+            raw = _gz.decompress(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="bad gzip stream") from None
+        if len(raw) > MAX_BODY:
+            raise HTTPException(status_code=413, detail="payload too large")
 
     try:
         text = raw.decode("utf-8")

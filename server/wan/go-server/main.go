@@ -282,8 +282,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	var reader io.Reader = io.LimitReader(r.Body, maxBodyBytes+1)
 	if strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
-		// Gzipped push (1/min cadence): decompress on the fly, still capped.
-		zr, err := gzip.NewReader(io.LimitReader(r.Body, maxBodyBytes+1))
+		// Gzipped push: decompress with a single hard cap on decompressed size
+		// to avoid zip-bomb expansion (crafted gzip expanding 10-100x).
+		zr, err := gzip.NewReader(r.Body)
 		if err != nil {
 			http.Error(w, `{"detail":"bad gzip stream"}`, http.StatusBadRequest)
 			return
