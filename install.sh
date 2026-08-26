@@ -592,6 +592,22 @@ if [[ "$DO_RYZEN_SMU" -eq 1 ]]; then
   fi
 fi
 
+# ─── optional KDE Plasma 6 widget ──────────────────────────────────────────
+if [[ "$DO_WIDGET" -eq 1 ]] || { [[ "$DO_WIDGET" -eq 0 ]] && [[ -n "${KDE_FULL_SESSION:-}" || "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] && need_cmd kpackagetool6; }; then
+  WIDGET_DIR="$ROOT/kde-widget"
+  if [[ -f "$WIDGET_DIR/package/metadata.json" ]] && need_cmd kpackagetool6; then
+    say ""
+    info "Installing / updating KDE Plasma 6 widget…"
+    if kpackagetool6 --type Plasma/Applet -i "$WIDGET_DIR/package" 2>/dev/null; then
+      ok "KDE Plasma 6 widget installed."
+    else
+      kpackagetool6 --type Plasma/Applet -u "$WIDGET_DIR/package" 2>/dev/null || true
+      ok "KDE Plasma 6 widget updated."
+    fi
+    say "  ${C_DIM}Add 'Legion Control' from Plasma's widget picker.${C_RST}"
+  fi
+fi
+
 # ─── PATH hint ──────────────────────────────────────────────────────────────
 if [[ ":$PATH:" != *":${USER_PREFIX}/bin:"* ]] && [[ "$PREFIX" == "$USER_PREFIX" ]]; then
   warn "Add ${USER_PREFIX}/bin to your PATH, e.g.:"
