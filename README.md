@@ -47,7 +47,7 @@ The GUI, CLI, and widget talk to `legion-daemon` for privileged operations. The 
 
 ## Alpha telemetry (opt-out)
 
-Alpha builds send **one anonymized JSON** report — hardware model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/Curve-Optimizer settings, settings digest, sanitized daemon-log tail, self-check results — over encrypted HTTPS to the developer's collector ([`server/wan/`](server/wan/README.md)). **On by default** at one report per minute; **you can opt out** any time in Setup → Alpha diagnostics (or on first launch). The operator reviews reports in a web portal; see the [privacy statement](server/wan/PRIVACY.md). Never included: hostname, username, serials, MAC/IP addresses. Self-hosters can run their own collector and point clients at it via `LEGION_TELEMETRY_URL`, sharing its secret through `LEGION_TELEMETRY_KEY`.
+Alpha builds send **one anonymized JSON** report — hardware model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/Curve-Optimizer settings, settings digest, sanitized daemon-log tail, self-check results — over encrypted HTTPS to the developer's collector (private repo `legion-telemetry`). **On by default** at one report per minute; **you can opt out** any time in Setup → Alpha diagnostics (or on first launch). The operator reviews reports in a private web portal; see the privacy statement in that repo. Never included: hostname, username, serials, MAC/IP addresses. Self-hosters can run their own collector and point clients at it via `LEGION_TELEMETRY_URL`, sharing its secret through `LEGION_TELEMETRY_KEY`.
 
 ## Hardware support
 
