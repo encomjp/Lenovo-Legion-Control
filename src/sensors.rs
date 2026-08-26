@@ -4,8 +4,27 @@
 //! nvme (SSD), spd5118 (RAM), iwlwifi (WiFi), r8169 (Ethernet).
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// Cached mapping of hwmon subsystem names to their base paths.
+static HWMON_CACHE: Mutex<Option<HashMap<String, Vec<PathBuf>>>> = Mutex::new(None);
+
+fn scan_all_hwmon() -> HashMap<String, Vec<PathBuf>> {
+    let mut map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let base = Path::new("/sys/class/hwmon");
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let name_file = entry.path().join("name");
+            if let Some(n) = read_file(&name_file) {
+                map.entry(n).or_default().push(entry.path());
+            }
+        }
+    }
+    map
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SensorReadings {
@@ -119,47 +138,23 @@ fn log_nvidia_smi_path_once() {
     );
 }
 
-/// Discover hwmon devices by name, returning their sysfs paths.
+/// Discover hwmon devices by name, returning their sysfs paths (using cache with auto-refresh).
 pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let mut scanned = 0usize;
-    let base = Path::new("/sys/class/hwmon");
-    match fs::read_dir(base) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                scanned += 1;
-                let name_file = entry.path().join("name");
-                if let Some(n) = read_file(&name_file) {
-                    log::trace!(
-                        "sensors::find_hwmon: dir {} name='{n}'",
-                        entry.path().display()
-                    );
-                    if n == name {
-                        log::debug!(
-                            "sensors::find_hwmon: '{name}' matched at {}",
-                            entry.path().display()
-                        );
-                        paths.push(entry.path());
-                    }
-                } else {
-                    log::trace!(
-                        "sensors::find_hwmon: dir {} has no readable name",
-                        entry.path().display()
-                    );
-                }
+    let mut guard = match HWMON_CACHE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if let Some(cache) = guard.as_ref() {
+        if let Some(paths) = cache.get(name) {
+            if paths.iter().all(|p| p.exists()) {
+                return paths.clone();
             }
         }
-        Err(e) => log::warn!("sensors::find_hwmon: {base:?} unreadable: {e}"),
     }
-    log::debug!(
-        "sensors::find_hwmon — scanned {scanned} dir(s) under /sys/class/hwmon while looking for '{name}'"
-    );
-    log::debug!(
-        "sensors::find_hwmon: '{name}' → {} match(es) {:?}",
-        paths.len(),
-        paths
-    );
-    paths
+    let fresh = scan_all_hwmon();
+    let result = fresh.get(name).cloned().unwrap_or_default();
+    *guard = Some(fresh);
+    result
 }
 
 /// Get the first hwmon device matching a name.

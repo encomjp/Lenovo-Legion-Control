@@ -166,61 +166,20 @@ fn read_temp_file(path: &Path, label: &str) -> Option<i32> {
 }
 
 /// Reads the main CPU temperature (the AMD Tctl sensor, hwmon `temp1_input`)
-/// and a per-CCD temperature (AMD Tccd1/Tccd2 sensors, hwmon `temp4_input`
-/// with fallback to `temp3_input`).
+/// and a per-CCD temperature via cached hwmon discovery (avoids 10+ readdir/tick).
 pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
-    let base = Path::new("/sys/class/hwmon");
-    match fs::read_dir(base) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let name_path = entry.path().join("name");
-                let name = match fs::read_to_string(&name_path) {
-                    Ok(name) => name,
-                    Err(e) => {
-                        log::debug!(
-                            "thermal: cannot read {} — skipping hwmon: {e}",
-                            name_path.display()
-                        );
-                        continue;
-                    }
-                };
-                if name.trim() == "k10temp" {
-                    let hw = entry.path();
-                    log::debug!("thermal: k10temp matched at {}", hw.display());
-                    let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
-                    log::debug!("thermal: temp1_input (Tctl) → {cpu_temp:?}");
-                    let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
-                    let cpu_temp_2 = match tccd1 {
-                        Some(v) => {
-                            log::debug!("thermal: temp4_input (Tccd1) → {v}");
-                            Some(v)
-                        }
-                        None => {
-                            let fallback = read_temp_file(
-                                &hw.join("temp3_input"),
-                                "temp3_input (Tccd1 fallback)",
-                            );
-                            log::debug!(
-                                "thermal: temp4_input unusable — temp3_input (Tccd1 fallback) → {fallback:?}"
-                            );
-                            fallback
-                        }
-                    };
-                    log::debug!("thermal: read_cpu_temps → ({cpu_temp:?}, {cpu_temp_2:?})");
-                    return (cpu_temp, cpu_temp_2);
-                } else {
-                    log::trace!(
-                        "thermal: hwmon {} name={:?} — not k10temp, skipping",
-                        entry.path().display(),
-                        name.trim()
-                    );
-                }
-            }
-            log::debug!("thermal: no k10temp hwmon found under {}", base.display());
-        }
-        Err(e) => log::warn!("thermal: cannot list {}: {e}", base.display()),
-    }
-    (None, None)
+    let Some(hw) = crate::sensors::hwmon_by_name("k10temp") else {
+        log::trace!("thermal: no k10temp hwmon found");
+        return (None, None);
+    };
+
+    let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
+    let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
+    let cpu_temp_2 = match tccd1 {
+        Some(v) => Some(v),
+        None => read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"),
+    };
+    (cpu_temp, cpu_temp_2)
 }
 
 pub fn read_cur_max() -> Option<u32> {

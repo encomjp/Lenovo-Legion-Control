@@ -330,7 +330,7 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
         log::debug!("ipc {label}: sent {sent} B");
         stream.shutdown(std::net::Shutdown::Write).ok();
 
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(1024);
         stream
             .take(MAX_FRAME_BYTES)
             .read_to_end(&mut buf)
