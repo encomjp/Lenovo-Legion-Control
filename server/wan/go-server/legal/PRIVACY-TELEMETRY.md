@@ -10,9 +10,11 @@ IONOS server infrastructure (data centre Germany).
 
 ## 2. What is collected?
 
-Only after you pick **Share ✓** in the first-launch welcome dialog (or later
-enable **Settings → Setup → “Share anonymous diagnostics”**), the software
-transmits **one** anonymised JSON report per click on “Send now”:
+Telemetry is **enabled by default**: the software transmits **one** anonymised
+JSON report per minute (60 s cadence). You can opt out any time — in the
+first-launch dialog ("Opt out") or later via **Settings → Setup → "Share
+anonymous diagnostics"** (turn the switch off). When disabled, nothing is
+transmitted.
 
 - **Device:** model name, machine type, BIOS version, CPU/GPU model, EC chip
 - **OS:** distribution and kernel version
@@ -38,9 +40,9 @@ Art. 4 No. 1 GDPR: it cannot be linked to a natural person, directly or
 indirectly (Recital 26 GDPR — anonymised data). The GDPR therefore does
 **not apply** to its collection and storage. Independently of that:
 
-- Transmission happens **only after explicit opt-in** (default: off).
-  Withdraw anytime via the same switch; previously sent reports remain until
-  the retention period ends.
+- Transmission happens **by default (opt-out)**; disable anytime via the
+  Settings switch or the first-launch dialog. Previously sent reports remain
+  until the retention period ends.
 - Transport encryption via HTTPS (Cloudflare edge TLS + origin certificate).
 - Storage: IONOS VPS, accessible only to the operator.
 

@@ -11,10 +11,11 @@ einer Server-Infrastruktur bei IONOS (Rechenzentrum Deutschland).
 
 ## 2. Was wird gesammelt?
 
-Nur wenn du im **Erststart-Dialog** „Share ✓" wählst oder später in der App
-unter **Einstellungen → Setup → „Share anonymous diagnostics"** ausdrücklich
-aktivierst, übermittelt die Software **einen** anonymisierten JSON-Bericht
-pro Klick auf „Send now":
+Telemetrie ist **standardmäßig aktiviert**: Die Software übermittelt **einen**
+anonymisierten JSON-Bericht pro Minute (60-s-Takt). Du kannst jederzeit
+widersprechen — im **Erststart-Dialog** („Opt out") oder später unter
+**Einstellungen → Setup → „Share anonymous diagnostics"** (Schalter
+ausschalten). Bei Deaktivierung wird nichts übermittelt.
 
 - **Gerät:** Modellbezeichnung (z. B. „Legion Pro 7 16AFR10H"), Maschinentyp,
   BIOS-Version, CPU-/GPU-Modell, EC-Chip
@@ -43,10 +44,9 @@ technisch möglich noch vorgesehen (Erwägungsgrund 26 DSGVO — anonymisierte
 Daten). Die DSGVO findet auf Erhebung und Speicherung daher **keine
 Anwendung**. Unabhängig davon gilt:
 
-- Die Übermittlung erfolgt **ausschließlich nach ausdrücklicher Opt-in-
-  Einwilligung** (Standard: aus). Der Widerruf erfolgt jederzeit über denselben
-  Schalter; bereits gesendete Berichte verbleiben bis zum Ablauf der
-  Speicherfrist.
+- Die Übermittlung erfolgt **standardmäßig (Opt-out)**; deaktivierbar jederzeit
+  über den Einstellungen-Schalter oder den Erststart-Dialog. Bereits gesendete
+  Berichte verbleiben bis zum Ablauf der Speicherfrist.
 - Transportverschlüsselung via HTTPS (Cloudflare-TLS + Origin-Zertifikat).
 - Speicherort: IONOS VPS, Zugriff nur für den Betreiber.
 
