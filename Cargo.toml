@@ -35,6 +35,8 @@ include_dir = "0.7"
 signal-hook = "0.3"
 libc = "0.2"
 
+flate2 = "1"
+
 # ─── Async utilities ───
 
 [lib]

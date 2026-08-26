@@ -581,7 +581,9 @@ fn create_private_temp(contents: &str, file_name: &str) -> Result<std::path::Pat
 }
 
 /// Serialized-report variant of [`create_private_temp`] — see there for the
-/// security properties.
+/// security properties. Kept for `legion-cli diagnose dump --send-raw` style
+/// plain-text fallbacks and unit tests.
+#[allow(dead_code)]
 fn create_temp_payload(json: &str) -> Result<std::path::PathBuf, String> {
     create_private_temp(json, &temp_name("legion-diag", "json"))
 }
@@ -626,7 +628,19 @@ fn normalize_key(key: Option<&str>) -> Option<&str> {
 /// `--` immediately precedes the endpoint as defence in depth: even if a
 /// future regression reintroduced a dash-prefixed value there, curl could
 /// never parse it as an option.
-fn build_curl_args(endpoint: &str, tmp_path: &str, header_path: Option<&str>) -> Vec<String> {
+fn gzip_bytes(input: &[u8]) -> Vec<u8> {
+    use flate2::{write::GzEncoder, Compression};
+    let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+    let _ = enc.write_all(input);
+    enc.finish().unwrap_or_default()
+}
+
+fn build_curl_args(
+    endpoint: &str,
+    tmp_path: &str,
+    header_path: Option<&str>,
+    gzipped: bool,
+) -> Vec<String> {
     let mut args = vec![
         "-sS".to_string(),
         "--max-time".to_string(),
@@ -636,6 +650,10 @@ fn build_curl_args(endpoint: &str, tmp_path: &str, header_path: Option<&str>) ->
         "-H".to_string(),
         "Content-Type: application/json".to_string(),
     ];
+    if gzipped {
+        args.push("-H".to_string());
+        args.push("Content-Encoding: gzip".to_string());
+    }
     if let Some(hdr_path) = header_path {
         args.push("-H".to_string());
         args.push(format!("@{hdr_path}"));
@@ -649,8 +667,9 @@ fn build_curl_args(endpoint: &str, tmp_path: &str, header_path: Option<&str>) ->
         endpoint.to_string(),
     ]);
     log::debug!(
-        "build_curl_args: {} argument(s), secret header: {}",
+        "build_curl_args: {} argument(s), gzipped={}, secret header: {}",
         args.len(),
+        gzipped,
         header_path.is_some()
     );
     args
@@ -676,7 +695,26 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
     };
 
     let outcome = (|| -> Result<String, String> {
-        let tmp = create_temp_payload(&json)?;
+        // Gzip the payload to save bandwidth for every push (NAT-friendly 1/min cadence).
+        let gzipped = gzip_bytes(json.as_bytes());
+        let use_gzip = !gzipped.is_empty() && gzipped.len() < json.len();
+        let payload_bytes: &[u8] = if use_gzip { &gzipped } else { json.as_bytes() };
+        // Write raw bytes (gzipped or plain) to a 0600 temp file via create_private_temp helper.
+        let tmp_name = temp_name("legion-diag", if use_gzip { "json.gz" } else { "json" });
+        let tmp_path = std::env::temp_dir().join(&tmp_name);
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp_path)
+                .map_err(|e| format!("temp file {}: {e}", tmp_path.display()))?;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+            f.write_all(payload_bytes)
+                .map_err(|e| format!("temp write: {e}"))?;
+        }
+        let tmp = tmp_path;
         temps.push(tmp.clone());
 
         // Per-send env read: the secret flows ONLY into its own brand-new
@@ -696,6 +734,7 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
                 endpoint,
                 &tmp.to_string_lossy(),
                 hdr_view.as_deref(),
+                use_gzip,
             ))
             .output()
             .map_err(|e| {
@@ -1055,7 +1094,12 @@ mod tests {
     /// `--` guarding the endpoint.
     #[test]
     fn build_curl_args_without_key_omits_secret_header() {
-        let args = build_curl_args("https://ep.example/v1/diagnostics", "/tmp/p.json", None);
+        let args = build_curl_args(
+            "https://ep.example/v1/diagnostics",
+            "/tmp/p.json",
+            None,
+            false,
+        );
         for flag in ["-sS", "--max-time", "15", "-X", "POST", "-w"] {
             assert!(args.iter().any(|a| a == flag), "flag {flag} missing");
         }
@@ -1097,6 +1141,7 @@ mod tests {
             "https://ep.example/v1/diagnostics",
             "/tmp/p.json",
             Some(hdr),
+            false,
         );
         for flag in ["-sS", "--max-time", "15", "-X", "POST", "-w"] {
             assert!(args.iter().any(|a| a == flag), "flag {flag} missing");

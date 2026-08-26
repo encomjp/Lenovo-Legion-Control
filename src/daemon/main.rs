@@ -363,6 +363,23 @@ fn main() {
         log::info!("thermal-governor thread started");
     }
 
+    // Telemetry push scheduler: gzipped diagnostics push every
+    // auto_interval_secs (default 60 s) while the user has opted in.
+    // Off by default — nothing leaves the machine until Settings →
+    // "Share anonymous diagnostics" is switched on. NAT-friendly:
+    // outbound HTTPS only, no inbound reachability required.
+    {
+        let shutdown_tel = shutdown.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("telemetry-push".into())
+            .spawn(move || telemetry_scheduler(shutdown_tel))
+        {
+            log::error!("failed to start telemetry-push thread: {e}");
+        } else {
+            log::info!("telemetry-push thread started");
+        }
+    }
+
     let client_state = Arc::new(Mutex::new(ClientState::default()));
     let active_clients = Arc::new(AtomicUsize::new(0));
 
@@ -1051,6 +1068,52 @@ fn rgb_health_str(h: rgb_panic::Health) -> &'static str {
         rgb_panic::Health::SoftIssue => "soft-issue",
         rgb_panic::Health::HardwareBroken => "broken",
         rgb_panic::Health::NotApplicable => "n/a",
+    }
+}
+
+/// Telemetry push scheduler — gzipped diagnostics every `auto_interval_secs`
+/// (default 60 s) while opted in. Respects the config live: flipping the
+/// Settings switch off stops sends on the next tick without a daemon restart.
+fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
+    // Delay first push so boot sensor settle finishes and first-send
+    // machine-id generation has a stable environment.
+    for _ in 0..100 {
+        if shutdown.load(Ordering::Relaxed) {
+            log::info!("telemetry-push thread stopped");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    loop {
+        let cfg = config::get().diagnostics;
+        if !cfg.enabled || cfg.auto_interval_secs == 0 {
+            // Not opted in or manual-only: re-check every 30 s.
+            for _ in 0..300 {
+                if shutdown.load(Ordering::Relaxed) {
+                    log::info!("telemetry-push thread stopped");
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            continue;
+        }
+        let interval = cfg.auto_interval_secs.clamp(15, 3600) as u64;
+        match legion_core::diagnostics::collect_and_send(None) {
+            Ok(_) => log::debug!("telemetry push sent (interval {interval}s, gzip)"),
+            Err(e) if e.contains("less than a minute ago") => {
+                log::trace!("telemetry push dedup-skipped: {e}");
+            }
+            Err(e) => log::warn!("telemetry push failed: {e}"),
+        }
+        // Sleep the interval in 100 ms slices so shutdown is prompt.
+        let slices = interval.saturating_mul(10);
+        for _ in 0..slices {
+            if shutdown.load(Ordering::Relaxed) {
+                log::info!("telemetry-push thread stopped");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 

@@ -220,9 +220,11 @@ pub struct DiagnosticsConfig {
     /// Empty string = use the built-in default collector URL.
     #[serde(default)]
     pub endpoint: String,
-    /// Auto-send interval in hours; 0 = manual only.
-    #[serde(default)]
-    pub auto_period_hours: u32,
+    /// Auto-send interval in seconds; 0 = manual only. Env override:
+    /// `LEGION_TELEMETRY_INTERVAL_SECS`. Rust default 60 s for NAT-friendly
+    /// push cadence. `auto_period_hours` is legacy compat (hours → secs).
+    #[serde(default = "default_auto_interval_secs")]
+    pub auto_interval_secs: u32,
     /// RFC3339 timestamp of the last successful send (informational).
     #[serde(default)]
     pub last_sent: Option<String>,
@@ -230,6 +232,9 @@ pub struct DiagnosticsConfig {
     /// the operator correlate reports from the same machine over time.
     #[serde(default)]
     pub machine_id: String,
+    /// Legacy hours field — migrated to `auto_interval_secs` on load.
+    #[serde(default)]
+    pub auto_period_hours: u32,
 }
 
 impl DiagnosticsConfig {
@@ -279,6 +284,9 @@ fn default_charge_limit() -> u32 {
     100
 }
 
+fn default_auto_interval_secs() -> u32 {
+    60
+}
 fn default_keyboard_layout() -> String {
     "de".into()
 }

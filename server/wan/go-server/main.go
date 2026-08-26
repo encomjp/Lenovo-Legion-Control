@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
@@ -279,7 +280,18 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"slow down"}`, http.StatusTooManyRequests)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	var reader io.Reader = io.LimitReader(r.Body, maxBodyBytes+1)
+	if strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
+		// Gzipped push (1/min cadence): decompress on the fly, still capped.
+		zr, err := gzip.NewReader(io.LimitReader(r.Body, maxBodyBytes+1))
+		if err != nil {
+			http.Error(w, `{"detail":"bad gzip stream"}`, http.StatusBadRequest)
+			return
+		}
+		defer zr.Close()
+		reader = io.LimitReader(zr, maxBodyBytes+1)
+	}
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		http.Error(w, `{"detail":"failed reading body"}`, http.StatusBadRequest)
 		return
@@ -323,7 +335,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if mid, ok := doc["machine_id"].(string); ok {
 		machineID = truncate(mid, 256)
 	}
-	if existing, _ := s.db.FindRecentByMachine(machineID, 5); existing > 0 {
+	if existing, _ := s.db.FindRecentByMachine(machineID, 1); existing > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "duplicate": true, "id": existing})
 		return
