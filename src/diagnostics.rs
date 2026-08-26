@@ -537,6 +537,44 @@ fn core_id_from_line(line: &str) -> Option<u32> {
     rest.trim().parse::<u32>().ok()
 }
 
+/// Derive the native refresh rate (Hz) from an EDID file's base-block Detailed
+/// Timing Descriptors. Many modern panels keep native timing in a DisplayID
+/// extension instead, so this returns `None` when the classic descriptors are
+/// empty — resolution stays reliable, refresh is best-effort.
+fn parse_display_refresh_hz(edid_path: &std::path::Path) -> Option<u32> {
+    let edid = std::fs::read(edid_path).ok()?;
+    // Valid EDID base block: at least 128 bytes + the standard header.
+    if edid.len() < 128 || edid[0..8] != [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00] {
+        return None;
+    }
+    for off in [0x36usize, 0x48, 0x5a, 0x6c] {
+        if off + 18 > 128 {
+            break;
+        }
+        let pix = (edid[off] as u32) | ((edid[off + 1] as u32) << 8); // 10 kHz units
+        if pix == 0 {
+            continue; // unused timing descriptor
+        }
+        let ha = (edid[off + 2] as u32) | (((edid[off + 4] as u32) & 0xf0) << 4);
+        let hb = (edid[off + 3] as u32) | (((edid[off + 4] as u32) & 0x0f) << 8);
+        let va = (edid[off + 5] as u32) | (((edid[off + 7] as u32) & 0xf0) << 4);
+        let vb = (edid[off + 6] as u32) | (((edid[off + 7] as u32) & 0x0f) << 8);
+        let htotal = ha + hb;
+        let mut vtotal = va + vb;
+        if edid[off + 17] & 0x80 != 0 {
+            vtotal *= 2; // interlaced
+        }
+        if htotal == 0 || vtotal == 0 {
+            continue;
+        }
+        let hz = (pix * 10_000) / (htotal * vtotal);
+        if (60..=360).contains(&hz) {
+            return Some(hz);
+        }
+    }
+    None
+}
+
 /// Safely extract detailed hardware context (CPU topology, RAM, GPU,
 /// storage devices, display metrics) from Linux standard sysfs & /proc files.
 /// 100% read-only, bounds-checked, zero unsafe, zero serial numbers.
@@ -688,26 +726,41 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         root_total_gb: None,
     };
 
-    // 5. Display resolution from DRM sysfs connectors
+    // 5. Display resolution + refresh from DRM sysfs connectors.
+    // Prefer the internal eDP panel (the laptop's own display) so external
+    // monitors can never displace it; fall back to the first connected output.
     let mut resolution = None;
-    let refresh_hz = None;
+    let mut refresh_hz = None;
+    let mut fallback_res = None;
     if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
-            let mode_path = entry.path().join("modes");
-            if let Ok(modes) = std::fs::read_to_string(mode_path) {
-                if let Some(first_mode) = modes.lines().next() {
-                    if first_mode.contains('x') {
-                        resolution = Some(first_mode.trim().to_string());
-                        break;
-                    }
-                }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let status = std::fs::read_to_string(entry.path().join("status"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            let first_mode = std::fs::read_to_string(entry.path().join("modes"))
+                .ok()
+                .and_then(|m| m.lines().next().map(|l| l.trim().to_string()));
+            if status != "connected" {
+                continue;
+            }
+            let Some(mode) = first_mode else { continue };
+            if !mode.contains('x') {
+                continue;
+            }
+            if name.contains("eDP") {
+                resolution = Some(mode);
+                refresh_hz = parse_display_refresh_hz(&entry.path().join("edid"));
+                break;
+            }
+            if fallback_res.is_none() {
+                fallback_res = Some(mode);
             }
         }
     }
-    // Derive refresh rate from the reported vsync refresh, not the resolution.
-    // resolution like "2560x1600" is kept as-is; refresh is None if unknown.
-    // Future: parse /sys/class/drm/.../vrr_enabled or EDID when available.
-    // Currently we leave refresh_hz None to avoid hardcoding 240 on 60/165 Hz panels.
+    if resolution.is_none() {
+        resolution = fallback_res;
+    }
     let display = DisplayDetail {
         resolution,
         refresh_hz,
@@ -1699,5 +1752,40 @@ mod tests {
         assert_eq!(core_id_from_line("core id\t: abc"), None);
         assert_eq!(core_id_from_line("coreid\t: 1"), None);
         assert_eq!(core_id_from_line("model name\t: Intel"), None);
+    }
+
+    /// parse_display_refresh_hz must derive the refresh rate from a valid
+    /// EDID base-block Detailed Timing Descriptor (1920x1080 @ 60 Hz here),
+    /// and return None for empty/invalid EDIDs.
+    #[test]
+    fn parse_display_refresh_hz_reads_edid_dtd() {
+        let dir = std::env::temp_dir();
+        let tag = std::process::id();
+        let good = dir.join(format!("legion-edid-{tag}-good.bin"));
+        let empty = dir.join(format!("legion-edid-{tag}-empty.bin"));
+
+        let mut edid = vec![0u8; 128];
+        edid[0..8].copy_from_slice(&[0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00]);
+        // 1920x1080@60: pixel clock 148.5 MHz -> 14850 units of 10 kHz, 0x3A02.
+        let pix = 148_500_000u32 / 10_000;
+        edid[0x36] = (pix & 0xff) as u8;
+        edid[0x37] = (pix >> 8) as u8;
+        let ha = 1920u32;
+        let hb = 280u32;
+        let va = 1080u32;
+        let vb = 45u32;
+        edid[0x38] = (ha & 0xff) as u8; // ha low
+        edid[0x39] = (hb & 0xff) as u8; // hb low
+        edid[0x3a] = (((ha >> 8) & 0x0f) << 4) as u8 | ((hb >> 8) as u8 & 0x0f); // ha/hb high 4b
+        edid[0x3b] = (va & 0xff) as u8; // va low
+        edid[0x3c] = (vb & 0xff) as u8; // vb low
+        edid[0x3d] = (((va >> 8) & 0x0f) << 4) as u8 | ((vb >> 8) as u8 & 0x0f);
+        std::fs::write(&good, &edid).unwrap();
+        std::fs::write(&empty, [0u8; 128]).unwrap();
+
+        assert_eq!(parse_display_refresh_hz(&good), Some(60));
+        assert_eq!(parse_display_refresh_hz(&empty), None);
+        let _ = std::fs::remove_file(&good);
+        let _ = std::fs::remove_file(&empty);
     }
 }
