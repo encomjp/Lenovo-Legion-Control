@@ -106,9 +106,9 @@ fn publish_user_socket_links(system_socket: &std::path::Path) {
         }
         let _ = std::fs::remove_file(&link);
         if let Err(e) = std::os::unix::fs::symlink(system_socket, &link) {
-            log::debug!("could not publish user socket link {}: {e}", link.display());
+            log::warn!("could not publish user socket link {}: {e}", link.display());
         } else {
-            log::debug!("published user socket link {}", link.display());
+            log::info!("published user socket link {}", link.display());
         }
     }
 }

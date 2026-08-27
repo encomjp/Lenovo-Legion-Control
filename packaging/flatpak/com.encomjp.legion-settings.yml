@@ -24,8 +24,6 @@ sdk-extensions:
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
-  env:
-    CARGO_TARGET_DIR: target
   # cargo fetches crates during the module build
   build-args:
     - --share=network
@@ -44,7 +42,7 @@ finish-args:
   # Privileged daemon IPC (daemon installed on the HOST, not in the sandbox).
   # The daemon publishes symlinks into xdg-run so a sandboxed UI can find
   # the system socket without direct /run access.
-  - --filesystem=xdg-run
+  - --filesystem=xdg-run/legion-control.socket
 
 modules:
   - name: legion-control
@@ -64,3 +62,4 @@ modules:
     sources:
       - type: dir
         path: ../..
+        skip: [".git", "target", ".flatpak-builder", "build", "packaging/out"]
