@@ -699,6 +699,50 @@ fn build_ui(app: &adw::Application) {
         });
     }
 
+    // The conn strip advertises "click to check service status" — deliver
+    // that: re-probe the socket on demand and toast the verdict.
+    {
+        let click = gtk::GestureClick::new();
+        let dot_c = dot.clone();
+        let conn_l_c = conn_l.clone();
+        let conn_s_c = conn_s.clone();
+        let foot_c = foot.clone();
+        let banner_c = banner.clone();
+        let gate_c = daemon_gate.clone();
+        let overlay_c = toast_overlay.clone();
+        click.connect_released(move |_, _, _, _| {
+            conn_s_c.set_text("Checking…");
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(daemon_ok());
+            });
+            let dot_c = dot_c.clone();
+            let conn_l_c = conn_l_c.clone();
+            let conn_s_c = conn_s_c.clone();
+            let foot_c = foot_c.clone();
+            let banner_c = banner_c.clone();
+            let gate_c = gate_c.clone();
+            let overlay_c = overlay_c.clone();
+            glib::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
+                Ok(online) => {
+                    sync_daemon_ui(
+                        online, &dot_c, &conn_l_c, &conn_s_c, &foot_c, &banner_c, &gate_c,
+                    );
+                    if online {
+                        toast_ok(&overlay_c, "Daemon online — service ready");
+                    } else {
+                        toast_error(&overlay_c, "Daemon offline — start legion-control.service");
+                    }
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            });
+        });
+        foot.add_controller(click);
+        foot.set_cursor(gtk::gdk::Cursor::from_name("pointer", None).as_ref());
+    }
+
     let overlay_banner = toast_overlay.clone();
     let dot_b = dot.clone();
     let conn_l_b = conn_l.clone();
@@ -3734,7 +3778,7 @@ fn build_cooling_overview_page(
     gate: &DaemonGate,
 ) -> gtk::Box {
     let page = page_lede(
-        "All fans at a glance — expand each card for per-fan tuning, or reset when done.",
+        "All fans at a glance — tune each fan inline, or flip back to Automatic when done.",
     );
     let overview = pref_group("Fans overview", None);
     tip(&overview, "Each card exposes full tuning for that fan");
@@ -5261,7 +5305,7 @@ fn build_logs_section(
     text_view.set_left_margin(8);
     text_view.set_right_margin(8);
     let buffer = text_view.buffer();
-    buffer.set_text("Click Fetch logs to retrieve recent daemon output.");
+    buffer.set_text("Fetching recent daemon output…");
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&text_view));
@@ -5323,6 +5367,34 @@ fn build_logs_section(
             }
         });
     });
+
+    // Auto-fetch once shortly after startup so opening the Logs tab shows
+    // content immediately; Fetch stays as the manual refresh.
+    {
+        let buf_auto = buffer.clone();
+        glib::timeout_add_local_once(Duration::from_millis(600), move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let text = match send_command(DaemonCommand::GetRecentLogs(100)) {
+                    Ok(DaemonResponse::RecentLogs(t)) if !t.is_empty() => t,
+                    Ok(DaemonResponse::RecentLogs(_)) => "(no log entries)".into(),
+                    Ok(DaemonResponse::Error(e)) => format!("daemon error: {e}"),
+                    Err(e) => format!("ipc error: {e}"),
+                    _ => "Unexpected response".into(),
+                };
+                let _ = tx.send(text);
+            });
+            let b = buf_auto.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                Ok(text) => {
+                    b.set_text(&text);
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => glib::ControlFlow::Break,
+            });
+        });
+    }
 
     // Copy to clipboard
     let buf_copy = buffer.clone();
