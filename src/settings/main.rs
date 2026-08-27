@@ -611,8 +611,10 @@ fn build_ui(app: &adw::Application) {
     apply_conn_status(&dot, &conn_l, &conn_s, &foot, true);
     daemon_gate.set_online(true);
 
+    // No top bar here: the brand strip (WindowHandle) is the drag area and
+    // an empty header bar wasted ~50px, which pushed the nav rail + status
+    // foot off short windows (900 px screens clipped the About row).
     let sidebar_toolbar = adw::ToolbarView::new();
-    sidebar_toolbar.add_top_bar(&adw::HeaderBar::new());
     sidebar_toolbar.set_content(Some(&sidebar_box));
 
     let sidebar_page = adw::NavigationPage::builder()
