@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const VERSION: u32 = 4;
@@ -550,8 +551,15 @@ fn write_disk(cfg: &AppConfig) {
     };
     // Atomic write: temp file in the same directory + rename. A crash or
     // power loss mid-write can never leave a truncated settings.json behind.
+    // The suffix is unique per call — PID alone collides when two threads
+    // persist concurrently (one rename would steal the other's temp file).
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let name = settings_file_name(&path);
-    let tmp = path.with_file_name(format!("{name}.tmp-{}", std::process::id()));
+    let tmp = path.with_file_name(format!(
+        "{name}.tmp-{}-{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     use std::io::Write;
     let write_result = fs::File::create(&tmp).and_then(|mut f| {
         f.write_all(s.as_bytes())?;
@@ -936,7 +944,6 @@ mod tests {
     fn with_isolated_config_dir(f: impl FnOnce(PathBuf)) {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("legion-test-{}-{}", std::process::id(), {
-            use std::sync::atomic::{AtomicU64, Ordering};
             static CTR: AtomicU64 = AtomicU64::new(0);
             CTR.fetch_add(1, Ordering::Relaxed)
         }));
@@ -963,12 +970,25 @@ mod tests {
             let loaded = load_from_disk();
             assert_eq!(loaded.brightness, 7);
             assert_eq!(loaded.charge_limit, 80);
-            // No .tmp left behind.
+            // No .tmp left behind — other tests may share the env-stomped
+            // config dir and be mid-write, so allow a short grace period
+            // before failing.
             let cfg_dir = base.join("legion-control");
-            for e in fs::read_dir(&cfg_dir).unwrap() {
-                let name = e.unwrap().file_name().to_string_lossy().to_string();
-                assert!(!name.contains(".tmp-"), "tmp file left behind: {name}");
+            let mut leftovers: Vec<String> = Vec::new();
+            for _ in 0..20 {
+                leftovers.clear();
+                for e in fs::read_dir(&cfg_dir).unwrap() {
+                    let name = e.unwrap().file_name().to_string_lossy().to_string();
+                    if name.contains(".tmp-") {
+                        leftovers.push(name);
+                    }
+                }
+                if leftovers.is_empty() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
+            assert!(leftovers.is_empty(), "tmp files left behind: {leftovers:?}");
         });
     }
 
