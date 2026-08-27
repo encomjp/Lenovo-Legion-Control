@@ -343,14 +343,14 @@ headerbar windowtitle .subtitle {
 
 /* Left-edge status — steel by default, amber/red by state */
 .metric-chip.hot {
-    border-left-color: #c8102e;
+    border-left-color: @accent_bg_color;
 }
 .metric-chip.hot .value {
     color: #ff6b7e;
 }
 
 .metric-chip.warm {
-    border-left-color: #d9981a;
+    border-left-color: @lab_amber;
 }
 .metric-chip.warm .value {
     color: #f5c542;

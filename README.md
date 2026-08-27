@@ -1,35 +1,147 @@
-<p align="center"><img src="data/icons/app-mark.svg" alt="Legion Control mark" width="96"></p>
+<p align="center">
+  <img src="data/icons/app-mark.svg" alt="Legion Control" width="120">
+</p>
 
-# Legion Control
+<h1 align="center">Legion Control</h1>
 
-[![License: GPL-2.0-only](https://img.shields.io/badge/license-GPL--2.0--only-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) [![Rust 1.87+](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](https://www.rust-lang.org/)
+<p align="center">
+  <b>Garage-lab console for Lenovo Legion — GTK4/libadwaita · Rust · Daemon · KDE widget</b><br>
+  <sub>Unofficial · Community · Not affiliated with Lenovo · Made in Europe for everyone</sub>
+</p>
 
-<p align="center"><img src="docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="320"></p>
+<p align="center">
+  <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-blue.svg" alt="License"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.87%2B-orange.svg" alt="Rust"></a>
+  <a href="https://github.com/encomjp/lenovo-legion-tool/releases"><img src="https://img.shields.io/github/v/release/encomjp/lenovo-legion-tool?label=release&color=c8102e" alt="Release"></a>
+  <a href="https://github.com/encomjp/lenovo-legion-tool/issues"><img src="https://img.shields.io/github/issues/encomjp/lenovo-legion-tool?color=6b7280" alt="Issues"></a>
+  <img src="https://img.shields.io/badge/wayland-%26%20X11-2ecc71.svg" alt="Wayland+X11">
+  <img src="https://img.shields.io/badge/KDE_Plasma-6-1e88e5.svg" alt="KDE">
+</p>
 
-Linux control software for Lenovo Legion laptops: a GTK4/libadwaita app, CLI, privileged hardware daemon, and optional KDE Plasma 6 widget.
+<p align="center">
+  <a href="docs/INSTALLATION.md"><b>Install</b></a> ·
+  <a href="docs/USAGE.md">Usage</a> ·
+  <a href="docs/HARDWARE-AND-HID.md">Hardware & HID</a> ·
+  <a href="docs/TROUBLESHOOTING.md">Troubleshooting</a> ·
+  <a href="https://github.com/encomjp/lenovo-legion-tool/issues/new">Report an issue</a>
+</p>
 
-[Install](docs/INSTALLATION.md) · [Usage](docs/USAGE.md) · [Hardware & HID](docs/HARDWARE-AND-HID.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Report an issue](https://github.com/encomjp/lenovo-legion-tool/issues)
+<p align="center">
+  <img src="docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="320">
+</p>
 
-> **Experimental software:** community-developed and provided without warranty. Hardware-writing features can affect system or device state; use them only when you understand their effect and have a recovery plan. Legion Control is not affiliated with Lenovo.
+> **Experimental:** community-developed, no warranty. Hardware writes can affect system state — use with a recovery plan. Screenshots below are captured headless on an isolated `Xvfb :99 + openbox` session (`GDK_BACKEND=x11`, `GSK_RENDERER=cairo`) — your real desktop is never obscured.
+
+---
+
+### Hero — Home overview on Legion Pro 7 16AFR10H (83RU)
+
+<p align="center">
+  <a href="docs/assets/screenshots/01-home-overview.png"><img src="docs/assets/screenshots/01-home-overview.png" alt="Home — metric chips, fans, battery, power mode" width="920"></a><br>
+  <sub><b>Home</b> · live chips · Fan overview · Battery · Custom PPT — 1060×680, dark libadwaita, captured offscreen</sub>
+</p>
+
+<p align="center">
+  <a href="docs/assets/screenshots/05-cooling.png"><img src="docs/assets/screenshots/05-cooling.png" alt="Cooling" width="275"></a>
+  <a href="docs/assets/screenshots/06-lighting-keyboard.png"><img src="docs/assets/screenshots/06-lighting-keyboard.png" alt="Lighting keyboard" width="275"></a>
+  <a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" alt="Battery" width="275"></a>
+</p>
+
+---
+
+## Screenshots — the whole app, no workflow interruption
+
+> Every image is a **real 1060×680 window** rendered headless (`Xvfb 1400×900 + openbox`, `LEGION_PAGE=…`, `xwd`→`png`). No compositor grab of your live session — the session stays untouched. Click any thumbnail for full resolution.
+
+<table>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/01-home-overview.png"><img src="docs/assets/screenshots/01-home-overview.png" width="260" alt="Home"></a><br><b>Home</b><br><sub>chips · fans · battery</sub></td>
+<td align="center"><a href="docs/assets/screenshots/02-cpu-features.png"><img src="docs/assets/screenshots/02-cpu-features.png" width="260" alt="CPU Features"></a><br><b>CPU · Features</b><br><sub>boost · SMT</sub></td>
+<td align="center"><a href="docs/assets/screenshots/03-cpu-tuning.png"><img src="docs/assets/screenshots/03-cpu-tuning.png" width="260" alt="CPU Tuning"></a><br><b>CPU · Tuning</b><br><sub>thermal · CO · stability</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/04-cpu-power.png"><img src="docs/assets/screenshots/04-cpu-power.png" width="260" alt="CPU Power"></a><br><b>CPU · Power</b><br><sub>read-only PPT preview</sub></td>
+<td align="center"><a href="docs/assets/screenshots/05-cooling.png"><img src="docs/assets/screenshots/05-cooling.png" width="260" alt="Cooling"></a><br><b>Cooling</b><br><sub>all fans at a glance</sub></td>
+<td align="center"><a href="docs/assets/screenshots/06-lighting-keyboard.png"><img src="docs/assets/screenshots/06-lighting-keyboard.png" width="260" alt="Lighting Keyboard"></a><br><b>Lighting · Keyboard</b><br><sub>zone + per-key</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/07-lighting-front.png"><img src="docs/assets/screenshots/07-lighting-front.png" width="260" alt="Front"></a><br><b>Lighting · Front</b><br><sub>chin bar</sub></td>
+<td align="center"><a href="docs/assets/screenshots/08-lighting-rear.png"><img src="docs/assets/screenshots/08-lighting-rear.png" width="260" alt="Rear"></a><br><b>Lighting · Rear</b><br><sub>hinge bar</sub></td>
+<td align="center"><a href="docs/assets/screenshots/09-lighting-logo.png"><img src="docs/assets/screenshots/09-lighting-logo.png" width="260" alt="Logo"></a><br><b>Lighting · Logo</b><br><sub>lid star</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/10-lighting-more.png"><img src="docs/assets/screenshots/10-lighting-more.png" width="260" alt="More"></a><br><b>Lighting · More</b><br><sub>brightness · all zones</sub></td>
+<td align="center"><a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" width="260" alt="Battery"></a><br><b>Battery</b><br><sub>health · limit · status</sub></td>
+<td align="center"><a href="docs/assets/screenshots/12-fix-audio.png"><img src="docs/assets/screenshots/12-fix-audio.png" width="260" alt="Fix Audio"></a><br><b>Fix · Speakers</b><br><sub>AW88399 amp</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/13-fix-rgb.png"><img src="docs/assets/screenshots/13-fix-rgb.png" width="260" alt="Fix RGB"></a><br><b>Fix · RGB Fix</b><br><sub>auto-fix + permanent udev</sub></td>
+<td align="center"><a href="docs/assets/screenshots/14-fix-logs.png"><img src="docs/assets/screenshots/14-fix-logs.png" width="260" alt="Logs"></a><br><b>Fix · Logs</b><br><sub>daemon journal</sub></td>
+<td align="center"><a href="docs/assets/screenshots/15-profiles.png"><img src="docs/assets/screenshots/15-profiles.png" width="260" alt="Profiles"></a><br><b>Profiles</b><br><sub>save · load · preset</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/assets/screenshots/16-about-setup.png"><img src="docs/assets/screenshots/16-about-setup.png" width="260" alt="Setup"></a><br><b>About · Setup</b><br><sub>updates · daemon · diagnostics</sub></td>
+<td align="center"><a href="docs/assets/screenshots/17-about-hardware.png"><img src="docs/assets/screenshots/17-about-hardware.png" width="260" alt="Hardware"></a><br><b>About · Hardware</b><br><sub>DMI · EC · lighting · storage</sub></td>
+<td align="center"><a href="docs/assets/screenshots/18-about-help.png"><img src="docs/assets/screenshots/18-about-help.png" width="260" alt="Help"></a><br><b>About · Help</b><br><sub>links · legal</sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>How screenshots are taken without obscuring your workflow</b></summary>
+
+```bash
+# 1. Isolate — virtual display, no grab of your real Wayland session
+Xvfb :99 -screen 0 1400x900x24 -ac &
+DISPLAY=:99 openbox --sm-disable &
+
+# 2. Run each page headless, with a private window
+DISPLAY=:99 WAYLAND_DISPLAY= GDK_BACKEND=x11 GSK_RENDERER=cairo \
+  LEGION_PAGE=overview legion-settings &
+
+# 3. Capture the 1060×680 CSD window directly
+WIN=$(DISPLAY=:99 xdotool search --onlyvisible --name "Legion Control")
+DISPLAY=:99 xwd -id $WIN -out page.xwd
+magick page.xwd page.png
+
+# 4. Real session is untouched — the hidden tray instance is
+#    briefly replaced and then restarted automatically
+```
+
+All 18 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are produced this way. Run `scripts/capture-screenshots.sh` to regenerate.
+
+</details>
+
+---
+
+## Highlights
+
+|  |  |  |
+|---|---|---|
+| **▸ Observe** — Home chips cross-fade on 2s polls, thermal governor 70–98°C, per-fan cards with reset | **▸ Tune** — Curve Optimizer -30..0 with live SMT/boost toggles and 5-min stability test | **▸ Light** — Spectrum 048d:c197: Keyboard / Front / Rear / Logo / More + per-key painter |
+| **▸ Endure** — Battery health, 60/80/100 % limiter, charge_types vs conservation_mode reconciliation | **▸ Repair** — Fix hub: Speakers (amp), RGB panic (HID soft → USB reset → hid-generic rebind + **permanent udev**), Logs | **▸ Persist** — Profiles, autostart, `~/.config/legion-control/settings.json`, optional Plasma 6 widget |
+
+---
 
 ## Features
 
-- Monitor CPU, GPU, battery, fans, and supported hwmon telemetry.
-- Control profiles, fan targets, CPU boost, SMT, charge limits, and **CPU Tuning** — thermal throttle (max-temp governor, 70–98°C) + Curve Optimizer undervolt + 5-min stability test on one tab (chips on top, controls below, hover tips, `--hidden` tray autostart).
-- Configure supported Gen 10 Spectrum RGB zones, effects, brightness, logo, and per-key colors.
-- Save profiles, automate supported controls with `legion-cli`, and use the optional Plasma 6 widget.
+- **Monitor** CPU, GPU, battery, fans, and hwmon telemetry — chips on top, details below, hover tips, `--hidden` tray autostart.
+- **Control** profiles, fan targets, CPU boost, SMT, charge limits, and **CPU Tuning** — thermal throttle + Curve Optimizer undervolt + stability test on one tab.
+- **Configure** Gen 10 Spectrum RGB zones, effects, brightness, logo, and per-key colors — 5 tabs + painter window.
+- **Save** profiles, automate with `legion-cli`, optional Plasma 6 widget — polling via `legion-poll.sh`.
+
+---
 
 ## Get started
 
-The source installer supports Ubuntu 24.04+, Fedora 40+, Arch-family distributions, and the implemented openSUSE Tumbleweed dependency path. The GUI build requires Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config`, and a C toolchain.
+The source installer supports **Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed**. GUI needs Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config`, C toolchain.
 
 ```bash
 git clone https://github.com/encomjp/lenovo-legion-tool.git
 cd lenovo-legion-tool
 ./install.sh
+# variants: ./install.sh -y | --user | --widget | --help
+# do not mix native package + source installer — see docs/INSTALLATION.md
 ```
-
-Useful variants include `./install.sh -y`, `./install.sh --user`, `./install.sh --widget`, and `./install.sh --help`. Do not mix a native package installation with the source installer; see the [Installation Guide](docs/INSTALLATION.md) for packages, optional backends, upgrades, and removal.
 
 After installation:
 
@@ -39,40 +151,50 @@ legion-cli status
 legion-cli info
 ```
 
+---
+
 ## How it works
 
-The GUI, CLI, and widget talk to `legion-daemon` for privileged operations. The daemon combines Linux interfaces such as sysfs, hwmon, battery, NVIDIA telemetry, and HID, while selected RGB operations use a direct HID path. Device-specific support varies by model, firmware, kernel, drivers, and installation.
+GUI, CLI, and widget talk to `legion-daemon` for privileged ops. Daemon merges sysfs, hwmon, battery, NVIDIA, HID; RGB uses direct HID when possible. Support varies by model/firmware/kernel.
 
 [![Legion Control architecture: clients, daemon, Linux interfaces, and device-specific HID paths](docs/assets/legion-control-overview.svg)](docs/assets/legion-control-overview.png)
 
-[Open the architecture diagram as PNG](docs/assets/legion-control-overview.png) · [View the SVG source](docs/assets/legion-control-overview.svg) · [Read the Architecture Guide](docs/ARCHITECTURE.md)
+[Open as PNG](docs/assets/legion-control-overview.png) · [View SVG](docs/assets/legion-control-overview.svg) · [Read Architecture Guide](docs/ARCHITECTURE.md)
+
+---
 
 ## Alpha telemetry (opt-out)
 
-Alpha builds send **one anonymized JSON** report — hardware model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/Curve-Optimizer settings, settings digest, sanitized daemon-log tail, self-check results — over encrypted HTTPS to the developer's collector (private repo `legion-telemetry`). **On by default** at one report per minute; **you can opt out** any time in Setup → Alpha diagnostics (or on first launch). The operator reviews reports in a private web portal; see the privacy statement in that repo. Never included: hostname, username, serials, MAC/IP addresses. Self-hosters can run their own collector and point clients at it via `LEGION_TELEMETRY_URL`, sharing its secret through `LEGION_TELEMETRY_KEY`.
+One anonymized JSON per minute — model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/CO, settings digest, sanitized log tail, self-check — over HTTPS to private `legion-telemetry`. **On by default**; opt-out in `Setup → Alpha diagnostics` or first launch. Never: hostname, username, serials, MAC/IP. Self-hosters can set `LEGION_TELEMETRY_URL` + `LEGION_TELEMETRY_KEY`.
+
+---
 
 ## Hardware support
 
-The project is verified on the Lenovo Legion Pro 7 16AFR10H (machine type `83RU`) with a Gen 10 Spectrum RGB keyboard (`048d:c197`). `048d:c193` is a separate Lenovo Lighting controller covered by the udev rule, not the Spectrum implementation. Other Gen 10 Legion models are likely-compatible but not verified here; older generations use different RGB protocols. Check the controller before expecting Spectrum support:
+Verified on **Lenovo Legion Pro 7 16AFR10H (83RU)** with Gen 10 Spectrum `048d:c197` (check with `lsusb -d 048d:c197`). `048d:c193` is a separate Lenovo controller covered by the udev rule. Other Gen 10 Legion likely compatible; older gens use different protocols. See [Hardware and HID](docs/HARDWARE-AND-HID.md).
 
 ```bash
 lsusb -d 048d:c197
 ```
 
-This identifies the Gen 10 Spectrum controller directly. `048d:c193` is a separate Lenovo Lighting controller covered by the udev rule, not the Spectrum implementation. See [Hardware and HID](docs/HARDWARE-AND-HID.md) for interface boundaries, device discovery, and safe diagnostics.
+---
 
 ## Guides
 
-- [Installation](docs/INSTALLATION.md) — prerequisites, source and native packages, installer options, widget setup, upgrades, and removal.
-- [Usage](docs/USAGE.md) — GUI and CLI controls, profiles, cooling, lighting, battery, diagnostics, logs, and safety rules.
-- [Architecture](docs/ARCHITECTURE.md) — components, IPC, hardware data flow, persistence, permissions, and deployment boundaries.
-- [Hardware and HID](docs/HARDWARE-AND-HID.md) — Linux interfaces, HID lighting, hardware support boundaries, and debugging checks.
-- [KDE Plasma widget](docs/WIDGET.md) — requirements, installation, controls, configuration, and validation.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — evidence-first fixes for installation, daemon, HID, sensors, fans, dGPU, battery, and widget issues.
-- [Development](docs/DEVELOPMENT.md) — toolchain, checks, packaging, hardware-sensitive testing, and contribution guidance.
+- [Installation](docs/INSTALLATION.md) — prereqs, packages, installer, widget, upgrades, removal
+- [Usage](docs/USAGE.md) — GUI & CLI, profiles, cooling, lighting, battery, diagnostics, logs, safety
+- [Architecture](docs/ARCHITECTURE.md) — components, IPC, data flow, persistence, permissions, deployment
+- [Hardware and HID](docs/HARDWARE-AND-HID.md) — Linux interfaces, HID, support boundaries, debugging
+- [KDE Plasma widget](docs/WIDGET.md) — install, controls, config, validation
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — evidence-first fixes for install, daemon, HID, sensors, fans, dGPU, battery, widget
+- [Development](docs/DEVELOPMENT.md) — toolchain, checks, packaging, hardware tests, contributions
+
+---
 
 ## Project
 
 Repository: <https://github.com/encomjp/lenovo-legion-tool>
 
-Legion Control is licensed under [GPL-2.0-only](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). Spectrum protocol notes draw on community reverse-engineering work, including [legion-spectrum-control](https://github.com/alstergee/legion-spectrum-control) and [LenovoLegionToolkit](https://github.com/BartoszCichecki/LenovoLegionToolkit).
+Licensed under [GPL-2.0-only](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). Spectrum notes build on community reverse-engineering: [legion-spectrum-control](https://github.com/alstergee/legion-spectrum-control) and [LenovoLegionToolkit](https://github.com/BartoszCichecki/LenovoLegionToolkit).
+
+<p align="center"><sub>Garage Lab · CachyOS · KWin Wayland · Rust + GTK4 · Made for Legion, made in Europe.</sub></p>

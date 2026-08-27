@@ -5429,9 +5429,9 @@ fn remove_kde_widget() -> Result<(), String> {
 }
 
 fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("Updates & Releases", None);
+    let group = pref_group("Updates &amp; Releases", None);
     let row = adw::ActionRow::builder()
-        .title("Version & Updates")
+        .title("Version &amp; Updates")
         .subtitle(format!(
             "Installed: v{} · Checking GitHub…",
             legion_core::update::CURRENT_VERSION
@@ -5720,7 +5720,7 @@ fn build_diagnostics_section(
         "Alpha diagnostics (anonymous)",
         Some(
             "Alpha program: one anonymized JSON report per minute — hardware model, distro/kernel, \
-             sensor readings, fan states, battery health stats, thermal & Curve Optimizer settings, a \
+             sensor readings, fan states, battery health stats, thermal &amp; Curve Optimizer settings, a \
              settings digest, a log summary (warn/error counts + last error, home paths redacted), and \
              self-check results. NEVER included: hostname, username, serials, MACs, IPs, per-key colors, \
              custom profile names. ON by default — you can opt out here.",
