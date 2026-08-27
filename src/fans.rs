@@ -1,30 +1,36 @@
 //! Fan control via lenovo_wmi_other (preferred) or legion_hwmon.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 use crate::device::{self, FanCapability};
 use crate::sensors::hwmon_by_name;
 
-fn fan_hwmon() -> Option<(String, PathBuf)> {
-    static NO_BACKEND_WARNED: AtomicBool = AtomicBool::new(false);
-    if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
-        log::debug!(
-            "fans::fan_hwmon: backend lenovo_wmi_other at {}",
-            hw.display()
-        );
-        return Some(("lenovo_wmi_other".into(), hw));
-    }
-    if let Some(hw) = hwmon_by_name("legion_hwmon") {
-        log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
-        return Some(("legion_hwmon".into(), hw));
-    }
-    if !NO_BACKEND_WARNED.swap(true, Ordering::Relaxed) {
-        log::warn!(
-            "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon) — fan control unavailable"
-        );
-    }
-    None
+/// Resolve the fan sysfs backend once (stable for machine uptime) instead of
+/// re-scanning `/sys/class/hwmon` on every read/write — the UI polls RPM
+/// every 2 s per fan, and each old call locked the hwmon cache mutex and
+/// cloned a `Vec<PathBuf>`.
+fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
+    static BACKEND: OnceLock<Option<(String, PathBuf)>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| {
+            if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
+                log::debug!(
+                    "fans::fan_hwmon: backend lenovo_wmi_other at {}",
+                    hw.display()
+                );
+                return Some(("lenovo_wmi_other".into(), hw));
+            }
+            if let Some(hw) = hwmon_by_name("legion_hwmon") {
+                log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
+                return Some(("legion_hwmon".into(), hw));
+            }
+            log::warn!(
+                "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon) — fan control unavailable"
+            );
+            None
+        })
+        .as_ref()
 }
 
 fn fan_path(fan: u8, suffix: &str) -> Option<PathBuf> {
