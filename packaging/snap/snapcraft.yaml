@@ -1,0 +1,46 @@
+name: legion-control
+base: core24
+version: '0.1.0'
+summary: Fans, profiles, RGB and sensors for Lenovo Legion laptops
+description: |
+  Unofficial control center for Lenovo Legion laptops: fan tuning, platform
+  power profiles, battery charge limits, Spectrum RGB lighting (including
+  per-key painting), Curve Optimizer, and live sensor dashboards.
+
+  Snap ships both the settings UI and the privileged daemon. Because strict
+  confinement cannot write /sys nor open /dev/hidraw* without a dedicated
+  upstream interface, this snap is intentionally **devmode-only** and NOT
+  store-ready. Use the native .deb/.rpm/.pkg or the Flatpak (UI) + host
+  daemon instead. Provided here as a reproducible devmode reference.
+
+grade: devel
+confinement: devmode
+
+apps:
+  legion-settings:
+    command: bin/legion-settings
+    extensions: [gnome]
+    plugs: [network, network-bind, hardware-observe, raw-usb]
+  legion-daemon:
+    command: bin/legion-daemon
+    daemon: simple
+    restart-condition: on-failure
+    install-mode: enable
+    plugs: [hardware-observe, raw-usb, network-bind]
+
+parts:
+  legion-control:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    build-packages: [libgtk-4-dev, libadwaita-1-dev, pkg-config]
+    build-environment:
+      - RUSTFLAGS: ""
+    override-build: |
+      cargo build --release --locked
+      install -Dm755 target/release/legion-settings $CRAFT_PART_INSTALL/bin/legion-settings
+      install -Dm755 target/release/legion-daemon   $CRAFT_PART_INSTALL/bin/legion-daemon
+      install -Dm755 target/release/legion-cli      $CRAFT_PART_INSTALL/bin/legion-cli
+      install -Dm644 data/gui/com.encomjp.legion-settings.desktop $CRAFT_PART_INSTALL/share/applications/com.encomjp.legion-settings.desktop
+      install -Dm644 data/icons/app-mark.svg $CRAFT_PART_INSTALL/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg
+      install -Dm644 data/icons/tray.svg     $CRAFT_PART_INSTALL/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg

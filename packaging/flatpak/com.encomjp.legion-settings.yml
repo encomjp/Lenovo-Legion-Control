@@ -1,0 +1,66 @@
+# Legion Control — Flatpak manifest (sandboxed GUI)
+#
+# The Flatpak ships ONLY the settings UI. The privileged legion-control
+# daemon must be installed on the HOST (native package / AppImage Enable /
+# install.sh) — a sandbox cannot hold root hardware access. The UI talks to
+# it through /run/legion-control.socket, which finish-args exposes.
+#
+# Local build:
+#   flatpak-builder --user --install --force-clean build \
+#       packaging/flatpak/com.encomjp.legion-settings.yml
+# Distributable single-file bundle:
+#   flatpak build-bundle ~/.local/share/flatpak/repo \
+#       legion-control-0.1.0.flatpak com.encomjp.legion-settings
+
+app-id: com.encomjp.legion-settings
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: legion-settings
+separate-locales: false
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_TARGET_DIR: target
+  # cargo fetches crates during the module build
+  build-args:
+    - --share=network
+
+finish-args:
+  # GUI
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Spectrum RGB / logo HID writes happen in the UI process; uaccess ACLs
+  # from the host udev rule apply to the sandboxed user as well.
+  - --device=all
+  # Update check + diagnostics upload
+  - --share=network
+  # System tray (ksni → StatusNotifierWatcher)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Privileged daemon IPC (daemon installed on the HOST, not in the sandbox).
+  # The daemon publishes symlinks into xdg-run so a sandboxed UI can find
+  # the system socket without direct /run access.
+  - --filesystem=xdg-run
+
+modules:
+  - name: legion-control
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm755 target/release/legion-settings /app/bin/legion-settings
+      - install -Dm644 data/gui/com.encomjp.legion-settings.desktop
+        /app/share/applications/com.encomjp.legion-settings.desktop
+      - install -Dm644 data/icons/app-mark.svg
+        /app/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg
+      - install -Dm644 data/icons/tray.svg
+        /app/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg
+      - install -Dm644 packaging/flatpak/com.encomjp.legion-settings.metainfo.xml
+        /app/share/metainfo/com.encomjp.legion-settings.metainfo.xml
+      - install -Dm644 README.md /app/share/doc/legion-control/README.md
+    sources:
+      - type: dir
+        path: ../..

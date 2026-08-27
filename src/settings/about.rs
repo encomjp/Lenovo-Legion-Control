@@ -254,6 +254,21 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
 pub(crate) fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     let installed = kde_widget_installed();
     let group = pref_group("KDE Plasma widget", None);
+    if is_flatpak() {
+        // Host Plasma cannot see the sandboxed home — per-user widget installs
+        // from inside the sandbox would silently do nothing.
+        let row = adw::ActionRow::builder()
+            .title("Legion Control widget")
+            .subtitle("Install from a native package — host Plasma cannot see the sandbox")
+            .activatable(false)
+            .build();
+        tip(
+            &row,
+            "kpackagetool6 installs into the sandbox home, which the host Plasma never reads",
+        );
+        group.add(&row);
+        return group;
+    }
     let row = adw::ActionRow::builder()
         .title("Legion Control widget")
         .subtitle(if installed {
@@ -592,12 +607,25 @@ pub(crate) fn build_diagnostics_section(
 }
 
 pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("First-time setup", None);
+    let group = pref_group(
+        "First-time setup",
+        if is_flatpak() {
+            Some("Sandboxed Flatpak UI — the privileged daemon comes from a host package")
+        } else {
+            None
+        },
+    );
 
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
     let daemon_row = adw::ActionRow::builder()
         .title("Hardware control daemon")
-        .subtitle(if daemon_active { "Active" } else { "Inactive" })
+        .subtitle(if daemon_active {
+            "Active"
+        } else if is_flatpak() {
+            "Inactive — install the host daemon package"
+        } else {
+            "Inactive"
+        })
         .activatable(false)
         .build();
     // Positive states render as a green status pill (like Fix badges), not a
@@ -611,7 +639,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     let daemon_pill = status_pill_tip("Enabled", "ok", Some("legion-control.service is active"));
     if daemon_active {
         daemon_suffix.append(&daemon_pill);
-    } else {
+    } else if !is_flatpak() {
         daemon_suffix.append(&daemon_button);
     }
     daemon_row.add_suffix(&daemon_suffix);
@@ -682,11 +710,17 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
         "ok",
         Some("ryzen_smu driver is loaded — Curve Optimizer is available on the CPU page"),
     );
-    smu_actions.append(&remove_smu);
-    if smu_installed {
-        smu_actions.append(&smu_pill);
+    if is_flatpak() {
+        if smu_installed {
+            smu_actions.append(&smu_pill);
+        }
     } else {
-        smu_actions.append(&install_smu);
+        smu_actions.append(&remove_smu);
+        if smu_installed {
+            smu_actions.append(&smu_pill);
+        } else {
+            smu_actions.append(&install_smu);
+        }
     }
     smu_row.add_suffix(&smu_actions);
     group.add(&smu_row);

@@ -45,6 +45,13 @@ use std::time::{Duration, Instant};
 
 type PptScales = Rc<RefCell<Vec<(String, gtk::Scale, gtk::Label)>>>;
 
+/// True inside a Flatpak sandbox — flatpak bind-mounts /.flatpak-info into
+/// every running instance. Sandboxes have no pkexec and no /run access, so
+/// system setup is delegated to the host daemon package.
+pub(crate) fn is_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
 fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
     let bytes = glib::Bytes::from_static(svg);
     match gtk::gdk::Texture::from_bytes(&bytes) {
@@ -275,6 +282,13 @@ fn wait_for_daemon_socket() -> Result<(), String> {
 /// Try to start the service without prompting, then use one authorized setup
 /// transaction. Do not chain run0 and pkexec: both can open an auth dialog.
 fn start_legion_control() -> Result<(), String> {
+    if is_flatpak() {
+        return Err(
+            "Flatpak builds use the host daemon — install a native legion-control \
+             package (see About → Setup)"
+                .into(),
+        );
+    }
     log::info!("trying to start daemon via: systemctl start legion-control");
     match std::process::Command::new("systemctl")
         .args(["start", "legion-control"])
@@ -1416,6 +1430,13 @@ fn run_daemon_command_async(
 
 /// Run one fixed PolicyKit setup operation synchronously.
 fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
+    if is_flatpak() {
+        return Err(
+            "System setup is not available inside the Flatpak sandbox — \
+             install the privileged daemon from a host package"
+                .into(),
+        );
+    }
     if setup_helper_path().is_none() {
         if appimage_root().is_some() {
             log::info!("bootstrap: staging stable setup helper via one PolicyKit transaction");
