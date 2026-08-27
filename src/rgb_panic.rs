@@ -346,49 +346,13 @@ pub fn troubleshoot() -> FixReport {
             // 3) USB reset
             if let Some(usb) = before.usb_sysfs.or_else(find_spectrum_usb_sysfs) {
                 log::info!("rgb-panic: ladder 3/5 USB reset on {}", usb.display());
-                match usb_reset(&usb) {
-                    Ok(()) => {
-                        steps.push(format!("USB reset {}", usb.display()));
-                        std::thread::sleep(Duration::from_millis(800));
-                    }
-                    Err(e) => {
-                        log::error!("rgb-panic: ladder 3/5 USB reset failed: {e}");
-                        errors.push(e);
-                    }
-                }
-                // 4) hid rebind
-                log::debug!("rgb-panic: ladder 4/5 HID rebind attempt");
-                match hid_rebind_spectrum() {
-                    Ok(msg) => {
-                        log::info!("rgb-panic: ladder 4/5 HID rebind result: {msg}");
-                        steps.push(msg);
-                        std::thread::sleep(Duration::from_millis(500));
-                    }
-                    Err(e) => {
-                        log::error!("rgb-panic: ladder 4/5 HID rebind failed: {e}");
-                        errors.push(e);
-                    }
-                }
-                // 5) Soft reset again after hardware kick
-                log::debug!(
-                    "rgb-panic: ladder 5/5 re-running soft lighting reset after hardware kick"
+                hardware_kick(
+                    &usb,
+                    &mut steps,
+                    &mut errors,
+                    "Soft lighting reset after USB/rebind",
+                    Duration::from_millis(500),
                 );
-                match crate::keyboard::troubleshoot_lighting() {
-                    Ok(s) => {
-                        log::info!(
-                            "rgb-panic: ladder 5/5 post-kick soft reset succeeded ({} sub-step(s))",
-                            s.len()
-                        );
-                        steps.push("Soft lighting reset after USB/rebind".into());
-                        steps.extend(s);
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "rgb-panic: ladder 5/5 lighting still dead after USB reset: {e}"
-                        );
-                        errors.push(format!("Lighting still dead after USB reset: {e}"));
-                    }
-                }
             } else {
                 log::warn!(
                     "rgb-panic: no USB sysfs path for Spectrum — cannot escalate without root daemon"
@@ -413,43 +377,13 @@ pub fn troubleshoot() -> FixReport {
                     "rgb-panic: escalating: USB reset {} + HID rebind + re-light",
                     usb.display()
                 );
-                match usb_reset(&usb) {
-                    Ok(()) => {
-                        steps.push(format!("USB reset {}", usb.display()));
-                        std::thread::sleep(Duration::from_millis(800));
-                        match hid_rebind_spectrum() {
-                            Ok(msg) => {
-                                log::info!("rgb-panic: escalated HID rebind ok: {msg}");
-                                steps.push(msg);
-                            }
-                            Err(e) => {
-                                log::warn!("HID rebind after USB reset failed: {e}");
-                                errors.push(format!("HID rebind: {e}"));
-                            }
-                        }
-                        std::thread::sleep(Duration::from_millis(400));
-                        match crate::keyboard::troubleshoot_lighting() {
-                            Ok(s) => {
-                                log::info!(
-                                    "rgb-panic: lighting reapplied after escalated reset ({} sub-step(s))",
-                                    s.len()
-                                );
-                                steps.push("Re-applied lighting after escalated reset".into());
-                                steps.extend(s);
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "rgb-panic: lighting reapply after escalated reset failed: {e}"
-                                );
-                                errors.push(e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("rgb-panic: escalated USB reset attempt failed: {e}");
-                        errors.push(e);
-                    }
-                }
+                hardware_kick(
+                    &usb,
+                    &mut steps,
+                    &mut errors,
+                    "Re-applied lighting after escalated reset",
+                    Duration::from_millis(400),
+                );
             } else {
                 log::debug!("rgb-panic: escalation skipped — a USB reset already ran this pass");
             }
@@ -477,6 +411,54 @@ pub fn troubleshoot() -> FixReport {
         steps,
         errors,
         after,
+    }
+}
+
+/// USB reset + HID rebind + soft re-light, recording steps/errors.
+/// `rebind_sleep` differs between the ladder (500 ms) and the escalation
+/// path (400 ms); `relight_label` keeps the two paths distinguishable.
+fn hardware_kick(
+    usb: &Path,
+    steps: &mut Vec<String>,
+    errors: &mut Vec<String>,
+    relight_label: &str,
+    rebind_sleep: Duration,
+) {
+    log::info!("rgb-panic: USB reset on {}", usb.display());
+    match usb_reset(usb) {
+        Ok(()) => {
+            steps.push(format!("USB reset {}", usb.display()));
+            std::thread::sleep(Duration::from_millis(800));
+            match hid_rebind_spectrum() {
+                Ok(msg) => {
+                    log::info!("rgb-panic: HID rebind result: {msg}");
+                    steps.push(msg);
+                }
+                Err(e) => {
+                    log::warn!("rgb-panic: HID rebind after USB reset failed: {e}");
+                    errors.push(format!("HID rebind: {e}"));
+                }
+            }
+            std::thread::sleep(rebind_sleep);
+            match crate::keyboard::troubleshoot_lighting() {
+                Ok(s) => {
+                    log::info!(
+                        "rgb-panic: lighting reapplied after USB reset ({} sub-step(s))",
+                        s.len()
+                    );
+                    steps.push(relight_label.into());
+                    steps.extend(s);
+                }
+                Err(e) => {
+                    log::warn!("rgb-panic: lighting still dead after USB reset: {e}");
+                    errors.push(format!("Lighting still dead after USB reset: {e}"));
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("rgb-panic: USB reset failed: {e}");
+            errors.push(e);
+        }
     }
 }
 
