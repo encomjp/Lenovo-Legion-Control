@@ -59,8 +59,9 @@ PlasmoidItem {
     switchWidth: Kirigami.Units.gridUnit * 18
     switchHeight: Kirigami.Units.gridUnit * 16
 
-    Plasmoid.toolTipMainText: "Legion Control"
-    Plasmoid.toolTipSubText: {
+    // Plasma 6 removed Plasmoid.toolTipMainText/toolTipSubText — the compact
+    // representation below hosts a PlasmaCore.ToolTipArea instead.
+    function tooltipSubText() {
         var l = []
         if (root.cpuTemp !== "--") l.push("CPU: " + root.cpuTemp + "°C")
         if (root.gpuTemp !== "--" && parseFloat(root.gpuTemp) >= 0) l.push("dGPU: " + root.gpuTemp + "°C" + (root.gpuPower !== "--" && parseFloat(root.gpuPower) >= 0 ? " · " + root.gpuPower + " W" : ""))
@@ -133,6 +134,12 @@ PlasmoidItem {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: root.expanded = !root.expanded
+        }
+
+        PlasmaCore.ToolTipArea {
+            anchors.fill: parent
+            mainText: "Legion Control"
+            subText: root.tooltipSubText()
         }
     }
 

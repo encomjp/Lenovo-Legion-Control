@@ -83,6 +83,7 @@
 <td align="center"><a href="docs/assets/screenshots/16-about-setup.png"><img src="docs/assets/screenshots/16-about-setup.png" width="260" alt="Setup"></a><br><b>About · Setup</b><br><sub>updates · daemon · diagnostics</sub></td>
 <td align="center"><a href="docs/assets/screenshots/17-about-hardware.png"><img src="docs/assets/screenshots/17-about-hardware.png" width="260" alt="Hardware"></a><br><b>About · Hardware</b><br><sub>DMI · EC · lighting · storage</sub></td>
 <td align="center"><a href="docs/assets/screenshots/18-about-help.png"><img src="docs/assets/screenshots/18-about-help.png" width="260" alt="Help"></a><br><b>About · Help</b><br><sub>links · legal</sub></td>
+<td align="center"><a href="docs/assets/screenshots/19-widget.png"><img src="docs/assets/screenshots/19-widget.png" width="260" alt="KDE Plasma widget"></a><br><b>KDE widget</b><br><sub>gauges · controls · plasma</sub></td>
 </tr>
 </table>
 
