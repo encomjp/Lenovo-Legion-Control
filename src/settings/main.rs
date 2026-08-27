@@ -2620,7 +2620,7 @@ fn build_cpu_features_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate)
 }
 
 fn build_cpu_power_page(
-    _toast_overlay: &adw::ToastOverlay,
+    toast_overlay: &adw::ToastOverlay,
     go_home: &Rc<dyn Fn(&'static str, &'static str)>,
 ) -> gtk::Box {
     let page = page_lede("");
@@ -2641,7 +2641,7 @@ fn build_cpu_power_page(
         .subtitle(if mode == "custom" {
             "Adjust the watts below on Home → Power mode"
         } else {
-            "Set Power mode on Home to Custom to unlock these sliders"
+            "The button below switches Power mode to Custom for you"
         })
         .activatable(false)
         .build();
@@ -2650,12 +2650,28 @@ fn build_cpu_power_page(
         "Firmware PPT/attribute writes are only accepted while the EC is in Custom mode — other modes use firmware defaults",
     );
     let go_home = go_home.clone();
+    let overlay = toast_overlay.clone();
     let go_home_btn = primary_button_tip(
-        "Edit on Home",
-        Some("Opens Home with the Power mode picker and the Custom-watt sliders"),
+        "Switch to Custom & edit",
+        Some("Switches Power mode to Custom (unlocks the watt sliders on Home) and jumps there"),
     );
     go_home_btn.connect_clicked(move |_| {
+        // One click instead of three: apply the Custom profile here, then
+        // jump Home where the sliders are unlocked. The Home mode picker
+        // syncs itself from firmware on its next poll.
         go_home("overview", "Home");
+        let overlay = overlay.clone();
+        run_daemon_command_async(DaemonCommand::SetProfile("custom".into()), move |result| {
+            match result {
+                Ok(DaemonResponse::Ok) => {
+                    legion_core::config::remember_platform_profile("custom");
+                    toast_ok(&overlay, "Power mode → Custom — sliders unlocked");
+                }
+                Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
+                Err(e) => toast_error(&overlay, &e),
+                _ => {}
+            }
+        });
     });
     lock_row.add_suffix(&go_home_btn);
     guide.add(&lock_row);
