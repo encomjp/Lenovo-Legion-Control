@@ -715,22 +715,6 @@ scale trough highlight {
     opacity: 1;
 }
 
-.brightness-slider trough {
-    background: linear-gradient(to right, alpha(black, 0.18), alpha(@lab_amber, 0.18));
-}
-
-.brightness-slider highlight {
-    background: linear-gradient(to right, shade(@lab_amber, 1.08), @lab_amber);
-}
-
-.brightness-slider slider {
-    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(@lab_amber, 0.0);
-}
-
-.brightness-slider slider:hover {
-    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(@lab_amber, 0.16);
-}
-
 /* Numeric value + marks helper row */
 .scale-marks {
     font-size: 0.62rem;
@@ -747,11 +731,7 @@ scale trough highlight {
     min-width: 3.2rem;
 }
 
-/* Thermal slider: cool→hot gradient + muted when throttling off */
-.thermal-scale trough {
-    background: linear-gradient(to right, #2d7dd6 0%, @lab_amber 52%, @accent_bg_color 100%);
-}
-
+/* Thermal slider: muted when throttling off */
 .thermal-scale.muted trough {
     background: alpha(currentColor, 0.08);
 }

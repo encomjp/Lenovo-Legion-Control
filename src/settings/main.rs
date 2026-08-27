@@ -2327,7 +2327,9 @@ fn build_curve_optimizer(
     );
     let offset_value = gtk::Label::new(Some("—"));
     offset_value.add_css_class("numeric");
+    offset_value.add_css_class("scale-value");
     offset_value.set_width_chars(4);
+    offset_value.set_xalign(1.0);
     let adjustment = gtk::Adjustment::new(0.0, -30.0, 0.0, 1.0, 5.0, 0.0);
     let offset_scale = gtk::Scale::new(Orientation::Horizontal, Some(&adjustment));
     offset_scale.set_draw_value(false);
@@ -2610,7 +2612,7 @@ fn build_cpu_power_page(
         let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
-        row.add_suffix(&val);
+        val.add_css_class("scale-value");
         let adj = gtk::Adjustment::new(
             lim.current as f64,
             lim.min as f64,
@@ -2625,6 +2627,7 @@ fn build_cpu_power_page(
         scale.set_width_request(160);
         tip(&scale, &format!("{} · {}", lim.label, lim.range_label()));
         row.add_suffix(&scale);
+        row.add_suffix(&val);
         preview.add(&row);
     }
     preview.set_sensitive(false);
@@ -3054,8 +3057,8 @@ fn attach_custom_ppt_group(
         let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
+        val.add_css_class("scale-value");
         tip(&val, &ppt_tip);
-        row.add_suffix(&val);
 
         let adj = gtk::Adjustment::new(
             lim.current as f64,
@@ -3071,6 +3074,7 @@ fn attach_custom_ppt_group(
         scale.set_width_request(160);
         tip(&scale, &ppt_tip);
         row.add_suffix(&scale);
+        row.add_suffix(&val);
         ppt_group.add(&row);
 
         let overlay = toast_overlay.clone();
@@ -4297,10 +4301,15 @@ fn fan_card(
     group.add(&sw);
 
     let scale = gtk::Scale::with_range(Orientation::Horizontal, min_rpm, max_rpm, 100.0);
-    scale.set_draw_value(true);
+    scale.set_draw_value(false);
     scale.set_digits(0);
     scale.set_hexpand(true);
     scale.set_width_request(180);
+    let speed_val = gtk::Label::new(Some("—"));
+    speed_val.add_css_class("numeric");
+    speed_val.add_css_class("scale-value");
+    speed_val.set_width_chars(5);
+    speed_val.set_xalign(1.0);
     tip(
         &scale,
         &format!(
@@ -4311,11 +4320,10 @@ fn fan_card(
     if cur > 0 {
         scale.set_value(cur as f64);
         scale.set_sensitive(true);
-        scale.set_draw_value(true);
+        speed_val.set_text(&format!("~{cur}"));
     } else {
         scale.set_value(min_rpm);
         scale.set_sensitive(false);
-        scale.set_draw_value(false);
     }
 
     let speed_row = adw::ActionRow::builder()
@@ -4328,10 +4336,12 @@ fn fan_card(
         "Automatic follows temperature · Manual holds a fixed speed until you change it",
     );
     speed_row.add_suffix(&scale);
+    speed_row.add_suffix(&speed_val);
     group.add(&speed_row);
 
     let high_accepted = Rc::new(Cell::new(false));
     let scale_s = scale.clone();
+    let speed_val_s = speed_val.clone();
     let sw_title = sw.clone();
     let queue = apply_queue.clone();
     let suppressing = Rc::new(Cell::new(false));
@@ -4343,7 +4353,7 @@ fn fan_card(
         }
         if s.is_active() {
             scale_s.set_sensitive(false);
-            scale_s.set_draw_value(false);
+            speed_val_s.set_text("—");
             sw_title.set_title("Automatic");
             sw_title.set_subtitle("Firmware temperature curve");
             queue.set_fan(fan, 0);
@@ -4352,6 +4362,7 @@ fn fan_card(
             let warn_rpm = (max_rpm * 0.85).round() as u32;
             if rpm >= warn_rpm && !high_s.get() {
                 let scale_r = scale_s.clone();
+                let speed_val_r = speed_val_s.clone();
                 let sw_r = s.clone();
                 let sw_title = sw_title.clone();
                 let queue = queue.clone();
@@ -4370,7 +4381,7 @@ fn fan_card(
                             suppressing.set(true);
                             sw_r.set_active(true);
                             scale_r.set_sensitive(false);
-                            scale_r.set_draw_value(false);
+                            speed_val_r.set_text("—");
                             sw_title.set_title("Automatic");
                             sw_title.set_subtitle("Firmware temperature curve");
                             suppressing.set(false);
@@ -4378,7 +4389,7 @@ fn fan_card(
                         }
                         high_s.set(true);
                         scale_r.set_sensitive(true);
-                        scale_r.set_draw_value(true);
+                        speed_val_r.set_text(&format!("~{rpm}"));
                         sw_title.set_title("Manual");
                         sw_title.set_subtitle("Fixed speed below");
                         queue.set_fan(fan, rpm);
@@ -4387,7 +4398,7 @@ fn fan_card(
                 return;
             }
             scale_s.set_sensitive(true);
-            scale_s.set_draw_value(true);
+            speed_val_s.set_text(&format!("~{rpm}"));
             sw_title.set_title("Manual");
             sw_title.set_subtitle("Fixed speed below");
             queue.set_fan(fan, rpm);
@@ -4398,7 +4409,9 @@ fn fan_card(
     let suppressing_sc = suppressing.clone();
     let queue_sc = apply_queue.clone();
     let high_sc = high_accepted.clone();
+    let speed_val_sc = speed_val.clone();
     scale.connect_value_changed(move |sc| {
+        speed_val_sc.set_text(&format!("~{}", sc.value() as u32));
         if sw_sc.is_active() || suppressing_sc.get() {
             return;
         }

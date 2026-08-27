@@ -232,16 +232,22 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
 
     let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
     bright.set_value(cfg.brightness as f64);
-    bright.set_draw_value(true);
-    bright.add_css_class("brightness-slider");
+    bright.set_draw_value(false);
     bright.set_digits(0);
     bright.set_hexpand(true);
     bright.set_width_request(240);
+    let bright_val = gtk::Label::new(Some(&cfg.brightness.to_string()));
+    bright_val.add_css_class("numeric");
+    bright_val.add_css_class("scale-value");
+    bright_val.set_width_chars(2);
+    bright_val.set_xalign(1.0);
     let bright_suppress = Rc::new(Cell::new(true));
     let bright_suppress_c = bright_suppress.clone();
     let bri_ticket = Rc::new(Cell::new(0u32));
     let toast_bri = toast.clone();
+    let bright_val_c = bright_val.clone();
     bright.connect_value_changed(move |s| {
+        bright_val_c.set_text(&s.value().round().clamp(0.0, 9.0).to_string());
         if bright_suppress_c.get() {
             return;
         }
@@ -269,10 +275,13 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
         &bright,
         "Spectrum brightness 0–9 · 0 turns lights off · saved to your config",
     );
+    let bright_box = gtk::Box::new(Orientation::Horizontal, 10);
+    bright_box.append(&bright);
+    bright_box.append(&bright_val);
     look.append(&labeled_row_tip(
         "Brightness",
         "0 off · 9 max",
-        &bright,
+        &bright_box,
         Some("Applies to keyboard and accent Spectrum zones"),
     ));
 
@@ -452,23 +461,32 @@ fn zone_editor(
 
         let bright_slider = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
         bright_slider.set_value(brightness.get() as f64);
-        bright_slider.set_draw_value(true);
+        bright_slider.set_draw_value(false);
         bright_slider.set_digits(0);
         bright_slider.set_hexpand(true);
         bright_slider.set_width_request(220);
-        bright_slider.add_css_class("brightness-slider");
+        let bright_val = gtk::Label::new(Some(&brightness.get().to_string()));
+        bright_val.add_css_class("numeric");
+        bright_val.add_css_class("scale-value");
+        bright_val.set_width_chars(2);
+        bright_val.set_xalign(1.0);
+        let bri_val_c = bright_val.clone();
         let bri_c = brightness.clone();
         bright_slider.connect_value_changed(move |s| {
+            bri_val_c.set_text(&s.value().round().clamp(0.0, 9.0).to_string());
             bri_c.set(s.value().round().clamp(0.0, 9.0) as u8);
         });
         tip(
             &bright_slider,
             "Brightness 0–9 for this zone · 0 turns it off",
         );
+        let bright_box = gtk::Box::new(Orientation::Horizontal, 10);
+        bright_box.append(&bright_slider);
+        bright_box.append(&bright_val);
         wrap.append(&labeled_row_tip(
             "Brightness",
             "0 off · 9 full",
-            &bright_slider,
+            &bright_box,
             Some("Per-zone brightness — independent of other zones"),
         ));
 
