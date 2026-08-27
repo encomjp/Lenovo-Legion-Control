@@ -16,6 +16,7 @@ use gtk4 as gtk;
 use include_dir::{include_dir, Dir};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
@@ -1213,14 +1214,20 @@ fn open_uri(uri: &str) {
     }
 }
 
-fn setup_helper_path() -> Option<&'static str> {
-    [
-        "/usr/libexec/legion-control-setup", // Fedora, Arch, source --prefix /usr
-        "/usr/local/libexec/legion-control-setup", // source installs (default prefix)
-        "/usr/lib/legion-control-setup",     // Debian-style relocation, just in case
-    ]
-    .into_iter()
-    .find(|path| std::path::Path::new(path).is_file())
+fn setup_helper_path() -> Option<PathBuf> {
+    // Bundled layouts first: packages install the helper to fixed prefixes;
+    // the AppImage carries it next to the GUI (usr/bin/legion-settings →
+    // ../libexec/legion-control-setup inside the squashfs mount).
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("../libexec/legion-control-setup"));
+        }
+    }
+    candidates.push("/usr/libexec/legion-control-setup".into());
+    candidates.push("/usr/local/libexec/legion-control-setup".into());
+    candidates.push("/usr/lib/legion-control-setup".into());
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 /// Run one daemon IPC request without blocking GTK's main loop.

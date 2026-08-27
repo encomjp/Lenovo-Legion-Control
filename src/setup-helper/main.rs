@@ -145,7 +145,60 @@ fn restart_daemon() -> Result<(), String> {
     systemctl(&["try-restart", "legion-control.service"])
 }
 
+fn bundled_usr_dir() -> Result<PathBuf, String> {
+    // …/usr/libexec/legion-control-setup → …/usr (works inside an AppImage
+    // squashfs mount and for fixed-prefix installs alike).
+    let exe =
+        std::env::current_exe().map_err(|error| format!("cannot resolve helper path: {error}"))?;
+    exe.parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "cannot resolve bundle root".into())
+}
+
 fn enable_daemon() -> Result<(), String> {
+    // A portable bundle (AppImage) ships the daemon and unit but installs
+    // nothing on first run — systemd needs stable paths and the squashfs
+    // mount is not one. Stage both onto the host before enabling; fixed
+    // installs (/usr/bin, /usr/local/bin) are left untouched.
+    let host_daemon = Path::new("/usr/bin/legion-daemon").is_file()
+        || Path::new("/usr/local/bin/legion-daemon").is_file();
+    if !host_daemon {
+        let usr = bundled_usr_dir()?;
+        let bundled_daemon = usr.join("bin/legion-daemon");
+        let bundled_unit = usr.join("lib/systemd/system/legion-control.service");
+        if !bundled_daemon.is_file() || !bundled_unit.is_file() {
+            return Err("portable bundle is missing the daemon or unit file".into());
+        }
+        fs::create_dir_all("/usr/local/bin")
+            .map_err(|e| format!("cannot create /usr/local/bin: {e}"))?;
+        fs::copy(&bundled_daemon, "/usr/local/bin/legion-daemon")
+            .map_err(|e| format!("cannot stage daemon: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata("/usr/local/bin/legion-daemon")
+                .map_err(|e| format!("cannot stat staged daemon: {e}"))?
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions("/usr/local/bin/legion-daemon", perms)
+                .map_err(|e| format!("cannot chmod staged daemon: {e}"))?;
+        }
+        let unit_text = fs::read_to_string(&bundled_unit)
+            .map_err(|e| format!("cannot read bundled unit: {e}"))?;
+        // The bundled unit targets package installs (/usr/bin); source-style
+        // staging lives in /usr/local/bin.
+        let unit_text = unit_text.replace(
+            "ExecStart=/usr/bin/legion-daemon",
+            "ExecStart=/usr/local/bin/legion-daemon",
+        );
+        fs::create_dir_all("/etc/systemd/system")
+            .map_err(|e| format!("cannot create unit dir: {e}"))?;
+        fs::write("/etc/systemd/system/legion-control.service", unit_text)
+            .map_err(|e| format!("cannot install unit: {e}"))?;
+        systemctl(&["daemon-reload"])?;
+        println!("staged daemon + unit from portable bundle");
+    }
     systemctl(&["enable", "--now", "legion-control.service"])
 }
 
