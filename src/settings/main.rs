@@ -137,6 +137,11 @@ fn flat_open_button(tooltip: &str) -> gtk::Button {
     btn
 }
 
+/// Advisory shown on the Battery page when the EC let the pack charge past
+/// the configured limit while the laptop was off (documented firmware
+/// behavior). Shared by the snapshot poll and the page-switch handler.
+const OFF_CHARGE_HINT: &str = "Battery charged past the limit while the laptop was off — EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.";
+
 /// Single source of truth for top-level page ids → header titles. nav_to callers,
 /// the LEGION_PAGE override, and the visible-child sync all read this so the
 /// maps can never disagree.
@@ -398,11 +403,17 @@ fn build_ui(app: &adw::Application) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
 
+    // The off-charge EC advisory (Battery page) only pops when the user is
+    // actually looking at Battery — pending until then, so it never blankets
+    // every other page for people who leave the app open.
+    let current_page: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    let off_charge_pending: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
     // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
     let legion_page_req = std::env::var("LEGION_PAGE").ok();
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
-    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
+    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate, &off_charge_pending);
     let fix_initial = legion_page_req
         .as_deref()
         .and_then(hub_initial_tab)
@@ -876,6 +887,7 @@ fn build_ui(app: &adw::Application) {
         let top = top_level_page(&page);
         if stack.child_by_name(top).is_some() {
             stack.set_visible_child_name(top);
+            *current_page.borrow_mut() = top.to_string();
             // Keep header in sync — the stack override bypasses nav_to().
             if let Some(title) = page_title(top) {
                 content_page.set_title(title);
@@ -908,6 +920,9 @@ fn build_ui(app: &adw::Application) {
     {
         let page = content_page.clone();
         let title_widget = window_title.clone();
+        let overlay = toast_overlay.clone();
+        let current_page = current_page.clone();
+        let off_charge_pending = off_charge_pending.clone();
         stack.connect_visible_child_notify(move |stk| {
             let Some(child) = stk.visible_child() else {
                 return;
@@ -916,6 +931,10 @@ fn build_ui(app: &adw::Application) {
                 Some(n) => n,
                 None => return,
             };
+            *current_page.borrow_mut() = name.to_string();
+            if name == "battery-status" && off_charge_pending.take() {
+                toast_info(&overlay, OFF_CHARGE_HINT);
+            }
             let Some(title) = page_title(&name) else {
                 return;
             };
@@ -4474,7 +4493,11 @@ fn fan_card(
 
 // ─── Power ──────────────────────────────────────────────────────────────────
 
-fn build_battery_pages(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+fn build_battery_pages(
+    toast_overlay: &adw::ToastOverlay,
+    gate: &DaemonGate,
+    off_charge_pending: &Rc<Cell<bool>>,
+) -> gtk::Box {
     let status_page = page_lede("");
 
     // Chips on top — 3×2: Capacity · Voltage · Power · Health · Cycles · Limit
@@ -4753,17 +4776,16 @@ fn build_battery_pages(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> 
     let overlay = toast_overlay.clone();
     // One-time-per-session hint: the EC charges past the limiter while the
     // laptop is off/asleep (documented behavior) — explain the surprise
-    // instead of leaving a confusing 98% unexplained.
+    // instead of leaving a confusing 98% unexplained. Fires only while the
+    // Battery page is on screen (see off_charge_pending).
     let off_charge_hint: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let pending_slot = off_charge_pending.clone();
     glib::timeout_add_local(Duration::from_millis(300), move || {
         match snap_rx.try_recv() {
             Ok(s) => {
                 if !off_charge_hint.get() && s.limit < 100 && s.pct.is_some_and(|p| p > 85) {
                     off_charge_hint.set(true);
-                    toast_info(
-                        &overlay,
-                        "Battery charged past the limit while the laptop was off — EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.",
-                    );
+                    pending_slot.set(true);
                 }
                 if let Some(pct) = s.pct {
                     pct_row.set_subtitle(&format!("{pct}%"));
