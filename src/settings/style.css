@@ -208,11 +208,9 @@ headerbar windowtitle .subtitle {
 }
 
 .section-label {
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    opacity: 0.52;
+    font-size: 0.95rem;
+    font-weight: 700;
+    opacity: 0.95;
 }
 
 .section-sub {
