@@ -133,21 +133,6 @@ pub(crate) fn show_welcome_if_needed(
     actions.append(&later_btn);
     actions.append(&setup_btn);
 
-    let links = gtk::Box::new(Orientation::Horizontal, 20);
-    links.set_halign(Align::Start);
-    let issues = gtk::LinkButton::builder()
-        .uri("https://github.com/encomjp/lenovo-legion-tool/issues/new")
-        .label("Report an issue")
-        .build();
-    issues.add_css_class("flat");
-    let donate = gtk::LinkButton::builder()
-        .uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A")
-        .label("Donate")
-        .build();
-    donate.add_css_class("flat");
-    links.append(&issues);
-    links.append(&donate);
-
     // ── layout ──
     let page = gtk::Box::new(Orientation::Vertical, 22);
     page.set_margin_top(24);
@@ -158,7 +143,6 @@ pub(crate) fn show_welcome_if_needed(
     page.append(&intro);
     page.append(&telemetry_group);
     page.append(&actions);
-    page.append(&links);
 
     let clamp = libadwaita::Clamp::builder().maximum_size(560).build();
     clamp.set_child(Some(&page));
