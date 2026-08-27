@@ -2248,6 +2248,20 @@ fn build_overview(
             }
             let _ = cr.stroke();
 
+            // Legend — which trace is which (CPU red, GPU amber).
+            cr.select_font_face(
+                "Sans",
+                gtk::cairo::FontSlant::Normal,
+                gtk::cairo::FontWeight::Normal,
+            );
+            cr.set_font_size(10.0);
+            cr.set_source_rgba(0.784, 0.063, 0.180, 0.95);
+            cr.move_to(w - 56.0, 12.0);
+            let _ = cr.show_text("CPU");
+            cr.set_source_rgba(0.851, 0.596, 0.102, 0.95);
+            cr.move_to(w - 22.0, 12.0);
+            let _ = cr.show_text("GPU");
+
             let hist = area_hist.borrow();
             if hist.len() >= 2 {
                 // Right-aligned: the line grows leftward into the fixed window.
@@ -3595,7 +3609,7 @@ fn build_profiles_page(
         let cur = legion_core::config::get().active_profile;
         names.iter().position(|n| n == &cur).unwrap_or(0) as u32
     };
-    let picker = string_combo_row("Profile", "Pick a saved preset", &labels, active);
+    let picker = string_combo_row("Profile", "", &labels, active);
     tip(&picker, "Presets are stored in ~/.config/legion-control/");
     group.add(&picker);
 
@@ -3959,7 +3973,7 @@ fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGrou
             .subtitle(if on {
                 "Frequency boost allowed"
             } else {
-                "Locked to base clocks — cooler and quieter"
+                "Locked to base clocks"
             })
             .active(on)
             .build();
@@ -4088,7 +4102,7 @@ fn apply_boost(
             row.set_subtitle(if on {
                 "Frequency boost allowed"
             } else {
-                "Locked to base clocks — cooler and quieter"
+                "Locked to base clocks"
             });
             toast_ok(&overlay, if on { "CPU boost on" } else { "CPU boost off" });
         }
@@ -4111,9 +4125,7 @@ fn build_cooling_overview_page(
     apply_queue: &ApplyQueue,
     gate: &DaemonGate,
 ) -> gtk::Box {
-    let page = page_lede(
-        "All fans at a glance — tune each fan inline, or flip back to Automatic when done.",
-    );
+    let page = page_lede("");
     let overview = pref_group("Fans overview", None);
     tip(&overview, "Each card exposes full tuning for that fan");
     let channels = legion_core::fans::channels();
@@ -4684,11 +4696,6 @@ fn fan_card(
     let auto = legion_core::fans::read_target(fan).unwrap_or(0) == 0;
     let sw = adw::SwitchRow::builder()
         .title(if auto { "Automatic" } else { "Manual" })
-        .subtitle(if auto {
-            "Firmware temperature curve"
-        } else {
-            "Fixed speed below"
-        })
         .active(auto)
         .build();
     tip(
@@ -4752,7 +4759,6 @@ fn fan_card(
             scale_s.set_sensitive(false);
             speed_val_s.set_text("—");
             sw_title.set_title("Automatic");
-            sw_title.set_subtitle("Firmware temperature curve");
             queue.set_fan(fan, 0);
         } else {
             let rpm = scale_s.value() as u32;
@@ -4780,16 +4786,14 @@ fn fan_card(
                             scale_r.set_sensitive(false);
                             speed_val_r.set_text("—");
                             sw_title.set_title("Automatic");
-                            sw_title.set_subtitle("Firmware temperature curve");
-                            suppressing.set(false);
+                                suppressing.set(false);
                             return;
                         }
                         high_s.set(true);
                         scale_r.set_sensitive(true);
                         speed_val_r.set_text(&format!("~{rpm}"));
                         sw_title.set_title("Manual");
-                        sw_title.set_subtitle("Fixed speed below");
-                        queue.set_fan(fan, rpm);
+                                    queue.set_fan(fan, rpm);
                     },
                 );
                 return;
@@ -4797,7 +4801,6 @@ fn fan_card(
             scale_s.set_sensitive(true);
             speed_val_s.set_text(&format!("~{rpm}"));
             sw_title.set_title("Manual");
-            sw_title.set_subtitle("Fixed speed below");
             queue.set_fan(fan, rpm);
         }
     });
