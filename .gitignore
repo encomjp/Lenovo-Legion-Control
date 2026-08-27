@@ -1,5 +1,6 @@
 # Build artifacts
 lenovo-legion-tool/target/
+/packaged/
 *.qmlc
 *.o
 *.ko
