@@ -37,6 +37,63 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+fn install_executable(source: &Path, destination: &Path) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    fs::copy(source, destination).map_err(|e| {
+        format!(
+            "cannot copy {} to {}: {e}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(destination)
+            .map_err(|e| format!("cannot stat {}: {e}", destination.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(destination, perms)
+            .map_err(|e| format!("cannot chmod {}: {e}", destination.display()))?;
+    }
+    Ok(())
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination)
+        .map_err(|e| format!("cannot create {}: {e}", destination.display()))?;
+    for entry in
+        fs::read_dir(source).map_err(|e| format!("cannot read {}: {e}", source.display()))?
+    {
+        let entry = entry.map_err(|e| format!("cannot inspect bundle entry: {e}"))?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("cannot inspect {}: {e}", source_path.display()))?;
+        if file_type.is_dir() {
+            copy_tree(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &destination_path).map_err(|e| {
+                format!(
+                    "cannot copy {} to {}: {e}",
+                    source_path.display(),
+                    destination_path.display()
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "unsupported bundle entry: {}",
+                source_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn source_dir() -> Result<PathBuf, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("cannot resolve setup helper path: {error}"))?;
@@ -45,9 +102,23 @@ fn source_dir() -> Result<PathBuf, String> {
     } else {
         PathBuf::from("/usr/lib/legion-control/ryzen_smu")
     };
-    (source.join("Makefile").is_file() && source.join("dkms.conf").is_file())
-        .then_some(source)
-        .ok_or_else(|| "bundled ryzen_smu source is missing; reinstall Legion Control".into())
+    if source.join("Makefile").is_file() && source.join("dkms.conf").is_file() {
+        return Ok(source);
+    }
+
+    let bundled = executable
+        .parent()
+        .and_then(Path::parent)
+        .map(|usr| usr.join("lib/legion-control/ryzen_smu"));
+    let Some(bundled) = bundled else {
+        return Err("bundled ryzen_smu source is missing; reinstall Legion Control".into());
+    };
+    if !bundled.join("Makefile").is_file() || !bundled.join("dkms.conf").is_file() {
+        return Err("bundled ryzen_smu source is missing; reinstall Legion Control".into());
+    }
+    let stable = PathBuf::from("/usr/local/lib/legion-control/ryzen_smu");
+    copy_tree(&bundled, &stable)?;
+    Ok(stable)
 }
 
 fn install_ryzen_smu() -> Result<(), String> {
@@ -163,27 +234,47 @@ fn enable_daemon() -> Result<(), String> {
     // installs (/usr/bin, /usr/local/bin) are left untouched.
     let host_daemon = Path::new("/usr/bin/legion-daemon").is_file()
         || Path::new("/usr/local/bin/legion-daemon").is_file();
-    if !host_daemon {
+    let host_unit = Path::new("/etc/systemd/system/legion-control.service").is_file()
+        || Path::new("/usr/lib/systemd/system/legion-control.service").is_file();
+    if !host_daemon || !host_unit {
         let usr = bundled_usr_dir()?;
         let bundled_daemon = usr.join("bin/legion-daemon");
         let bundled_unit = usr.join("lib/systemd/system/legion-control.service");
         if !bundled_daemon.is_file() || !bundled_unit.is_file() {
             return Err("portable bundle is missing the daemon or unit file".into());
         }
-        fs::create_dir_all("/usr/local/bin")
-            .map_err(|e| format!("cannot create /usr/local/bin: {e}"))?;
-        fs::copy(&bundled_daemon, "/usr/local/bin/legion-daemon")
-            .map_err(|e| format!("cannot stage daemon: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata("/usr/local/bin/legion-daemon")
-                .map_err(|e| format!("cannot stat staged daemon: {e}"))?
-                .permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions("/usr/local/bin/legion-daemon", perms)
-                .map_err(|e| format!("cannot chmod staged daemon: {e}"))?;
+        install_executable(&bundled_daemon, Path::new("/usr/local/bin/legion-daemon"))?;
+
+        // Bootstrap stable helper/policy paths so later setup actions reuse
+        // PolicyKit's auth_admin_keep instead of the AppImage mount path.
+        let bundled_helper = usr.join("libexec/legion-control-setup");
+        let stable_helper = Path::new("/usr/local/libexec/legion-control-setup");
+        if bundled_helper.is_file() && !stable_helper.is_file() {
+            install_executable(&bundled_helper, stable_helper)?;
         }
+        let bundled_policy = usr.join("share/polkit-1/actions/com.encomjp.legion-control.policy");
+        let policy = Path::new("/usr/share/polkit-1/actions/com.encomjp.legion-control.policy");
+        if bundled_policy.is_file() && !policy.is_file() {
+            if let Some(parent) = policy.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            }
+            fs::copy(&bundled_policy, policy)
+                .map_err(|e| format!("cannot stage polkit policy: {e}"))?;
+        }
+
+        // DKMS must use a stable source tree after the AppImage mount goes
+        // away. This also makes the later backend button work without another
+        // authentication transaction.
+        let bundled_source = usr.join("lib/legion-control/ryzen_smu");
+        let stable_source = Path::new("/usr/local/lib/legion-control/ryzen_smu");
+        if bundled_source.join("Makefile").is_file()
+            && bundled_source.join("dkms.conf").is_file()
+            && !stable_source.join("Makefile").is_file()
+        {
+            copy_tree(&bundled_source, stable_source)?;
+        }
+
         let unit_text = fs::read_to_string(&bundled_unit)
             .map_err(|e| format!("cannot read bundled unit: {e}"))?;
         // The bundled unit targets package installs (/usr/bin); source-style
@@ -196,8 +287,9 @@ fn enable_daemon() -> Result<(), String> {
             .map_err(|e| format!("cannot create unit dir: {e}"))?;
         fs::write("/etc/systemd/system/legion-control.service", unit_text)
             .map_err(|e| format!("cannot install unit: {e}"))?;
+        install_udev_rule()?;
         systemctl(&["daemon-reload"])?;
-        println!("staged daemon + unit from portable bundle");
+        println!("staged daemon + helper + policy + udev + unit from portable bundle");
     }
     systemctl(&["enable", "--now", "legion-control.service"])
 }

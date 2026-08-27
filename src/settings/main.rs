@@ -243,50 +243,62 @@ fn copy_daemon_fix_cmd() {
     }
 }
 
-/// Try to start the system legion-control unit (plain → run0 → pkexec).
-fn start_legion_control() -> Result<(), String> {
-    let attempts: &[&[&str]] = &[
-        &["systemctl", "start", "legion-control"],
-        &["run0", "systemctl", "start", "legion-control"],
-        &["pkexec", "systemctl", "start", "legion-control"],
-    ];
-    let mut last = "Could not start legion-control".to_string();
-    for argv in attempts {
-        log::info!("trying to start daemon via: {}", argv.join(" "));
-        match std::process::Command::new(argv[0])
-            .args(&argv[1..])
-            .output()
-        {
-            Ok(out) if out.status.success() => {
-                log::info!("{} succeeded — waiting for socket", argv.join(" "));
-                for _ in 0..25 {
-                    std::thread::sleep(Duration::from_millis(120));
-                    if daemon_ok() {
-                        log::info!("daemon socket is reachable");
-                        return Ok(());
-                    }
-                }
-                return Err(
-                    "Service start returned OK but the control socket is not reachable yet".into(),
-                );
-            }
-            Ok(out) => {
-                let err = String::from_utf8_lossy(&out.stderr);
-                let err = err.trim();
-                if !err.is_empty() {
-                    last = err.to_string();
-                } else {
-                    last = format!("{} exited {}", argv.join(" "), out.status);
-                }
-                log::warn!("start attempt failed: {last}");
-            }
-            Err(e) => {
-                last = format!("{}: {e}", argv[0]);
-                log::warn!("start attempt failed: {last}");
-            }
+/// Wait briefly for the service socket after a successful start command.
+fn wait_for_daemon_socket() -> Result<(), String> {
+    for _ in 0..25 {
+        std::thread::sleep(Duration::from_millis(120));
+        if daemon_ok() {
+            log::info!("daemon socket is reachable");
+            return Ok(());
         }
     }
-    Err(last)
+    Err("Service start returned OK but the control socket is not reachable yet".into())
+}
+
+/// Try to start the service without prompting, then use one authorized setup
+/// transaction. Do not chain run0 and pkexec: both can open an auth dialog.
+fn start_legion_control() -> Result<(), String> {
+    log::info!("trying to start daemon via: systemctl start legion-control");
+    match std::process::Command::new("systemctl")
+        .args(["start", "legion-control"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            log::info!("systemctl start succeeded — waiting for socket");
+            return wait_for_daemon_socket();
+        }
+        Ok(out) => {
+            let error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            log::debug!("unprivileged service start failed: {error}");
+        }
+        Err(error) => log::debug!("unprivileged service start unavailable: {error}"),
+    }
+
+    if setup_helper_path().is_some() {
+        log::info!("starting daemon through one PolicyKit setup transaction");
+        return run_setup_helper_blocking("enable-daemon").and_then(|_| wait_for_daemon_socket());
+    }
+
+    // Keep a single fallback for installations that have a unit but no setup
+    // helper. This is still one pkexec invocation, never run0 plus pkexec.
+    log::info!("starting daemon via: pkexec systemctl start legion-control");
+    let output = std::process::Command::new("pkexec")
+        .args(["systemctl", "start", "legion-control"])
+        .output()
+        .map_err(|error| format!("Cannot start daemon through PolicyKit: {error}"))?;
+    if output.status.success() {
+        wait_for_daemon_socket()
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if error.is_empty() {
+            format!(
+                "pkexec systemctl start legion-control exited {}",
+                output.status
+            )
+        } else {
+            error
+        })
+    }
 }
 
 fn sync_daemon_ui(
@@ -405,17 +417,11 @@ fn build_ui(app: &adw::Application) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
 
-    // The off-charge EC advisory (Battery page) only pops when the user is
-    // actually looking at Battery — pending until then, so it never blankets
-    // every other page for people who leave the app open.
-    let current_page: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-    let off_charge_pending: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-
     // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
     let legion_page_req = std::env::var("LEGION_PAGE").ok();
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
-    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate, &off_charge_pending);
+    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
     let fix_initial = legion_page_req
         .as_deref()
         .and_then(hub_initial_tab)
@@ -948,7 +954,6 @@ fn build_ui(app: &adw::Application) {
         let top = top_level_page(&page);
         if stack.child_by_name(top).is_some() {
             stack.set_visible_child_name(top);
-            *current_page.borrow_mut() = top.to_string();
             // Keep header in sync — the stack override bypasses nav_to().
             if let Some(title) = page_title(top) {
                 content_page.set_title(title);
@@ -981,9 +986,6 @@ fn build_ui(app: &adw::Application) {
     {
         let page = content_page.clone();
         let title_widget = window_title.clone();
-        let overlay = toast_overlay.clone();
-        let current_page = current_page.clone();
-        let off_charge_pending = off_charge_pending.clone();
         stack.connect_visible_child_notify(move |stk| {
             let Some(child) = stk.visible_child() else {
                 return;
@@ -992,10 +994,6 @@ fn build_ui(app: &adw::Application) {
                 Some(n) => n,
                 None => return,
             };
-            *current_page.borrow_mut() = name.to_string();
-            if name == "battery-status" && off_charge_pending.take() {
-                toast_info(&overlay, OFF_CHARGE_HINT);
-            }
             let Some(title) = page_title(&name) else {
                 return;
             };
@@ -1215,18 +1213,19 @@ fn open_uri(uri: &str) {
 }
 
 fn setup_helper_path() -> Option<PathBuf> {
-    // Bundled layouts first: packages install the helper to fixed prefixes;
-    // the AppImage carries it next to the GUI (usr/bin/legion-settings →
-    // ../libexec/legion-control-setup inside the squashfs mount).
+    // Stable host helpers first — they have a matching polkit policy with
+    // auth_admin_keep (one prompt covers several operations). The AppImage
+    // mount path is dynamic (/tmp/.mount_…), has no policy, and falls back
+    // to generic auth_admin (no keep) — so it would prompt for every call.
     let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.push("/usr/libexec/legion-control-setup".into());
+    candidates.push("/usr/local/libexec/legion-control-setup".into());
+    candidates.push("/usr/lib/legion-control-setup".into());
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("../libexec/legion-control-setup"));
         }
     }
-    candidates.push("/usr/libexec/legion-control-setup".into());
-    candidates.push("/usr/local/libexec/legion-control-setup".into());
-    candidates.push("/usr/lib/legion-control-setup".into());
     candidates.into_iter().find(|path| path.is_file())
 }
 
@@ -1242,38 +1241,37 @@ fn run_daemon_command_async(
     );
 }
 
-/// Run one fixed PolicyKit setup operation without blocking GTK's main loop.
-fn run_setup_helper(operation: &'static str, done: impl FnOnce(Result<String, String>) + 'static) {
+/// Run one fixed PolicyKit setup operation synchronously.
+fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
     let helper = match setup_helper_path() {
         Some(path) => path,
         None => {
-            done(Err(
+            return Err(
                 "Setup helper is missing; reinstall Legion Control from the current package".into(),
-            ));
-            return;
+            )
         }
     };
+    let output = std::process::Command::new("pkexec")
+        .arg(&helper)
+        .arg(operation)
+        .output()
+        .map_err(|error| format!("Cannot start PolicyKit setup: {error}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if error.is_empty() {
+            format!("Setup was cancelled or failed ({})", output.status)
+        } else {
+            error
+        })
+    }
+}
+
+/// Run one fixed PolicyKit setup operation without blocking GTK's main loop.
+fn run_setup_helper(operation: &'static str, done: impl FnOnce(Result<String, String>) + 'static) {
     dispatch_async(
-        move || {
-            let result = std::process::Command::new("pkexec")
-                .arg(helper)
-                .arg(operation)
-                .output()
-                .map_err(|error| format!("Cannot start PolicyKit setup: {error}"))
-                .and_then(|output| {
-                    if output.status.success() {
-                        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-                    } else {
-                        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                        Err(if error.is_empty() {
-                            format!("Setup was cancelled or failed ({})", output.status)
-                        } else {
-                            error
-                        })
-                    }
-                });
-            result
-        },
+        move || run_setup_helper_blocking(operation),
         "Setup helper stopped without a result",
         done,
     );
@@ -1832,7 +1830,7 @@ fn build_overview(
     let metrics = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
-        .min_children_per_line(2)
+        .min_children_per_line(1)
         .homogeneous(true)
         .column_spacing(12)
         .row_spacing(12)
@@ -4704,11 +4702,7 @@ fn fan_card(
 
 // ─── Power ──────────────────────────────────────────────────────────────────
 
-fn build_battery_pages(
-    toast_overlay: &adw::ToastOverlay,
-    gate: &DaemonGate,
-    off_charge_pending: &Rc<Cell<bool>>,
-) -> gtk::Box {
+fn build_battery_pages(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let status_page = page_lede("");
 
     // Chips on top — 3×2: Capacity · Voltage · Power · Health · Cycles · Limit
@@ -4984,18 +4978,24 @@ fn build_battery_pages(
         }
         std::thread::sleep(Duration::from_secs(3));
     });
-    // One-time-per-session hint: the EC charges past the limiter while the
-    // laptop is off/asleep (documented behavior) — explain the surprise
-    // instead of leaving a confusing 98% unexplained. Fires only while the
-    // Battery page is on screen (see off_charge_pending).
-    let off_charge_hint: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let pending_slot = off_charge_pending.clone();
+    // Keep the EC advisory on the Battery page instead of repeatedly adding a
+    // global toast while the snapshot poll runs.
+    let off_charge_hint = gtk::Label::new(Some(OFF_CHARGE_HINT));
+    off_charge_hint.add_css_class("hint");
+    off_charge_hint.set_halign(Align::Fill);
+    off_charge_hint.set_hexpand(true);
+    off_charge_hint.set_wrap(true);
+    off_charge_hint.set_xalign(0.0);
+    off_charge_hint.set_visible(false);
+    status_page.append(&off_charge_hint);
     glib::timeout_add_local(Duration::from_millis(300), move || {
         match snap_rx.try_recv() {
             Ok(s) => {
-                if !off_charge_hint.get() && s.limit < 100 && s.pct.is_some_and(|p| p > 85) {
-                    off_charge_hint.set(true);
-                    pending_slot.set(true);
+                if !off_charge_hint.is_visible()
+                    && s.pct
+                        .is_some_and(|p| legion_core::battery::above_limiter_band(s.limit, p))
+                {
+                    off_charge_hint.set_visible(true);
                 }
                 if let Some(pct) = s.pct {
                     pct_row.set_subtitle(&format!("{pct}%"));

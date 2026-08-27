@@ -347,14 +347,31 @@ pub fn charge_limit_pct() -> u32 {
 /// self-undoing bug. Verifies the read-back selection and returns an error
 /// when the EC did not accept the mode instead of reporting silent success.
 pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
+    set_charge_limit_pct_inner(pct, true)
+}
+
+/// Watchdog variant: repair attempts are reported by the daemon only when
+/// their state changes, not once per polling interval.
+fn set_charge_limit_pct_quiet(pct: u32) -> std::io::Result<()> {
+    set_charge_limit_pct_inner(pct, false)
+}
+
+fn set_charge_limit_pct_inner(pct: u32, announce: bool) -> std::io::Result<()> {
     log::trace!("battery::set_charge_limit_pct(pct={pct})");
     let pct = discretize_limit(pct);
     let preserve = pct < 100;
     let want = if preserve { "Long_Life" } else { "Standard" };
-    log::info!(
-        "charge limit → {} ({want})",
-        if preserve { "preserved" } else { "full" }
-    );
+    if announce {
+        log::info!(
+            "charge limit → {} ({want})",
+            if preserve { "preserved" } else { "full" }
+        );
+    } else {
+        log::debug!(
+            "charge limit repair → {} ({want})",
+            if preserve { "preserved" } else { "full" }
+        );
+    }
     log::debug!(
         "battery::set_charge_limit_pct — request mapped to {pct} (preserve={preserve}, target={want})"
     );
@@ -375,10 +392,17 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(100));
             match selected_charge_type() {
                 Some(t) if t.eq_ignore_ascii_case(want) => {
-                    log::info!(
-                        "battery::set_charge_limit_pct — verified charge_types={want} on readback {} of 5",
-                        attempt + 1
-                    );
+                    if announce {
+                        log::info!(
+                            "battery::set_charge_limit_pct — verified charge_types={want} on readback {} of 5",
+                            attempt + 1
+                        );
+                    } else {
+                        log::debug!(
+                            "battery::set_charge_limit_pct — verified charge_types={want} on readback {} of 5",
+                            attempt + 1
+                        );
+                    }
                     return Ok(());
                 }
                 _ => {
@@ -398,7 +422,11 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
             "Firmware did not accept charge_types={want} (reads {:?}) — charging may be uncapped. AC plug/unplug or reboot usually clears this EC state",
             selected_charge_type().as_deref().unwrap_or("<unreadable>")
         );
-        log::warn!("{msg}");
+        if announce {
+            log::warn!("{msg}");
+        } else {
+            log::debug!("{msg}");
+        }
         return Err(std::io::Error::other(msg));
     }
 
@@ -414,10 +442,17 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
     // Same verification contract as the charge_types path.
     match conservation_mode() {
         Some(on) if on == preserve => {
-            log::info!(
-                "battery::set_charge_limit_pct — verified legacy conservation_mode={} on readback",
-                if preserve { 1 } else { 0 }
-            );
+            if announce {
+                log::info!(
+                    "battery::set_charge_limit_pct — verified legacy conservation_mode={} on readback",
+                    if preserve { 1 } else { 0 }
+                );
+            } else {
+                log::debug!(
+                    "battery::set_charge_limit_pct — verified legacy conservation_mode={} on readback",
+                    if preserve { 1 } else { 0 }
+                );
+            }
             Ok(())
         }
         Some(on) => {
@@ -425,11 +460,21 @@ pub fn set_charge_limit_pct(pct: u32) -> std::io::Result<()> {
                 "Firmware did not accept conservation_mode={} (reads {on}) — charging may be uncapped",
                 if preserve { 1 } else { 0 }
             );
-            log::warn!("{msg}");
+            if announce {
+                log::warn!("{msg}");
+            } else {
+                log::debug!("{msg}");
+            }
             Err(std::io::Error::other(msg))
         }
         None => {
-            log::warn!("conservation_mode unreadable after write — cannot verify charge limit");
+            if announce {
+                log::warn!("conservation_mode unreadable after write — cannot verify charge limit");
+            } else {
+                log::debug!(
+                    "conservation_mode unreadable after repair — cannot verify charge limit"
+                );
+            }
             Ok(())
         }
     }
@@ -522,15 +567,15 @@ pub fn reassert_configured_limit() -> std::io::Result<bool> {
         );
         return Ok(false);
     }
-    log::warn!(
+    log::debug!(
         "charge limiter state silently cleared by firmware — re-applying {}%",
         want
     );
-    if let Err(e) = set_charge_limit_pct(want) {
+    if let Err(e) = set_charge_limit_pct_quiet(want) {
         log::debug!("battery::reassert_configured_limit — re-apply failed: {e}");
         return Err(e);
     }
-    log::info!("battery::reassert_configured_limit — repaired limiter to {want}%");
+    log::debug!("battery::reassert_configured_limit — repaired limiter to {want}%");
     Ok(true)
 }
 

@@ -1729,15 +1729,15 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     hint.add_css_class("hint");
     hint.set_hexpand(true);
     hint.set_halign(Align::Start);
+    hint.set_wrap(true);
+    hint.set_max_width_chars(24);
     hint.set_margin_top(0);
     tip(&hint, "Switching layout does not wipe painted colours");
     switch_row.append(&hint);
     root.append(&switch_row);
 
     let area = gtk::DrawingArea::new();
-    area.set_content_width(640);
     area.set_content_height(240);
-    area.set_size_request(640, 240);
     area.set_hexpand(true);
     area.set_vexpand(true);
     area.add_css_class("perkey-canvas");

@@ -161,7 +161,7 @@ fn open_perkey_window(app: &adw::Application, brush: Rc<Cell<(u8, u8, u8)>>) -> 
     let win = adw::Window::builder()
         .application(app)
         .title("Individual key lighting")
-        .default_width(1180)
+        .default_width(900)
         .default_height(620)
         .build();
 
@@ -193,7 +193,7 @@ fn open_perkey_window(app: &adw::Application, brush: Rc<Cell<(u8, u8, u8)>>) -> 
     body.append(&perkey::build_perkey_editor(brush));
 
     let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .child(&body)
         .build();

@@ -623,7 +623,7 @@ button.destructive-action {
     border-radius: 10px;
     border: 1px solid alpha(currentColor, 0.10);
     min-height: 150px;
-    min-width: 400px;
+    min-width: 0;
     background: alpha(currentColor, 0.02);
 }
 
@@ -818,5 +818,4 @@ scale trough highlight {
         transition-duration: 0.01ms;
     }
 }
-
 

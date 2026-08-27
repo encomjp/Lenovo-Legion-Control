@@ -1145,6 +1145,10 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
 /// Periodically re-apply the user's charge limit when the EC silently
 /// cleared it. One sysfs read per interval until a repair is needed.
 fn battery_watchdog(shutdown: Arc<AtomicBool>) {
+    // Avoid repeating the same warning while firmware remains in a broken
+    // state. A later stable read emits one recovery message.
+    // 0 = stable, 1 = repaired, 2 = failed.
+    let mut repair_state = 0u8;
     // Delay first check so boot EC settle finishes.
     if sleep_interruptible(
         &shutdown,
@@ -1155,20 +1159,35 @@ fn battery_watchdog(shutdown: Arc<AtomicBool>) {
         return;
     }
     while !shutdown.load(Ordering::Relaxed) {
-        // 60 s in 100 ms slices so shutdown is noticed promptly, and silent
+        // 5 min in 100 ms slices so shutdown is noticed promptly, and silent
         // firmware/EC charge-threshold resets are caught before the battery charges significantly.
         if sleep_interruptible(
             &shutdown,
-            Duration::from_secs(60),
+            Duration::from_secs(300),
             Duration::from_millis(100),
         ) {
             log::info!("battery-watchdog thread stopped");
             return;
         }
         match battery::reassert_configured_limit() {
-            Ok(true) => log::info!("charge limiter re-applied after firmware cleared it"),
-            Ok(false) => log::debug!("charge limiter reassert: state intact — no repair needed"),
-            Err(e) => log::warn!("charge limiter re-assert failed: {e}"),
+            Ok(true) => {
+                if repair_state != 1 {
+                    log::warn!("charge limiter re-applied after firmware cleared it");
+                }
+                repair_state = 1;
+            }
+            Ok(false) => {
+                if repair_state != 0 {
+                    log::info!("charge limiter state stable again");
+                }
+                repair_state = 0;
+            }
+            Err(e) => {
+                if repair_state != 2 {
+                    log::warn!("charge limiter re-assert failed: {e}");
+                }
+                repair_state = 2;
+            }
         }
     }
     log::info!("battery-watchdog thread stopped");
