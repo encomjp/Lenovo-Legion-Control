@@ -91,28 +91,6 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
     }
 }
 
-/// Publish the system socket into every user's runtime dir so sandboxed UIs
-/// (Flatpak) can reach it via xdg-run without /run access.
-fn publish_user_socket_links(system_socket: &std::path::Path) {
-    let Ok(users) = std::fs::read_dir("/run/user") else {
-        return;
-    };
-    for entry in users.flatten() {
-        let link = entry.path().join("legion-control.socket");
-        if let Ok(target) = std::fs::read_link(&link) {
-            if target == system_socket {
-                continue;
-            }
-        }
-        let _ = std::fs::remove_file(&link);
-        if let Err(e) = std::os::unix::fs::symlink(system_socket, &link) {
-            log::warn!("could not publish user socket link {}: {e}", link.display());
-        } else {
-            log::info!("published user socket link {}", link.display());
-        }
-    }
-}
-
 /// GID of the `legion` system group, if it exists. Socket access is gated by
 /// group membership (0660 root:legion); root always passes kernel checks.
 fn legion_group_gid() -> Option<u32> {
@@ -264,7 +242,6 @@ fn main() {
             Ok(()) => log::debug!("socket {} chmod {:o} applied", path.display(), mode),
             Err(e) => log::warn!("failed to chmod socket {}: {e}", path.display()),
         }
-        publish_user_socket_links(&path);
     }
 
     if let Err(e) = listener.set_nonblocking(true) {

@@ -16,8 +16,7 @@ DeviceAllow=/dev/input/* rw
 DeviceAllow=/dev/bus/usb/* rw
 DeviceAllow=char-usb_device rw
 ProtectSystem=false
-ProtectHome=false
-ReadWritePaths=/run/user
+ProtectHome=read-only
 PrivateTmp=true
 NoNewPrivileges=true
 
