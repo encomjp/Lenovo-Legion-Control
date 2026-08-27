@@ -41,8 +41,11 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   # Privileged daemon IPC (daemon installed on the HOST, not in the sandbox).
   # The daemon publishes symlinks into xdg-run so a sandboxed UI can find
-  # the system socket without direct /run access.
+  # the system socket without direct /run access. Both the link and its
+  # target must be exposed — the link itself lives in xdg-run, its target in
+  # /run.
   - --filesystem=xdg-run/legion-control.socket
+  - --filesystem=/run/legion-control.socket
 
 modules:
   - name: legion-control
