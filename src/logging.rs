@@ -111,6 +111,38 @@ fn json_escape(s: &str) -> String {
     out
 }
 
+/// Compact JSON line for stderr/file output.
+fn format_json(entry: &LogEntry) -> String {
+    match (&entry.file, entry.line) {
+        (Some(f), Some(l)) => format!(
+            r#"{{"ts":"{}","level":"{}","target":"{}","file":"{f}","line":{l},"msg":"{}"}}"#,
+            entry.ts,
+            entry.level,
+            entry.target,
+            json_escape(&entry.message),
+        ),
+        _ => format!(
+            r#"{{"ts":"{}","level":"{}","target":"{}","msg":"{}"}}"#,
+            entry.ts,
+            entry.level,
+            entry.target,
+            json_escape(&entry.message),
+        ),
+    }
+}
+
+/// Human-readable line for stderr output.
+fn format_text(entry: &LogEntry) -> String {
+    let loc = match (&entry.file, entry.line) {
+        (Some(f), Some(l)) => format!(" [{f}:{l}]"),
+        _ => String::new(),
+    };
+    format!(
+        "{} {:<5} [{}]{} {}",
+        entry.ts, entry.level, entry.target, loc, entry.message
+    )
+}
+
 struct Logger {
     json: AtomicBool,
     ring: Mutex<RingBuffer>,
@@ -167,33 +199,9 @@ impl log::Log for Logger {
         // ── stderr (text or JSON) ──
         let mut stderr = io::stderr();
         if self.json.load(Ordering::Relaxed) {
-            let json_line = match (&entry.file, entry.line) {
-                (Some(f), Some(l)) => format!(
-                    r#"{{"ts":"{}","level":"{}","target":"{}","file":"{f}","line":{l},"msg":"{}"}}"#,
-                    entry.ts,
-                    entry.level,
-                    entry.target,
-                    json_escape(&entry.message),
-                ),
-                _ => format!(
-                    r#"{{"ts":"{}","level":"{}","target":"{}","msg":"{}"}}"#,
-                    entry.ts,
-                    entry.level,
-                    entry.target,
-                    json_escape(&entry.message),
-                ),
-            };
-            let _ = writeln!(stderr, "{json_line}");
+            let _ = writeln!(stderr, "{}", format_json(&entry));
         } else {
-            let loc = match (&entry.file, entry.line) {
-                (Some(f), Some(l)) => format!(" [{f}:{l}]"),
-                _ => String::new(),
-            };
-            let _ = writeln!(
-                stderr,
-                "{} {:<5} [{}]{} {}",
-                entry.ts, entry.level, entry.target, loc, entry.message
-            );
+            let _ = writeln!(stderr, "{}", format_text(&entry));
         }
 
         // ── rotated file with poison recovery ──
@@ -213,22 +221,7 @@ impl log::Log for Logger {
                     }
                     state.date = today;
                 }
-                let json_line = match (&entry.file, entry.line) {
-                    (Some(f), Some(l)) => format!(
-                        r#"{{"ts":"{}","level":"{}","target":"{}","file":"{f}","line":{l},"msg":"{}"}}"#,
-                        entry.ts,
-                        entry.level,
-                        entry.target,
-                        json_escape(&entry.message),
-                    ),
-                    _ => format!(
-                        r#"{{"ts":"{}","level":"{}","target":"{}","msg":"{}"}}"#,
-                        entry.ts,
-                        entry.level,
-                        entry.target,
-                        json_escape(&entry.message),
-                    ),
-                };
+                let json_line = format_json(&entry);
                 match writeln!(state.file, "{json_line}") {
                     Ok(_) => {
                         state.writes += 1;
