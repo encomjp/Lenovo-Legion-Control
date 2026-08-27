@@ -9,6 +9,10 @@ use std::process::{Command, ExitCode};
 
 const DKMS_VERSION: &str = "0.1.7";
 
+const UDEV_RULE: &str = "# Lenovo Legion — allow userspace access to ec_sys and keyboard HID\n\
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c193\", MODE=\"0660\", TAG+=\"uaccess\"\n\
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c197\", MODE=\"0660\", TAG+=\"uaccess\"\n";
+
 fn executable(candidates: &[&'static str]) -> Result<&'static str, String> {
     for path in candidates {
         if Path::new(path).is_file() {
@@ -145,6 +149,37 @@ fn enable_daemon() -> Result<(), String> {
     systemctl(&["enable", "--now", "legion-control.service"])
 }
 
+fn install_udev_rule() -> Result<(), String> {
+    let dest = Path::new("/etc/udev/rules.d/99-legion.rules");
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    fs::write(dest, UDEV_RULE).map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
+    // Ensure file mode 0644 (udev expects world-readable)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(dest)
+            .map_err(|e| format!("cannot stat {}: {e}", dest.display()))?
+            .permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(dest, perms)
+            .map_err(|e| format!("cannot chmod {}: {e}", dest.display()))?;
+    }
+    // Reload and trigger — best-effort, never fatal if udevadm is missing.
+    let _ = Command::new("udevadm")
+        .args(["control", "--reload-rules"])
+        .status();
+    let _ = Command::new("udevadm")
+        .args(["trigger", "-s", "hidraw"])
+        .status();
+    // Give udev a beat to re-apply, then verify at least one Spectrum node is group-rw.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    println!("udev rule installed at {}", dest.display());
+    Ok(())
+}
+
 fn real_main() -> Result<(), String> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("this helper must be authorized through PolicyKit".into());
@@ -153,7 +188,11 @@ fn real_main() -> Result<(), String> {
         Some("install-ryzen-smu") => install_ryzen_smu(),
         Some("remove-ryzen-smu") => remove_ryzen_smu(),
         Some("enable-daemon") => enable_daemon(),
-        _ => Err("allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon".into()),
+        Some("install-udev") => install_udev_rule(),
+        _ => Err(
+            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, install-udev"
+                .into(),
+        ),
     }
 }
 

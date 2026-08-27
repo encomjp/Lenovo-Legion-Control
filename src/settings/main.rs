@@ -173,14 +173,14 @@ fn top_level_page(id: &str) -> &'static str {
 }
 
 /// Initial hub tab for a (possibly legacy) page id, if it names one.
+/// `about-storage` is a legacy id — Storage was merged into Hardware.
 fn hub_initial_tab(id: &str) -> Option<&'static str> {
     match id {
         "cpu-features" => Some("features"),
         "cpu-tuning" => Some("tuning"),
         "cpu-power" => Some("power"),
         "about-setup" => Some("setup"),
-        "about-hardware" => Some("hardware"),
-        "about-storage" => Some("storage"),
+        "about-hardware" | "about-storage" => Some("hardware"),
         "about-help" => Some("help"),
         "fix-audio" => Some("fix-audio"),
         "fix-lighting" => Some("fix-lighting"),
@@ -402,7 +402,6 @@ fn build_ui(app: &adw::Application) {
         about_setup_page,
         about_help_page,
         about_hardware_page,
-        about_storage_page,
         welcome_consent,
         welcome_share_switch,
     ) = build_about_pages(&toast_overlay);
@@ -432,7 +431,6 @@ fn build_ui(app: &adw::Application) {
         vec![
             (about_setup_page, "setup", "Setup"),
             (about_hardware_page, "hardware", "Hardware"),
-            (about_storage_page, "storage", "Storage"),
             (about_help_page, "help", "Help"),
         ],
         about_initial,
@@ -553,7 +551,7 @@ fn build_ui(app: &adw::Application) {
         (
             include_bytes!("../../data/icons/about.svg"),
             "About",
-            "Setup, hardware, storage, help",
+            "Setup, hardware, help",
         ),
     ] {
         let row = adw::ActionRow::builder()
@@ -4873,7 +4871,136 @@ fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::
 fn build_fix_lighting_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("");
     page.append(&build_lighting_reset_section(toast_overlay, gate));
+    page.append(&build_udev_permanent_section(toast_overlay));
     page
+}
+
+fn udev_rule_installed() -> bool {
+    for path in [
+        "/etc/udev/rules.d/99-legion.rules",
+        "/usr/lib/udev/rules.d/99-legion.rules",
+        "/usr/local/lib/udev/rules.d/99-legion.rules",
+    ] {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let lower = content.to_lowercase();
+            if lower.contains("048d") && lower.contains("c197") && lower.contains("0660") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+    let group = pref_group(
+        "Permanent fix (udev)",
+        Some(
+            "Makes the RGB permission fix survive reboots — without the rule the keyboard can go dark again after a restart",
+        ),
+    );
+
+    let installed = udev_rule_installed();
+    let (pill_text, pill_kind) = if installed {
+        ("Installed", "ok")
+    } else {
+        ("Missing", "warn")
+    };
+    let pill = status_pill_tip(
+        pill_text,
+        pill_kind,
+        Some(if installed {
+            "udev rule 99-legion.rules is present and looks correct"
+        } else {
+            "Rule file missing — Auto-fix only lasts until reboot; install permanently below"
+        }),
+    );
+
+    let status_row = adw::ActionRow::builder()
+        .title("Udev rule 99-legion.rules")
+        .subtitle(if installed {
+            "Present — permissions will be restored automatically after reboot"
+        } else {
+            "Missing — lights may need re-fix after every boot"
+        })
+        .activatable(false)
+        .build();
+    tip(
+        &status_row,
+        "Checks /etc/udev/rules.d/99-legion.rules (and /usr/lib/udev) for 048d:c197 with MODE 0660",
+    );
+    status_row.add_suffix(&pill);
+    group.add(&status_row);
+
+    let btn = primary_button_tip(
+        if installed {
+            "Reinstall permanently"
+        } else {
+            "Install permanently"
+        },
+        Some("Writes /etc/udev/rules.d/99-legion.rules and reloads udev (needs admin password via PolicyKit)"),
+    );
+    let action = adw::ActionRow::builder()
+        .title("Make fix permanent")
+        .subtitle("Writes the packaged udev rule and triggers hidraw — one-time admin approval")
+        .activatable(false)
+        .build();
+    tip(
+        &action,
+        "Runs legion-control-setup install-udev through pkexec; then re-checks the rule",
+    );
+    action.add_suffix(&btn);
+    group.add(&action);
+
+    let overlay = toast_overlay.clone();
+    let pill_c = pill.clone();
+    let status_c = status_row.clone();
+    let btn_c = btn.clone();
+    btn.connect_clicked(move |_| {
+        btn_c.set_sensitive(false);
+        btn_c.set_label("Installing…");
+        let overlay = overlay.clone();
+        let pill_c = pill_c.clone();
+        let status_c = status_c.clone();
+        let btn_c = btn_c.clone();
+        run_setup_helper("install-udev", move |result| match result {
+            Ok(msg) => {
+                // Verify on disk after helper reports success
+                let now_installed = udev_rule_installed();
+                if now_installed {
+                    set_pill(&pill_c, "Installed", "ok");
+                    tip(
+                        &pill_c,
+                        "udev rule 99-legion.rules is present and looks correct",
+                    );
+                    status_c.set_subtitle(
+                        "Present — permissions will be restored automatically after reboot",
+                    );
+                    btn_c.set_label("Reinstall permanently");
+                    let detail = if msg.is_empty() {
+                        "Udev rule installed permanently".to_string()
+                    } else {
+                        msg
+                    };
+                    toast_ok(&overlay, &detail);
+                } else {
+                    set_pill(&pill_c, "Missing", "warn");
+                    toast_error(
+                        &overlay,
+                        "Helper finished but rule still not found — check /etc/udev/rules.d/99-legion.rules",
+                    );
+                    btn_c.set_label("Install permanently");
+                }
+                btn_c.set_sensitive(true);
+            }
+            Err(error) => {
+                toast_error(&overlay, &error);
+                btn_c.set_label("Install permanently");
+                btn_c.set_sensitive(true);
+            }
+        });
+    });
+
+    group
 }
 
 fn build_fix_logs_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
@@ -5926,7 +6053,6 @@ fn build_about_pages(
     gtk::Box,
     gtk::Box,
     gtk::Box,
-    gtk::Box,
     // Live diagnostics consent state + switch, threaded to
     // show_welcome_if_needed so its "Share ✓" response can flip them.
     Rc<Cell<bool>>,
@@ -5935,7 +6061,6 @@ fn build_about_pages(
     let setup_page = page_lede("");
     let help_page = page_lede("");
     let hardware_page = page_lede("");
-    let storage_page = page_lede("");
     let info = legion_core::device::detect();
 
     setup_page.append(&build_updates_section(toast_overlay));
@@ -6147,12 +6272,13 @@ fn build_about_pages(
         "Close hides to tray · Quit from tray menu",
         Some("Left-click the tray icon to show the window again"),
     ));
-    storage_page.append(&lighting);
+    // Storage was a redundant duplicate of Hardware — merged here so the
+    // About hub stays at Setup / Hardware / Help only.
+    hardware_page.append(&lighting);
     (
         setup_page,
         help_page,
         hardware_page,
-        storage_page,
         diag_consent,
         diag_share_switch,
     )
@@ -6467,7 +6593,7 @@ mod tests {
                 let _ = hub;
                 let valid = match top {
                     "cpu" => ["features", "tuning", "power"].contains(&tab),
-                    "about" => ["setup", "hardware", "storage", "help"].contains(&tab),
+                    "about" => ["setup", "hardware", "help"].contains(&tab),
                     "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
                     _ => false,
                 };
