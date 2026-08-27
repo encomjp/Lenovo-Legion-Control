@@ -3271,6 +3271,28 @@ fn set_fan_metrics_from_sensors(
     }
 }
 
+/// One-line preview of what a preset will change — shown under the picker so
+/// Load isn't apply-and-pray.
+fn profile_summary(p: &legion_core::config::UserProfile) -> String {
+    let fan = |v: u32| {
+        if v == 0 {
+            "auto".to_string()
+        } else {
+            v.to_string()
+        }
+    };
+    format!(
+        "{} · fans {}/{}/{} · brightness {} · limit {}% · rgb {}",
+        friendly_profile(&p.platform_profile),
+        fan(p.fan1),
+        fan(p.fan2),
+        fan(p.fan4),
+        p.brightness,
+        p.charge_limit,
+        p.lighting_mode
+    )
+}
+
 fn build_profiles_page(
     toast_overlay: &adw::ToastOverlay,
     gate: &DaemonGate,
@@ -3295,6 +3317,23 @@ fn build_profiles_page(
     let picker = string_combo_row("Profile", "Pick a saved preset", &labels, active);
     tip(&picker, "Presets are stored in ~/.config/legion-control/");
     group.add(&picker);
+
+    // Preview what the selected preset will change before Load applies it.
+    {
+        let update_summary = move |p: &adw::ComboRow| {
+            let names = legion_core::config::list_profile_names();
+            let text = names
+                .get(p.selected() as usize)
+                .and_then(|n| legion_core::config::get_named_profile(n))
+                .map(|prof| profile_summary(&prof))
+                .unwrap_or_else(|| {
+                    "Nothing saved yet — snapshot your setup with Save current".into()
+                });
+            p.set_subtitle(&text);
+        };
+        update_summary(&picker);
+        picker.connect_selected_notify(update_summary);
+    }
 
     let entry = gtk::Entry::builder()
         .placeholder_text("Name for new profile")
