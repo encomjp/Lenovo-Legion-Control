@@ -384,14 +384,14 @@ headerbar windowtitle .subtitle {
 
 .status-warn {
     color: #f5c542;
-    background: alpha(#d9981a, 0.18);
-    border-color: alpha(#d9981a, 0.32);
+    background: alpha(@lab_amber, 0.18);
+    border-color: alpha(@lab_amber, 0.32);
 }
 
 .status-bad {
     color: #ff6b7e;
-    background: alpha(#c8102e, 0.16);
-    border-color: alpha(#c8102e, 0.30);
+    background: alpha(@accent_bg_color, 0.16);
+    border-color: alpha(@accent_bg_color, 0.30);
 }
 
 .status-muted {
@@ -718,19 +718,19 @@ scale trough highlight {
 }
 
 .brightness-slider trough {
-    background: linear-gradient(to right, alpha(black, 0.18), alpha(#d9981a, 0.18));
+    background: linear-gradient(to right, alpha(black, 0.18), alpha(@lab_amber, 0.18));
 }
 
 .brightness-slider highlight {
-    background: linear-gradient(to right, #e0a72a, #d9981a);
+    background: linear-gradient(to right, shade(@lab_amber, 1.08), @lab_amber);
 }
 
 .brightness-slider slider {
-    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(#d9981a, 0.0);
+    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(@lab_amber, 0.0);
 }
 
 .brightness-slider slider:hover {
-    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(#d9981a, 0.16);
+    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(@lab_amber, 0.16);
 }
 
 /* Numeric value + marks helper row */
@@ -751,7 +751,7 @@ scale trough highlight {
 
 /* Thermal slider: cool→hot gradient + muted when throttling off */
 .thermal-scale trough {
-    background: linear-gradient(to right, #2d7dd6 0%, #d9981a 52%, #c8102e 100%);
+    background: linear-gradient(to right, #2d7dd6 0%, @lab_amber 52%, @accent_bg_color 100%);
 }
 
 .thermal-scale.muted trough {
@@ -776,7 +776,7 @@ scale trough highlight {
 
 .thermal-validate-row {
     margin-top: 8px;
-    border-left: 2px solid alpha(#d9981a, 0.22);
+    border-left: 2px solid alpha(@lab_amber, 0.22);
     padding-left: 10px;
 }
 
@@ -791,13 +791,13 @@ scale trough highlight {
 }
 
 .thermal-tctl-dot.hot {
-    background: #c8102e;
-    box-shadow: 0 0 0 3px alpha(#c8102e, 0.20);
+    background: @accent_bg_color;
+    box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.20);
 }
 
 .thermal-tctl-dot.warm {
-    background: #d9981a;
-    box-shadow: 0 0 0 3px alpha(#d9981a, 0.22);
+    background: @lab_amber;
+    box-shadow: 0 0 0 3px alpha(@lab_amber, 0.22);
 }
 
 /* ── Motion & a11y ───────────────────────────────────────────────

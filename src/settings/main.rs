@@ -429,7 +429,7 @@ fn build_ui(app: &adw::Application) {
         let hub = gtk::Box::new(Orientation::Vertical, 0);
         hub.set_vexpand(true);
         hub.append(&bar);
-        hub.append(&page_shell(&lighting_page));
+        hub.append(&page_shell_width(&lighting_page, PageWidth::Wide));
         hub
     };
     if let Some(tab) = legion_page_req.as_deref().and_then(hub_initial_tab) {
@@ -449,25 +449,27 @@ fn build_ui(app: &adw::Application) {
     );
 
     stack.add_titled(
-        &page_shell(&build_overview(
-            &toast_overlay,
-            &apply_queue,
-            &daemon_gate,
-            &mode_drop_slot,
-            &profile_choices_slot,
-            &ppt_group_slot,
-            &ppt_scales_slot,
-            &ppt_suppress_slot,
-        )),
+        &page_shell_width(
+            &build_overview(
+                &toast_overlay,
+                &apply_queue,
+                &daemon_gate,
+                &mode_drop_slot,
+                &profile_choices_slot,
+                &ppt_group_slot,
+                &ppt_scales_slot,
+                &ppt_suppress_slot,
+            ),
+            PageWidth::Wide,
+        ),
         Some("overview"),
         "Home",
     );
     stack.add_titled(
-        &page_shell(&build_cooling_overview_page(
-            &toast_overlay,
-            &apply_queue,
-            &daemon_gate,
-        )),
+        &page_shell_width(
+            &build_cooling_overview_page(&toast_overlay, &apply_queue, &daemon_gate),
+            PageWidth::Wide,
+        ),
         Some("cooling-fans"),
         "Cooling",
     );
@@ -2285,7 +2287,10 @@ fn set_curve_optimizer_persistence_async(
     );
 }
 
-fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+fn build_curve_optimizer(
+    toast_overlay: &adw::ToastOverlay,
+    gate: &DaemonGate,
+) -> adw::PreferencesGroup {
     let group = pref_group("Curve Optimizer", None);
     tip(
         &group,
@@ -2535,6 +2540,7 @@ fn build_curve_optimizer(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
     });
 
     refresh_curve_optimizer(&ui, None);
+    gate.track(&group);
     group
 }
 
@@ -2689,7 +2695,7 @@ fn build_cpu_tuning_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -
     let page = page_lede("");
     // Cards on top — squares/overview style, then tuning controls below. Tooltips (hover) carry the how-to.
     let thermal = build_thermal_card(toast_overlay, gate);
-    let co = build_curve_optimizer(toast_overlay);
+    let co = build_curve_optimizer(toast_overlay, gate);
     // Autostart as a small row on this Tuning tab (hover tip explains it).
     let autostart_row = adw::SwitchRow::builder()
         .title("Launch at login")
@@ -4859,7 +4865,7 @@ fn build_fix_page(
         "RGB Fix",
     );
     inner.add_titled(
-        &page_shell(&build_fix_logs_page(toast_overlay)),
+        &page_shell(&build_fix_logs_page(toast_overlay, gate)),
         Some("fix-logs"),
         "Logs",
     );
@@ -5021,9 +5027,9 @@ fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::Prefe
     group
 }
 
-fn build_fix_logs_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
+fn build_fix_logs_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("");
-    page.append(&build_logs_section(toast_overlay));
+    page.append(&build_logs_section(toast_overlay, gate));
     page
 }
 
@@ -5201,7 +5207,10 @@ fn build_lighting_reset_section(
     group
 }
 
-fn build_logs_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+fn build_logs_section(
+    toast_overlay: &adw::ToastOverlay,
+    gate: &DaemonGate,
+) -> adw::PreferencesGroup {
     use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
 
     let group = pref_group("Daemon logs", None);
@@ -5328,6 +5337,8 @@ fn build_logs_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGrou
         });
     });
 
+    gate.track(&fetch_btn);
+    gate.track(&level_btn);
     group
 }
 
@@ -5595,7 +5606,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         .activatable(false)
         .build();
 
-    let actions = gtk::Box::new(Orientation::Horizontal, 6);
+    let actions = gtk::Box::new(Orientation::Horizontal, 8);
     actions.set_valign(Align::Center);
     let preview = gtk::Button::builder()
         .label("Preview")
@@ -5988,7 +5999,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
             smu_row_c.set_subtitle(&smu_status);
         });
     }
-    let smu_actions = gtk::Box::new(Orientation::Horizontal, 6);
+    let smu_actions = gtk::Box::new(Orientation::Horizontal, 8);
     smu_actions.set_valign(Align::Center);
     let remove_smu = gtk::Button::builder()
         .label("Remove")
