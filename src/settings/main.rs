@@ -6190,19 +6190,9 @@ fn confirm_disable_telemetry(win: Option<&gtk::Window>, on_result: impl FnOnce(b
 fn build_diagnostics_section(
     toast_overlay: &adw::ToastOverlay,
 ) -> (adw::PreferencesGroup, Rc<Cell<bool>>, adw::SwitchRow) {
-    // Disclosure lives as the group description (outside the boxed list) so
-    // the card itself contains only the three actionable rows — no empty
-    // boxed row at the top.
-    let group = pref_group(
-        "Alpha diagnostics (anonymous)",
-        Some(
-            "Alpha program: one anonymized JSON report per minute — hardware model, distro/kernel, \
-             sensor readings, fan states, battery health stats, thermal &amp; Curve Optimizer settings, a \
-             settings digest, a log summary (warn/error counts + last error, home paths redacted), and \
-             self-check results. NEVER included: hostname, username, serials, MACs, IPs, per-key colors, \
-             custom profile names. ON by default — you can opt out here.",
-        ),
-    );
+    // No long disclosure paragraph here — the switch subtitle and hover tips
+    // carry what matters, and the boxed list holds only actionable rows.
+    let group = pref_group("Alpha diagnostics (anonymous)", None);
 
     // Live consent mirror — updated by the switch handler below, read by the
     // Send-now gating, and handed to show_welcome_if_needed by the caller.
@@ -6210,7 +6200,7 @@ fn build_diagnostics_section(
 
     let share_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
-        .subtitle("On by default · one report per minute · turn off to opt out")
+        .subtitle("On by default · turn off to opt out")
         .active(legion_core::config::get().diagnostics.enabled)
         .build();
     tip(
