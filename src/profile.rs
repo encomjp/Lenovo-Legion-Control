@@ -13,31 +13,52 @@ const LEGACY_PROFILE: &str = "/sys/firmware/acpi/platform_profile";
 const LEGACY_CHOICES: &str = "/sys/firmware/acpi/platform_profile_choices";
 const CLASS_DIR: &str = "/sys/class/platform-profile";
 
-/// First platform-profile handler exposing `file` ("profile"/"choices").
-fn handler_attr_path(file: &str) -> Option<PathBuf> {
-    let dir = match fs::read_dir(CLASS_DIR) {
+/// Scan a sysfs class dir for the first entry whose (optionally filtered)
+/// sub-path satisfies `want`, with match/no-match debug logging.
+fn find_class_attr(
+    what: &str,
+    root: &str,
+    name_filter: impl Fn(&str) -> bool,
+    sub: &[&str],
+    want_dir: bool,
+) -> Option<PathBuf> {
+    let dir = match fs::read_dir(root) {
         Ok(d) => d,
         Err(e) => {
-            log::debug!("profile: handler_attr_path('{file}'): {CLASS_DIR} unreadable: {e}");
+            log::debug!("profile: {what}: {root} unreadable: {e}");
             return None;
         }
     };
-    let mut handlers = 0usize;
+    let mut scanned = 0usize;
     for entry in dir.flatten() {
-        let attr = entry.path().join(file);
-        handlers += 1;
-        if attr.is_file() {
-            log::debug!(
-                "profile: handler_attr_path('{file}') matched {} after scanning {handlers} handler entries",
-                attr.display()
-            );
-            return Some(attr);
+        let name = entry.file_name();
+        let n = name.to_string_lossy();
+        if !name_filter(&n) {
+            continue;
+        }
+        scanned += 1;
+        let mut path = entry.path();
+        for part in sub {
+            path = path.join(part);
+        }
+        if (want_dir && path.is_dir()) || (!want_dir && path.is_file()) {
+            log::debug!("profile: {what} matched '{n}' → {}", path.display());
+            return Some(path);
         }
     }
-    log::debug!(
-        "profile: handler_attr_path('{file}'): no handler exposes '{file}' ({handlers} entries scanned)"
-    );
+    log::debug!("profile: {what}: no match under {scanned} scanned entr(ies) in {root}");
     None
+}
+
+/// First platform-profile handler exposing `file` ("profile"/"choices").
+fn handler_attr_path(file: &str) -> Option<PathBuf> {
+    find_class_attr(
+        &format!("handler_attr_path('{file}')"),
+        CLASS_DIR,
+        |_| true,
+        &[file],
+        false,
+    )
 }
 
 fn handler_profile_path() -> Option<PathBuf> {
@@ -201,33 +222,13 @@ const GPU_PPT_IDS: &[(&str, &str, LimitUnit)] = &[
 ];
 
 fn fw_attr_dir(attr: &str) -> Option<PathBuf> {
-    let root = match fs::read_dir(FW_ATTR_ROOT) {
-        Ok(r) => r,
-        Err(e) => {
-            log::debug!("profile: fw_attr_dir('{attr}'): {FW_ATTR_ROOT} unreadable: {e}");
-            return None;
-        }
-    };
-    let mut drivers = 0usize;
-    for entry in root.flatten() {
-        let name = entry.file_name();
-        let n = name.to_string_lossy();
-        if n.starts_with("lenovo-wmi-other") {
-            drivers += 1;
-            let dir = entry.path().join("attributes").join(attr);
-            if dir.is_dir() {
-                log::debug!(
-                    "profile: fw_attr_dir('{attr}') matched driver '{n}' → {}",
-                    dir.display()
-                );
-                return Some(dir);
-            }
-        }
-    }
-    log::debug!(
-        "profile: fw_attr_dir('{attr}'): no attribute dir under {drivers} lenovo-wmi-other driver(s)"
-    );
-    None
+    find_class_attr(
+        &format!("fw_attr_dir('{attr}')"),
+        FW_ATTR_ROOT,
+        |n| n.starts_with("lenovo-wmi-other"),
+        &["attributes", attr],
+        true,
+    )
 }
 
 fn read_u32_file(path: &Path) -> Option<u32> {
