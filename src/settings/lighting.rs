@@ -69,7 +69,7 @@ pub fn build_lighting(
         ),
         Some("front"),
         "Front",
-        "go-down-symbolic",
+        "night-light-symbolic",
     );
     tabs.add_titled_with_icon(
         &build_zone_tab(
@@ -81,7 +81,7 @@ pub fn build_lighting(
         ),
         Some("rear"),
         "Rear",
-        "go-up-symbolic",
+        "daytime-sunset-symbolic",
     );
     tabs.add_titled_with_icon(
         &build_zone_tab(
