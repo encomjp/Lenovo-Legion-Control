@@ -71,19 +71,23 @@ pub fn read_pstate() -> std::io::Result<IntelPState> {
     })
 }
 
+/// Write a sysfs file, wrapping errors with the path for context.
+fn write_sysfs(path: &str, value: impl std::fmt::Display) -> std::io::Result<()> {
+    fs::write(path, value.to_string())
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{path}: {e}")))
+}
+
 pub fn set_pstate_hwp_dynamic_boost(on: bool) -> std::io::Result<()> {
-    fs::write(
-        format!("{SYSFS_PSTATE}hwp_dynamic_boost"),
+    write_sysfs(
+        &format!("{SYSFS_PSTATE}hwp_dynamic_boost"),
         if on { "1" } else { "0" },
     )
-    .map_err(|e| std::io::Error::new(e.kind(), format!("{SYSFS_PSTATE}hwp_dynamic_boost: {e}")))
 }
 pub fn set_pstate_no_turbo(no_turbo: bool) -> std::io::Result<()> {
-    fs::write(
-        format!("{SYSFS_PSTATE}no_turbo"),
+    write_sysfs(
+        &format!("{SYSFS_PSTATE}no_turbo"),
         if no_turbo { "1" } else { "0" },
     )
-    .map_err(|e| std::io::Error::new(e.kind(), format!("{SYSFS_PSTATE}no_turbo: {e}")))
 }
 pub fn set_pstate_max_pct(pct: u32) -> std::io::Result<()> {
     if pct > 100 {
@@ -92,8 +96,7 @@ pub fn set_pstate_max_pct(pct: u32) -> std::io::Result<()> {
             "max_perf_pct 0-100",
         ));
     }
-    fs::write(format!("{SYSFS_PSTATE}max_perf_pct"), format!("{pct}"))
-        .map_err(|e| std::io::Error::new(e.kind(), format!("{SYSFS_PSTATE}max_perf_pct: {e}")))
+    write_sysfs(&format!("{SYSFS_PSTATE}max_perf_pct"), pct)
 }
 pub fn set_pstate_min_pct(pct: u32) -> std::io::Result<()> {
     if pct > 100 {
@@ -102,8 +105,7 @@ pub fn set_pstate_min_pct(pct: u32) -> std::io::Result<()> {
             "min_perf_pct 0-100",
         ));
     }
-    fs::write(format!("{SYSFS_PSTATE}min_perf_pct"), format!("{pct}"))
-        .map_err(|e| std::io::Error::new(e.kind(), format!("{SYSFS_PSTATE}min_perf_pct: {e}")))
+    write_sysfs(&format!("{SYSFS_PSTATE}min_perf_pct"), pct)
 }
 
 // ── Intel Uncore ───────────────────────────────────────────────────────────
@@ -153,21 +155,18 @@ pub fn uncore_packages() -> std::io::Result<Vec<IntelUncorePackage>> {
     Ok(out)
 }
 
-pub fn set_uncore_max(package: &str, khz: u32) -> std::io::Result<()> {
-    let path = format!("{SYSFS_UNCORE}{package}/max_freq_khz");
+fn set_uncore_freq(package: &str, khz: u32, suffix: &str) -> std::io::Result<()> {
+    let path = format!("{SYSFS_UNCORE}{package}/{suffix}");
     if !Path::new(&path).exists() {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, path));
     }
-    fs::write(&path, format!("{khz}"))
-        .map_err(|e| std::io::Error::new(e.kind(), format!("{path}: {e}")))
+    write_sysfs(&path, khz)
+}
+pub fn set_uncore_max(package: &str, khz: u32) -> std::io::Result<()> {
+    set_uncore_freq(package, khz, "max_freq_khz")
 }
 pub fn set_uncore_min(package: &str, khz: u32) -> std::io::Result<()> {
-    let path = format!("{SYSFS_UNCORE}{package}/min_freq_khz");
-    if !Path::new(&path).exists() {
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, path));
-    }
-    fs::write(&path, format!("{khz}"))
-        .map_err(|e| std::io::Error::new(e.kind(), format!("{path}: {e}")))
+    set_uncore_freq(package, khz, "min_freq_khz")
 }
 
 // ── Hybrid topology helpers (Intel 12th+ P/E split) ───────────────────────
