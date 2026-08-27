@@ -1725,15 +1725,6 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     });
     switch_row.append(&switch_l);
     switch_row.append(&layout_dd);
-    let hint = gtk::Label::new(Some("LED mapping stays the same"));
-    hint.add_css_class("hint");
-    hint.set_hexpand(true);
-    hint.set_halign(Align::Start);
-    hint.set_wrap(true);
-    hint.set_max_width_chars(24);
-    hint.set_margin_top(0);
-    tip(&hint, "Switching layout does not wipe painted colours");
-    switch_row.append(&hint);
     root.append(&switch_row);
 
     let area = gtk::DrawingArea::new();
@@ -1938,13 +1929,6 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
         legion_core::keyboard::restore_lighting_async();
     });
     tools.append(&fill);
-
-    let paint_hint = gtk::Label::new(Some("Click or drag to paint"));
-    paint_hint.add_css_class("hint");
-    paint_hint.set_hexpand(true);
-    paint_hint.set_halign(Align::End);
-    tip(&paint_hint, "Hold and drag across keys for faster painting");
-    tools.append(&paint_hint);
 
     root.append(&tools);
     root

@@ -2709,7 +2709,6 @@ fn build_curve_optimizer(
 
     let actions_row = adw::ActionRow::builder()
         .title("Current session")
-        .subtitle("Verified by firmware readback")
         .activatable(false)
         .build();
     tip(
@@ -3143,10 +3142,7 @@ fn build_stability_group(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
     }
     // Fallback recompose — should never hit.
     let g = pref_group("Stability test", None);
-    let row = adw::ActionRow::builder()
-        .title("Stability test")
-        .subtitle("5 minutes")
-        .build();
+    let row = adw::ActionRow::builder().title("Stability test").build();
     g.add(&row);
     g
 }
@@ -3241,10 +3237,7 @@ fn spawn_stability_test_for(
 fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
     let page = page_lede("");
     let group = pref_group("Stability test", None);
-    let status = adw::ActionRow::builder()
-        .title("Ready")
-        .subtitle("5 minutes · all CPU threads")
-        .build();
+    let status = adw::ActionRow::builder().title("Ready").build();
     group.add(&status);
 
     // One button, two roles — Start test ↔ Stop. A separate Stop button left
@@ -3349,13 +3342,7 @@ fn attach_custom_ppt_group(
     let caps = legion_core::device::detect().capabilities;
     let peak_tgp = caps.peak_gpu_w.unwrap_or(175);
     let peak_src = caps.peak_gpu_source;
-    let ppt_group = pref_group(
-        "Custom power limits",
-        Some(&format!(
-            "Only active in Custom mode. Peak GPU TGP on this laptop is {peak_tgp} W (Performance / Max). \
-             The GPU AC power slider below is a separate BIOS knob (firmware-capped)."
-        )),
-    );
+    let ppt_group = pref_group("Custom power limits", None);
     tip(
         &ppt_group,
         &format!(
@@ -3643,7 +3630,6 @@ fn build_profiles_page(
     tip(&entry, "Type a name, then Save current");
     let entry_row = adw::ActionRow::builder()
         .title("New name")
-        .subtitle("Name for this profile")
         .activatable(false)
         .build();
     tip(
@@ -3677,7 +3663,6 @@ fn build_profiles_page(
 
     let restore_sw = adw::SwitchRow::builder()
         .title("Restore last session on launch")
-        .subtitle("Re-apply power, fans, charge, and lighting when the app starts")
         .active(legion_core::config::get().restore_on_launch)
         .build();
     tip(
@@ -4170,7 +4155,6 @@ fn build_cooling_overview_page(
     });
     let row = adw::ActionRow::builder()
         .title("Reset all")
-        .subtitle("Clears any manual RPM targets")
         .activatable(false)
         .build();
     tip(&row, "Recommended after testing loud manual speeds");
@@ -4749,7 +4733,6 @@ fn fan_card(
 
     let speed_row = adw::ActionRow::builder()
         .title("Speed")
-        .subtitle("Fixed RPM when Automatic is off")
         .activatable(false)
         .build();
     tip(
@@ -5354,12 +5337,7 @@ fn udev_rule_installed() -> bool {
 }
 
 fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group(
-        "Permanent fix (udev)",
-        Some(
-            "Makes the RGB permission fix survive reboots — without the rule the keyboard can go dark again after a restart",
-        ),
-    );
+    let group = pref_group("Permanent fix (udev)", None);
 
     let installed = udev_rule_installed();
     let (pill_text, pill_kind) = if installed {
@@ -5403,7 +5381,6 @@ fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::Prefe
     );
     let action = adw::ActionRow::builder()
         .title("Make fix permanent")
-        .subtitle("Writes the packaged udev rule and triggers hidraw — one-time admin approval")
         .activatable(false)
         .build();
     tip(
@@ -5477,12 +5454,7 @@ fn build_lighting_reset_section(
 ) -> adw::PreferencesGroup {
     use legion_core::rgb_panic::{self, Health};
 
-    let group = pref_group(
-        "Keyboard lighting issue",
-        Some(
-            "Detects Spectrum HID / kernel USB faults when lights go black, then soft-resets or USB-resets the controller",
-        ),
-    );
+    let group = pref_group("Keyboard lighting issue", None);
 
     let diag0 = rgb_panic::diagnose();
     let (pill_text, pill_kind) = rgb_pill(diag0.health);
@@ -5502,7 +5474,6 @@ fn build_lighting_reset_section(
 
     let expander = adw::ExpanderRow::builder()
         .title("Technical details")
-        .subtitle("HID path, permissions, ioctl, kernel log hits")
         .build();
     tip(
         &expander,
@@ -5538,7 +5509,6 @@ fn build_lighting_reset_section(
     );
     let action = adw::ActionRow::builder()
         .title("Auto-fix")
-        .subtitle("Daemon watches kernel HID faults and can auto-fix in the background")
         .activatable(false)
         .build();
     tip(
@@ -6200,7 +6170,6 @@ fn build_diagnostics_section(
 
     let share_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
-        .subtitle("On by default · turn off to opt out")
         .active(legion_core::config::get().diagnostics.enabled)
         .build();
     tip(
@@ -6213,7 +6182,6 @@ fn build_diagnostics_section(
     // keep the button's sensitivity glued to the consent state (both ways).
     let send_row = adw::ActionRow::builder()
         .title("Send now")
-        .subtitle("Collects and uploads one anonymized report")
         .activatable(false)
         .build();
     let send_btn = gtk::Button::with_label("Send now");
@@ -6267,7 +6235,6 @@ fn build_diagnostics_section(
 
     let check_row = adw::ActionRow::builder()
         .title("Self-check")
-        .subtitle("Read-only checks of config, battery, fans, sensors, and lighting")
         .activatable(false)
         .build();
     let run_btn = gtk::Button::with_label("Run");
@@ -6581,7 +6548,6 @@ fn build_about_pages(
     let help = pref_group("Help", None);
     let report_row = adw::ActionRow::builder()
         .title("Report an issue")
-        .subtitle("GitHub — bugs and feature requests")
         .activatable(true)
         .build();
     tip(
@@ -6600,7 +6566,6 @@ fn build_about_pages(
 
     let donate_row = adw::ActionRow::builder()
         .title("Donate")
-        .subtitle("PayPal — optional support for the project")
         .activatable(true)
         .build();
     donate_row.add_prefix(&color_icon(
@@ -6796,12 +6761,7 @@ fn build_about_pages(
 fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
     use legion_core::audio::{self, Health};
 
-    let group = pref_group(
-        "Speakers",
-        Some(
-            "Gen 10 woofers use an AW88399 smart amp — tinny sound usually means the amp isn’t loaded or audio is muted / on the wrong output",
-        ),
-    );
+    let group = pref_group("Speakers", None);
     let diag0 = audio::diagnose();
     let (pill_text, pill_kind) = amp_pill(diag0.health);
     let pill = status_pill_tip(pill_text, pill_kind, Some(amp_pill_tooltip(diag0.health)));
@@ -6820,7 +6780,6 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
 
     let expander = adw::ExpanderRow::builder()
         .title("Technical details")
-        .subtitle("ACPI amp, modules, firmware, mute, PipeWire sink")
         .build();
     tip(
         &expander,
@@ -6854,7 +6813,6 @@ fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferences
     );
     let action = adw::ActionRow::builder()
         .title("Repair")
-        .subtitle("Unmute, restart PipeWire, prefer onboard sink")
         .activatable(false)
         .build();
     tip(&action, amp_action_tooltip(diag0.health));

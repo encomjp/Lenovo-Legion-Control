@@ -240,7 +240,7 @@ fn logo_power_row(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     logo_suppress.set(false);
     labeled_row_tip(
         "Logo LED power",
-        "Hardware on/off for the lid logo",
+        "",
         &logo,
         Some("Turns the physical lid logo LED on or off"),
     )
@@ -303,7 +303,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     bright_box.append(&bright_val);
     look.append(&labeled_row_tip(
         "Brightness",
-        "0 off · 9 max",
+        "",
         &bright_box,
         Some("Applies to keyboard and accent Spectrum zones"),
     ));
@@ -333,7 +333,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     });
     restore_card.append(&labeled_row_tip(
         "Hardware sync",
-        "~/.config/legion-control/settings.json",
+        "",
         &restore,
         Some("Useful after sleep or if lights drifted from the saved look"),
     ));
@@ -441,7 +441,7 @@ fn zone_editor(
         fx_box.append(&speed_dd);
         wrap.append(&labeled_row_tip(
             "Effect",
-            "Animation and playback speed",
+            "",
             &fx_box,
             Some("Lighting animation for this surface — speed only affects animated effects"),
         ));
@@ -452,7 +452,7 @@ fn zone_editor(
         colour_box.append(&hex);
         wrap.append(&labeled_row_tip(
             "Colour",
-            "Picker, or type #RRGGBB and press Return",
+            "",
             &colour_box,
             Some("Used by Static, Pulse, Wave, and other coloured effects"),
         ));
@@ -483,7 +483,7 @@ fn zone_editor(
         bright_box.append(&bright_val);
         wrap.append(&labeled_row_tip(
             "Brightness",
-            "0 off · 9 full",
+            "",
             &bright_box,
             Some("Per-zone brightness — independent of other zones"),
         ));
@@ -518,15 +518,7 @@ fn colour_toolbar(brush: &Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
         &t,
         "Active paint colour for per-key mode — also used by coloured lighting effects",
     );
-    let s = gtk::Label::new(Some("Any RGB — dialog or hex"));
-    s.add_css_class("row-sub");
-    s.set_halign(Align::Start);
-    tip(
-        &s,
-        "Use the colour dialog, a preset swatch, or type #RRGGBB and press Return",
-    );
     text.append(&t);
-    text.append(&s);
     tip(
         &row,
         "Choose the colour you paint keys with — saved as your UI brush colour",
