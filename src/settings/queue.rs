@@ -153,6 +153,9 @@ fn flush(inner: Rc<Inner>) {
                 };
                 let label = gtk4::Label::new(Some(&msg));
                 label.add_css_class("toast-error");
+                label.set_wrap(true);
+                label.set_max_width_chars(56);
+                label.set_xalign(0.0);
                 let t = adw::Toast::new("");
                 t.set_custom_title(Some(&label));
                 t.set_timeout(4);

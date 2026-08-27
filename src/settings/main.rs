@@ -99,6 +99,11 @@ fn toast_error(overlay: &adw::ToastOverlay, msg: &str) {
     log::warn!("ui error: {msg}");
     let label = gtk::Label::new(Some(msg));
     label.add_css_class("toast-error");
+    // Wrap instead of letting the message stretch the toast (and with it the
+    // whole window) to the full single-line width.
+    label.set_wrap(true);
+    label.set_max_width_chars(56);
+    label.set_xalign(0.0);
     let t = adw::Toast::new("");
     t.set_custom_title(Some(&label));
     t.set_timeout(4);
@@ -978,6 +983,42 @@ fn build_ui(app: &adw::Application) {
     ));
     bp.add_setter(&split, "collapsed", Some(&true.to_value()));
     window.add_breakpoint(bp);
+
+    // Dev aid (mirrors LEGION_PAGE): LEGION_DEBUG_LAYOUT=1 logs every widget
+    // whose minimum width exceeds the window — pinpoints "exceeds width"
+    // offenders when a page stops scaling at narrow sizes.
+    if std::env::var_os("LEGION_DEBUG_LAYOUT").is_some() {
+        let probe_root = window.clone();
+        glib::timeout_add_local(Duration::from_secs(2), move || {
+            fn walk(w: &gtk::Widget, depth: usize, out: &mut Vec<String>) {
+                let (min, _, _, _) = w.measure(gtk::Orientation::Horizontal, -1);
+                if min > 900 {
+                    out.push(format!(
+                        "{}{} ({}) min={min} classes={:?}",
+                        "  ".repeat(depth),
+                        w.type_().name(),
+                        w.widget_name(),
+                        w.css_classes()
+                    ));
+                }
+                let mut child = w.first_child();
+                while let Some(c) = child {
+                    walk(&c, depth + 1, out);
+                    child = c.next_sibling();
+                }
+            }
+            let mut out = Vec::new();
+            walk(probe_root.upcast_ref::<gtk::Widget>(), 0, &mut out);
+            if out.is_empty() {
+                log::info!("layout probe: no widget wider than 900px");
+            } else {
+                for line in out {
+                    log::warn!("layout probe: {line}");
+                }
+            }
+            glib::ControlFlow::Break
+        });
+    }
 
     // Robust header sync: whenever the stack's visible child changes by ANY
     // path (nav_to, LEGION_PAGE, welcome dialog, future code), update the

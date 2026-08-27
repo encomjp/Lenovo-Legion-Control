@@ -297,6 +297,12 @@ pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::La
     let d = gtk::Label::new(Some(""));
     d.add_css_class("detail");
     d.set_halign(Align::Start);
+    // Dynamic readouts can carry long IPC error strings — without ellipsizing,
+    // a chip's text dictates the page's minimum width and the whole window
+    // stops scaling at narrow sizes ("exceeds width" warnings).
+    for label in [&l, &v, &d] {
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    }
     box_.append(&l);
     box_.append(&v);
     box_.append(&d);
