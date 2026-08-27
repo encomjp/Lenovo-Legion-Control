@@ -1922,14 +1922,18 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     let layout_f = layout.clone();
     fill.connect_clicked(move |_| {
         let (r, g, b) = paint_f.get();
-        {
+        let batch: Vec<(String, [u8; 3])> = {
             let mut map = colors_f.borrow_mut();
-            for key in layout_keys(layout_f.get()) {
-                let ck = color_key_for_code(key.code);
-                map.insert(ck.clone(), [r, g, b]);
-                legion_core::config::set_per_key_color(&ck, r, g, b);
-            }
-        }
+            layout_keys(layout_f.get())
+                .iter()
+                .map(|key| {
+                    let ck = color_key_for_code(key.code);
+                    map.insert(ck.clone(), [r, g, b]);
+                    (ck, [r, g, b])
+                })
+                .collect()
+        };
+        legion_core::config::set_per_key_colors(&batch);
         area_f.queue_draw();
         legion_core::keyboard::restore_lighting_async();
     });

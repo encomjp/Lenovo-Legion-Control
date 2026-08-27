@@ -881,7 +881,24 @@ pub fn set_per_key_color(key: &str, r: u8, g: u8, b: u8) {
         cfg.lighting_mode = "per-key".into();
         cfg.per_key.insert(key.to_string(), [r, g, b]);
         cfg.last_session.lighting_mode = "per-key".into();
-        cfg.last_session.per_key = cfg.per_key.clone();
+        // Insert only this key — cloning the whole map per paint stroke is
+        // O(n) on every mouse-move event.
+        cfg.last_session.per_key.insert(key.to_string(), [r, g, b]);
+    });
+}
+
+/// Batch-set many per-key colors in one config read/write. The per-key
+/// editor's "Fill all" paints every key; one disk round-trip instead of one
+/// per key.
+pub fn set_per_key_colors(entries: &[(String, [u8; 3])]) {
+    log::trace!("config::set_per_key_colors({} keys)", entries.len());
+    update(|cfg| {
+        cfg.lighting_mode = "per-key".into();
+        cfg.last_session.lighting_mode = "per-key".into();
+        for (key, rgb) in entries {
+            cfg.per_key.insert(key.clone(), *rgb);
+            cfg.last_session.per_key.insert(key.clone(), *rgb);
+        }
     });
 }
 
