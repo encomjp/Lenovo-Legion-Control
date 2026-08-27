@@ -5293,18 +5293,27 @@ fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesG
         ))
         .activatable(false)
         .build();
+    row.add_css_class("updates-row");
 
-    let actions = gtk::Box::new(Orientation::Horizontal, 6);
+    let actions = gtk::Box::new(Orientation::Horizontal, 8);
     actions.set_valign(Align::Center);
+    actions.set_homogeneous(true);
     let check_btn = primary_button_tip(
         "Check for updates",
         Some("Query GitHub for the latest Legion Control release"),
     );
+    check_btn.set_size_request(156, -1);
+    check_btn.set_halign(Align::Fill);
+    check_btn.set_hexpand(true);
     let view_btn = gtk::Button::builder()
         .label("View on GitHub")
         .tooltip_text("Open GitHub releases in your browser")
         .valign(Align::Center)
         .build();
+    view_btn.add_css_class("pill-btn");
+    view_btn.set_size_request(156, -1);
+    view_btn.set_halign(Align::Fill);
+    view_btn.set_hexpand(true);
 
     actions.append(&view_btn);
     actions.append(&check_btn);
@@ -5559,24 +5568,23 @@ fn confirm_disable_telemetry(win: Option<&gtk::Window>, on_result: impl FnOnce(b
 fn build_diagnostics_section(
     toast_overlay: &adw::ToastOverlay,
 ) -> (adw::PreferencesGroup, Rc<Cell<bool>>, adw::SwitchRow) {
-    let group = pref_group("Alpha diagnostics (anonymous)", None);
+    // Disclosure lives as the group description (outside the boxed list) so
+    // the card itself contains only the three actionable rows — no empty
+    // boxed row at the top.
+    let group = pref_group(
+        "Alpha diagnostics (anonymous)",
+        Some(
+            "Alpha program: one anonymized JSON report per minute — hardware model, distro/kernel, \
+             sensor readings, fan states, battery health stats, thermal & Curve Optimizer settings, a \
+             settings digest, a log summary (warn/error counts + last error, home paths redacted), and \
+             self-check results. NEVER included: hostname, username, serials, MACs, IPs, per-key colors, \
+             custom profile names. ON by default — you can opt out here.",
+        ),
+    );
 
     // Live consent mirror — updated by the switch handler below, read by the
     // Send-now gating, and handed to show_welcome_if_needed by the caller.
     let consent = Rc::new(Cell::new(legion_core::config::get().diagnostics.enabled));
-
-    // Caption-style disclosure row — the exact data contract shown verbatim.
-    let disclosure = adw::ActionRow::builder()
-        .activatable(false)
-        .subtitle(
-            "Alpha program: one anonymized JSON report is sent per minute — \
-             hardware model, distro/kernel, sensor readings, fan states, battery health stats, thermal & \
-             Curve Optimizer settings, a settings digest, a log summary (warn/error counts + last error, home paths redacted), and self-check results. \
-             NEVER included: hostname, username, serials, MACs, IPs, per-key colors, custom profile names. \
-             ON by default — you can opt out here.",
-        )
-        .build();
-    group.add(&disclosure);
 
     let share_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
@@ -5599,6 +5607,8 @@ fn build_diagnostics_section(
     let send_btn = gtk::Button::with_label("Send now");
     send_btn.set_valign(Align::Center);
     send_btn.add_css_class("pill-btn");
+    send_btn.set_size_request(110, -1);
+    send_btn.set_halign(Align::Center);
     tip(
         &send_btn,
         "Collects and sends one anonymized report immediately",
@@ -5651,6 +5661,8 @@ fn build_diagnostics_section(
     let run_btn = gtk::Button::with_label("Run");
     run_btn.set_valign(Align::Center);
     run_btn.add_css_class("pill-btn");
+    run_btn.set_size_request(110, -1);
+    run_btn.set_halign(Align::Center);
     tip(
         &run_btn,
         "Runs read-only local checks — nothing is written or sent",
