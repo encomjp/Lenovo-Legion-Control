@@ -107,7 +107,7 @@ pub fn diagnose() -> Diagnosis {
         details.push(format!("kernel: {f}"));
     }
 
-    let Some(path) = device_path.clone() else {
+    let Some(path) = device_path else {
         let health = if kernel_faults.is_empty() {
             Health::NotApplicable
         } else {
@@ -174,9 +174,8 @@ pub fn diagnose() -> Diagnosis {
     );
     match (ioctl_ok, brightness, &ioctl_err) {
         (true, Some(b), _) => details.push(format!("ioctl OK · brightness {b}/9")),
-        (true, None, _) => details.push("ioctl OK · brightness unread".into()),
         (false, _, Some(e)) => details.push(format!("ioctl failed: {e}")),
-        (false, _, None) => details.push("ioctl failed".into()),
+        _ => details.push("ioctl failed".into()),
     }
 
     let cfg = crate::config::get();
@@ -345,7 +344,7 @@ pub fn troubleshoot() -> FixReport {
             );
             errors.push(format!("Soft lighting reset failed: {e}"));
             // 3) USB reset
-            if let Some(usb) = before.usb_sysfs.clone().or_else(find_spectrum_usb_sysfs) {
+            if let Some(usb) = before.usb_sysfs.or_else(find_spectrum_usb_sysfs) {
                 log::info!("rgb-panic: ladder 3/5 USB reset on {}", usb.display());
                 match usb_reset(&usb) {
                     Ok(()) => {
@@ -408,7 +407,7 @@ pub fn troubleshoot() -> FixReport {
             "rgb-panic: mid-check health {:?} — considering escalated full reset",
             mid.health
         );
-        if let Some(usb) = mid.usb_sysfs.clone().or_else(find_spectrum_usb_sysfs) {
+        if let Some(usb) = mid.usb_sysfs.or_else(find_spectrum_usb_sysfs) {
             if !steps.iter().any(|s| s.starts_with("USB reset")) {
                 log::info!(
                     "rgb-panic: escalating: USB reset {} + HID rebind + re-light",
@@ -696,9 +695,9 @@ fn usb_reset(usb: &Path) -> Result<(), String> {
             "rgb-panic: toggling authorized attribute at {}",
             auth.display()
         );
-        let _ = fs::write(&auth, b"0");
+        fs::write(&auth, b"0").map_err(|e| format!("authorized toggle (off) failed: {e}"))?;
         std::thread::sleep(Duration::from_millis(200));
-        let _ = fs::write(&auth, b"1");
+        fs::write(&auth, b"1").map_err(|e| format!("authorized toggle (on) failed: {e}"))?;
         log::info!(
             "rgb-panic: USB re-authorization completed at {}",
             usb.display()
@@ -899,6 +898,34 @@ pub fn scan_kernel_rgb_faults() -> Vec<String> {
     out
 }
 
+/// Run a command and return its stdout on success; `None` when the spawn
+/// failed or the command exited non-zero, so callers can fall through to
+/// the next log source (e.g. journalctl → dmesg).
+fn capture_stdout(name: &str, cmd: &mut Command) -> Option<String> {
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            let blob = String::from_utf8_lossy(&o.stdout).into_owned();
+            log::debug!(
+                "rgb-panic: {name} exit 0 · {} line(s) · {} bytes",
+                blob.lines().count(),
+                blob.len()
+            );
+            Some(blob)
+        }
+        Ok(o) => {
+            log::warn!(
+                "rgb-panic: {name} exited {:?} — falling through",
+                o.status.code()
+            );
+            None
+        }
+        Err(e) => {
+            log::debug!("rgb-panic: {name} spawn failed ({e})");
+            None
+        }
+    }
+}
+
 fn kernel_log_blob() -> String {
     // Prefer journalctl (works without CAP_SYSLOG on many systems). `-g`
     // narrows to Spectrum-related lines server-side and `-n 200` keeps the
@@ -908,8 +935,9 @@ fn kernel_log_blob() -> String {
     log::debug!(
         "rgb-panic: kernel_log_blob: spawning journalctl -k -b -g <spectrum needles> -n 200"
     );
-    let raw = match Command::new("journalctl")
-        .args([
+    if let Some(blob) = capture_stdout(
+        "journalctl",
+        Command::new("journalctl").args([
             "-k",
             "-b",
             "--no-pager",
@@ -919,58 +947,12 @@ fn kernel_log_blob() -> String {
             KERNEL_FAULT_GREP,
             "-n",
             "200",
-        ])
-        .output()
-    {
-        Ok(o) => {
-            if o.status.success() {
-                let blob = String::from_utf8_lossy(&o.stdout).into_owned();
-                log::debug!(
-                    "rgb-panic: kernel_log_blob: journalctl exit 0 · {} line(s) · {} bytes",
-                    blob.lines().count(),
-                    blob.len()
-                );
-                Some(blob)
-            } else {
-                log::warn!(
-                    "rgb-panic: kernel_log_blob: journalctl exited {:?} — no kernel fault data this boot (dmesg not attempted)",
-                    o.status.code()
-                );
-                Some(String::new())
-            }
-        }
-        Err(e) => {
-            log::debug!(
-                "rgb-panic: kernel_log_blob: journalctl spawn failed ({e}) — trying dmesg fallback"
-            );
-            None
-        }
-    };
-    if let Some(blob) = raw {
+        ]),
+    ) {
         return blob;
     }
     log::debug!("rgb-panic: kernel_log_blob: spawning dmesg fallback");
-    match Command::new("dmesg").output() {
-        Ok(o) if o.status.success() => {
-            let blob = String::from_utf8_lossy(&o.stdout).into_owned();
-            log::debug!(
-                "rgb-panic: kernel_log_blob: dmesg fallback exit 0 · {} line(s)",
-                blob.lines().count()
-            );
-            blob
-        }
-        Ok(o) => {
-            log::debug!(
-                "rgb-panic: kernel_log_blob: dmesg fallback exited {:?}",
-                o.status.code()
-            );
-            String::new()
-        }
-        Err(e) => {
-            log::debug!("rgb-panic: kernel_log_blob: dmesg spawn failed ({e})");
-            String::new()
-        }
-    }
+    capture_stdout("dmesg", &mut Command::new("dmesg")).unwrap_or_default()
 }
 
 struct OpenOptionsCompat;
