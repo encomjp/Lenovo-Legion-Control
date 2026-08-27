@@ -216,6 +216,15 @@ fn restart_daemon() -> Result<(), String> {
     systemctl(&["try-restart", "legion-control.service"])
 }
 
+/// True when a Spectrum-permission udev rule is already on the host — either
+/// the canonical /etc location (source + helper installs) or the packaged
+/// /usr/lib location. Never counts other prefixes: /usr/local staging relies
+/// on the /etc copy below.
+fn udev_rule_installed() -> bool {
+    Path::new("/etc/udev/rules.d/99-legion.rules").is_file()
+        || Path::new("/usr/lib/udev/rules.d/99-legion.rules").is_file()
+}
+
 fn bundled_usr_dir() -> Result<PathBuf, String> {
     // …/usr/libexec/legion-control-setup → …/usr (works inside an AppImage
     // squashfs mount and for fixed-prefix installs alike).
@@ -287,9 +296,13 @@ fn enable_daemon() -> Result<(), String> {
             .map_err(|e| format!("cannot create unit dir: {e}"))?;
         fs::write("/etc/systemd/system/legion-control.service", unit_text)
             .map_err(|e| format!("cannot install unit: {e}"))?;
-        install_udev_rule()?;
         systemctl(&["daemon-reload"])?;
-        println!("staged daemon + helper + policy + udev + unit from portable bundle");
+        println!("staged daemon + helper + policy + unit from portable bundle");
+    }
+    // The portable bootstrap pre-stages the daemon at /usr/local/bin, so the
+    // branch above is skipped — Spectrum permissions still need the udev rule.
+    if !udev_rule_installed() {
+        install_udev_rule()?;
     }
     systemctl(&["enable", "--now", "legion-control.service"])
 }

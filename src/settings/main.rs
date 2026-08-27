@@ -274,7 +274,7 @@ fn start_legion_control() -> Result<(), String> {
         Err(error) => log::debug!("unprivileged service start unavailable: {error}"),
     }
 
-    if setup_helper_path().is_some() {
+    if setup_helper_path().is_some() || appimage_root().is_some() {
         log::info!("starting daemon through one PolicyKit setup transaction");
         return run_setup_helper_blocking("enable-daemon").and_then(|_| wait_for_daemon_socket());
     }
@@ -1215,18 +1215,157 @@ fn open_uri(uri: &str) {
 fn setup_helper_path() -> Option<PathBuf> {
     // Stable host helpers first — they have a matching polkit policy with
     // auth_admin_keep (one prompt covers several operations). The AppImage
-    // mount path is dynamic (/tmp/.mount_…), has no policy, and falls back
-    // to generic auth_admin (no keep) — so it would prompt for every call.
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    candidates.push("/usr/libexec/legion-control-setup".into());
-    candidates.push("/usr/local/libexec/legion-control-setup".into());
-    candidates.push("/usr/lib/legion-control-setup".into());
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("../libexec/legion-control-setup"));
+    // mount path is deliberately NOT a candidate: pkexec can never execute
+    // anything inside the image because the squashfs FUSE mount is only
+    // readable by the launching user, so root gets "Permission denied".
+    // Portable installs bootstrap a stable helper instead (see
+    // bootstrap_appimage_setup).
+    let candidates: Vec<PathBuf> = vec![
+        "/usr/libexec/legion-control-setup".into(),
+        "/usr/local/libexec/legion-control-setup".into(),
+        "/usr/lib/legion-control-setup".into(),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+/// Root of the running AppImage bundle, if any. The official runtime exports
+/// APPDIR; without it, fall back to the /tmp/.mount_* squashfs mount path.
+fn appimage_root() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("APPDIR") {
+        let dir = PathBuf::from(dir);
+        if dir.is_dir() {
+            return Some(dir);
         }
     }
-    candidates.into_iter().find(|path| path.is_file())
+    let exe = std::env::current_exe().ok()?;
+    let root = exe.parent()?.parent()?.parent()?;
+    root.file_name()?
+        .to_str()?
+        .starts_with(".mount_")
+        .then(|| root.to_path_buf())
+}
+
+/// One authorized transaction for portable (AppImage) installs.
+///
+/// pkexec can never execute anything inside an AppImage: the squashfs FUSE
+/// mount is only readable by the launching user, so root's open() fails with
+/// EACCES ("Error accessing …: Permission denied"). Instead the GUI streams a
+/// root-owned tar payload through a single `pkexec sh` transaction; root
+/// extracts it to fixed paths (stable helper, polkit policy, daemon, unit,
+/// DKMS source), reloads systemd, and runs the freshly installed helper for
+/// the requested operation. Every later setup action then matches the polkit
+/// policy (auth_admin_keep) instead of generic per-call auth.
+fn bootstrap_appimage_setup(operation: &str) -> Result<String, String> {
+    let usr = appimage_root()
+        .ok_or_else(|| "Not running from an AppImage bundle".to_string())?
+        .join("usr");
+    let helper = usr.join("libexec/legion-control-setup");
+    let unit = usr.join("lib/systemd/system/legion-control.service");
+    if !helper.is_file() || !unit.is_file() {
+        return Err("portable bundle is missing the setup helper or unit file".into());
+    }
+
+    let stage = std::env::temp_dir().join(format!(
+        "legion-bootstrap-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    let result = (|| -> Result<(), String> {
+        for dir in [
+            "usr/local/bin",
+            "usr/local/libexec",
+            "usr/local/lib/legion-control/ryzen_smu",
+            "usr/share/polkit-1/actions",
+            "etc/systemd/system",
+        ] {
+            std::fs::create_dir_all(stage.join(dir))
+                .map_err(|e| format!("cannot create staging dir {dir}: {e}"))?;
+        }
+        std::fs::copy(
+            &helper,
+            stage.join("usr/local/libexec/legion-control-setup"),
+        )
+        .map_err(|e| format!("cannot stage setup helper: {e}"))?;
+        std::fs::copy(
+            usr.join("bin/legion-daemon"),
+            stage.join("usr/local/bin/legion-daemon"),
+        )
+        .map_err(|e| format!("cannot stage daemon: {e}"))?;
+        // The staged daemon lives in /usr/local/bin — same rewrite the
+        // helper's enable-daemon staging applies.
+        let unit_text =
+            std::fs::read_to_string(&unit).map_err(|e| format!("cannot read bundled unit: {e}"))?;
+        std::fs::write(
+            stage.join("etc/systemd/system/legion-control.service"),
+            unit_text.replace(
+                "ExecStart=/usr/bin/legion-daemon",
+                "ExecStart=/usr/local/bin/legion-daemon",
+            ),
+        )
+        .map_err(|e| format!("cannot stage unit: {e}"))?;
+        std::fs::copy(
+            usr.join("share/polkit-1/actions/com.encomjp.legion-control.policy"),
+            stage.join("usr/share/polkit-1/actions/com.encomjp.legion-control.policy"),
+        )
+        .map_err(|e| format!("cannot stage polkit policy: {e}"))?;
+        for entry in std::fs::read_dir(usr.join("lib/legion-control/ryzen_smu"))
+            .map_err(|e| format!("cannot read bundled ryzen_smu: {e}"))?
+        {
+            let entry = entry.map_err(|e| format!("cannot inspect bundle entry: {e}"))?;
+            if entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                std::fs::copy(
+                    entry.path(),
+                    stage
+                        .join("usr/local/lib/legion-control/ryzen_smu")
+                        .join(entry.file_name()),
+                )
+                .map_err(|e| format!("cannot stage ryzen_smu: {e}"))?;
+            }
+        }
+
+        let mut tar = std::process::Command::new("tar")
+            .current_dir(&stage)
+            .args(["--owner=0", "--group=0", "-cf", "-", "usr", "etc"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start tar: {e}"))?;
+        let payload = tar
+            .stdout
+            .take()
+            .ok_or_else(|| "tar produced no payload".to_string())?;
+        let output = std::process::Command::new("pkexec")
+            .args([
+                "/bin/sh",
+                "-c",
+                "tar -C / -xpf - && systemctl daemon-reload \
+                 && exec /usr/local/libexec/legion-control-setup \"$1\"",
+                "sh",
+                operation,
+            ])
+            .stdin(payload)
+            .output()
+            .map_err(|error| format!("Cannot start PolicyKit setup: {error}"))?;
+        let _ = tar.wait();
+        if output.status.success() {
+            Ok(())
+        } else {
+            let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if error.is_empty() {
+                format!("Setup was cancelled or failed ({})", output.status)
+            } else {
+                error
+            })
+        }
+    })();
+    let _ = std::fs::remove_dir_all(&stage);
+    result?;
+
+    Ok(format!(
+        "bootstrap staged stable helper + policy ({operation})"
+    ))
 }
 
 /// Run one daemon IPC request without blocking GTK's main loop.
@@ -1243,14 +1382,16 @@ fn run_daemon_command_async(
 
 /// Run one fixed PolicyKit setup operation synchronously.
 fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
-    let helper = match setup_helper_path() {
-        Some(path) => path,
-        None => {
-            return Err(
-                "Setup helper is missing; reinstall Legion Control from the current package".into(),
-            )
+    if setup_helper_path().is_none() {
+        if appimage_root().is_some() {
+            log::info!("bootstrap: staging stable setup helper via one PolicyKit transaction");
+            return bootstrap_appimage_setup(operation);
         }
-    };
+        return Err(
+            "Setup helper is missing; reinstall Legion Control from the current package".into(),
+        );
+    }
+    let helper = setup_helper_path().expect("stable helper checked above");
     let output = std::process::Command::new("pkexec")
         .arg(&helper)
         .arg(operation)
