@@ -83,18 +83,15 @@ pub fn build_lighting(
         "Rear",
         "daytime-sunset-symbolic",
     );
-    tabs.add_titled_with_icon(
-        &build_zone_tab(
-            "Lid logo",
-            "Logo colour — power switch is under More",
-            RgbZone::Logo,
-            &cfg.logo,
-            toast_overlay,
-        ),
-        Some("logo"),
-        "Logo",
-        "starred-symbolic",
+    let logo_page = build_zone_tab(
+        "Lid logo",
+        "Logo colour, brightness, and LED power",
+        RgbZone::Logo,
+        &cfg.logo,
+        toast_overlay,
     );
+    logo_page.append(&logo_power_row(&cfg, toast_overlay));
+    tabs.add_titled_with_icon(&logo_page, Some("logo"), "Logo", "starred-symbolic");
     tabs.add_titled_with_icon(
         &build_more_tab(&cfg, toast_overlay),
         Some("more"),
@@ -223,12 +220,38 @@ fn build_zone_tab(
     box_
 }
 
+/// The lid-logo LED on/off switch — lives on the Logo tab next to its
+/// colour/brightness editor instead of hiding under More.
+fn logo_power_row(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverlay) -> gtk::Box {
+    let logo = gtk::Switch::builder().active(cfg.logo_on).build();
+    tip(&logo, "Turns the physical lid logo LED on or off");
+    let logo_suppress = Rc::new(Cell::new(true));
+    let logo_suppress_c = logo_suppress.clone();
+    let toast_logo = toast.clone();
+    logo.connect_active_notify(move |s| {
+        if logo_suppress_c.get() {
+            return;
+        }
+        legion_core::keyboard::set_logo_async(s.is_active());
+        let t = adw::Toast::new(if s.is_active() { "Logo on" } else { "Logo off" });
+        t.set_timeout(1);
+        toast_logo.add_toast(t);
+    });
+    logo_suppress.set(false);
+    labeled_row_tip(
+        "Logo LED power",
+        "Hardware on/off for the lid logo",
+        &logo,
+        Some("Turns the physical lid logo LED on or off"),
+    )
+}
+
 fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverlay) -> gtk::Box {
     let toast = toast.clone();
     let box_ = gtk::Box::new(Orientation::Vertical, 0);
     box_.set_margin_top(14);
 
-    let (sec_look, look) = section_tip("Brightness and logo", None);
+    let (sec_look, look) = section_tip("Keyboard brightness", None);
 
     let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
     bright.set_value(cfg.brightness as f64);
@@ -283,31 +306,6 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
         "0 off · 9 max",
         &bright_box,
         Some("Applies to keyboard and accent Spectrum zones"),
-    ));
-
-    let logo = gtk::Switch::builder().active(cfg.logo_on).build();
-    tip(
-        &logo,
-        "Lid Legion logo LED power — colour is set under the Logo tab",
-    );
-    let logo_suppress = Rc::new(Cell::new(true));
-    let logo_suppress_c = logo_suppress.clone();
-    let toast_logo = toast.clone();
-    logo.connect_active_notify(move |s| {
-        if logo_suppress_c.get() {
-            return;
-        }
-        legion_core::keyboard::set_logo_async(s.is_active());
-        let t = adw::Toast::new(if s.is_active() { "Logo on" } else { "Logo off" });
-        t.set_timeout(1);
-        toast_logo.add_toast(t);
-    });
-    logo_suppress.set(false);
-    look.append(&labeled_row_tip(
-        "Lid logo power",
-        "Hardware on/off (colour is on the Logo tab)",
-        &logo,
-        Some("Turns the physical lid logo LED on or off"),
     ));
     box_.append(&sec_look);
 

@@ -4817,7 +4817,6 @@ fn build_battery_pages(
         }
         std::thread::sleep(Duration::from_secs(3));
     });
-    let overlay = toast_overlay.clone();
     // One-time-per-session hint: the EC charges past the limiter while the
     // laptop is off/asleep (documented behavior) — explain the surprise
     // instead of leaving a confusing 98% unexplained. Fires only while the
