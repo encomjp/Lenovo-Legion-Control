@@ -14,6 +14,7 @@ tar \
   --exclude='./target' \
   --exclude='./packaging/out' \
   --exclude='./.hermes' \
+  --exclude='./.git' \
   --transform="s,^\.,legion-control-$VERSION," \
   -czf "$SOURCE" -C "$ROOT" .
 
