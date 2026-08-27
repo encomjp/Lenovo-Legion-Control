@@ -163,7 +163,8 @@ fn top_level_page(id: &str) -> &'static str {
     match id {
         "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" => "cpu",
         "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" => "about",
-        "lighting" | "lighting-keyboard" => "lighting",
+        "lighting" | "lighting-keyboard" | "lighting-front" | "lighting-rear" | "lighting-logo"
+        | "lighting-more" => "lighting",
         "battery-status" | "battery-limit" => "battery-status",
         "fix" | "fix-audio" | "fix-lighting" | "fix-logs" => "fix",
         "cooling-fans" => "cooling-fans",
@@ -182,6 +183,11 @@ fn hub_initial_tab(id: &str) -> Option<&'static str> {
         "about-setup" => Some("setup"),
         "about-hardware" | "about-storage" => Some("hardware"),
         "about-help" => Some("help"),
+        "lighting-keyboard" => Some("keyboard"),
+        "lighting-front" => Some("front"),
+        "lighting-rear" => Some("rear"),
+        "lighting-logo" => Some("logo"),
+        "lighting-more" => Some("more"),
         "fix-audio" => Some("fix-audio"),
         "fix-lighting" => Some("fix-lighting"),
         "fix-logs" => Some("fix-logs"),
@@ -397,7 +403,11 @@ fn build_ui(app: &adw::Application) {
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
     let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
-    let fix_page = build_fix_page(&toast_overlay, &daemon_gate);
+    let fix_initial = legion_page_req
+        .as_deref()
+        .and_then(hub_initial_tab)
+        .filter(|id| ["fix-audio", "fix-lighting", "fix-logs"].contains(id));
+    let fix_page = build_fix_page(&toast_overlay, &daemon_gate, fix_initial);
     let (
         about_setup_page,
         about_help_page,
@@ -422,8 +432,10 @@ fn build_ui(app: &adw::Application) {
         hub.append(&page_shell(&lighting_page));
         hub
     };
-    if legion_page_req.as_deref() == Some("lighting-keyboard") {
-        lighting_tabs.set_visible_child_name("keyboard");
+    if let Some(tab) = legion_page_req.as_deref().and_then(hub_initial_tab) {
+        if lighting_tabs.child_by_name(tab).is_some() {
+            lighting_tabs.set_visible_child_name(tab);
+        }
     }
 
     let about_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
@@ -448,7 +460,7 @@ fn build_ui(app: &adw::Application) {
             &ppt_suppress_slot,
         )),
         Some("overview"),
-        "Overview",
+        "Home",
     );
     stack.add_titled(
         &page_shell(&build_cooling_overview_page(
@@ -457,7 +469,7 @@ fn build_ui(app: &adw::Application) {
             &daemon_gate,
         )),
         Some("cooling-fans"),
-        "Cooling Fans",
+        "Cooling",
     );
     stack.add_titled(&lighting_hub, Some("lighting"), "Lighting");
     stack.add_titled(
@@ -3691,13 +3703,10 @@ fn build_cooling_overview_page(
     gate: &DaemonGate,
 ) -> gtk::Box {
     let page = page_lede(
-        "All fans at a glance — use CPU/GPU/Aux pages for per-fan tuning, or reset when done.",
+        "All fans at a glance — expand each card for per-fan tuning, or reset when done.",
     );
     let overview = pref_group("Fans overview", None);
-    tip(
-        &overview,
-        "Same fan_card controls as the per-fan pages, stacked for overview",
-    );
+    tip(&overview, "Each card exposes full tuning for that fan");
     let channels = legion_core::fans::channels();
     for ch in &channels {
         overview.add(&fan_card(
@@ -4830,7 +4839,11 @@ fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
 
 /// One "Fix" destination with an internal switcher instead of three sidebar
 /// rows — keeps the rail short while all diagnostics stay one click away.
-fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+fn build_fix_page(
+    toast_overlay: &adw::ToastOverlay,
+    gate: &DaemonGate,
+    initial: Option<&str>,
+) -> gtk::Box {
     let page = page_lede("");
 
     let inner = adw::ViewStack::new();
@@ -4843,13 +4856,18 @@ fn build_fix_page(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::
     inner.add_titled(
         &page_shell(&build_fix_lighting_page(toast_overlay, gate)),
         Some("fix-lighting"),
-        "Lighting",
+        "RGB Fix",
     );
     inner.add_titled(
         &page_shell(&build_fix_logs_page(toast_overlay)),
         Some("fix-logs"),
         "Logs",
     );
+    if let Some(id) = initial {
+        if inner.child_by_name(id).is_some() {
+            inner.set_visible_child_name(id);
+        }
+    }
 
     // Same horizontal tab bar as the CPU/About/Lighting hubs.
     let switcher = adw::ViewSwitcher::new();
@@ -6564,6 +6582,10 @@ mod tests {
             "cooling-fans",
             "lighting",
             "lighting-keyboard",
+            "lighting-front",
+            "lighting-rear",
+            "lighting-logo",
+            "lighting-more",
             "battery-status",
             "battery-limit",
             "fix",
@@ -6588,6 +6610,7 @@ mod tests {
                     "cpu" => "cpu hub",
                     "about" => "about hub",
                     "fix" => "fix hub",
+                    "lighting" => "lighting hub",
                     other => panic!("hub tab {tab} mapped into non-hub page {other}"),
                 };
                 let _ = hub;
@@ -6595,6 +6618,7 @@ mod tests {
                     "cpu" => ["features", "tuning", "power"].contains(&tab),
                     "about" => ["setup", "hardware", "help"].contains(&tab),
                     "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
+                    "lighting" => ["keyboard", "front", "rear", "logo", "more"].contains(&tab),
                     _ => false,
                 };
                 assert!(valid, "tab {tab} not registered in {top} hub");
