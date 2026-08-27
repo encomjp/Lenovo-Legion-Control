@@ -9,7 +9,6 @@ pub mod battery;
 pub mod comms;
 pub mod config;
 pub mod cpu;
-pub mod cpu_percore;
 pub mod device;
 pub mod dgpu;
 pub mod diagnostics;
