@@ -18,6 +18,21 @@ fn usage_fail(msg: impl std::fmt::Display) -> ! {
     std::process::exit(2);
 }
 
+/// Unwrap a daemon response, failing with exit 1 on any error variant.
+fn expect_ok(resp: Result<DaemonResponse, String>) -> Result<(), String> {
+    match resp {
+        Ok(DaemonResponse::Ok) => Ok(()),
+        Ok(DaemonResponse::Error(e)) => fail(e),
+        Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
+/// Send a command and fail with exit 1 unless the daemon answers Ok.
+fn send_ok(cmd: DaemonCommand) -> Result<(), String> {
+    expect_ok(send_command(cmd))
+}
+
 #[derive(Parser)]
 #[command(
     name = "legion-cli",
@@ -239,12 +254,8 @@ fn main() {
                      Thermal pads alone are often not enough for sustained Extreme."
                 );
             }
-            match send_command(DaemonCommand::SetProfile(name.clone())) {
-                Ok(DaemonResponse::Ok) => println!("profile → {}", friendly_profile(&name)),
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetProfile(name.clone())).ok();
+            println!("profile → {}", friendly_profile(&name));
         }
         Commands::Fan => {
             for (fan, name) in [(1u8, "CPU"), (2, "GPU"), (4, "Aux")] {
@@ -267,17 +278,11 @@ fn main() {
                     "RPM target '{rpm}' exceeds safety limit of 8000 RPM"
                 ));
             }
-            match send_command(DaemonCommand::SetFanTarget(fan, rpm)) {
-                Ok(DaemonResponse::Ok) => {
-                    if rpm == 0 {
-                        println!("fan {fan} → auto");
-                    } else {
-                        println!("fan {fan} → {rpm} RPM");
-                    }
-                }
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
+            send_ok(DaemonCommand::SetFanTarget(fan, rpm)).ok();
+            if rpm == 0 {
+                println!("fan {fan} → auto");
+            } else {
+                println!("fan {fan} → {rpm} RPM");
             }
         }
         Commands::FanAuto => {
@@ -326,12 +331,8 @@ fn main() {
             if level > 9 {
                 usage_fail(format!("backlight level '{level}' out of range (0-2 for white/4-zone, 0-9 for Spectrum)"));
             }
-            match send_command(DaemonCommand::SetKbdBrightness(level)) {
-                Ok(DaemonResponse::Ok) => println!("backlight → {level}"),
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetKbdBrightness(level)).ok();
+            println!("backlight → {level}");
         }
         Commands::Rgb { r, g, b } => match legion_core::keyboard::set_rgb_static(r, g, b) {
             Ok(()) => println!("rgb → #{r:02X}{g:02X}{b:02X}"),
@@ -361,13 +362,13 @@ fn main() {
                     z,
                 ) {
                     Ok(()) => println!("effect → off · {}", z.name()),
-                    Err(e) => eprintln!("error: {e}"),
+                    Err(e) => fail(e),
                 }
             } else if let Some(fx) = legion_core::keyboard::RgbEffect::from_name(&name) {
                 log::debug!("effect: '{name}' matched");
                 match legion_core::keyboard::set_rgb_effect_zone(fx, r, g, b, speed, 9, z) {
                     Ok(()) => println!("effect → {name} · {}", z.name()),
-                    Err(e) => eprintln!("error: {e}"),
+                    Err(e) => fail(e),
                 }
             } else {
                 log::debug!("effect: '{name}' not found");
@@ -427,12 +428,8 @@ fn main() {
                     "charge limit '{pct}' invalid; must be 60, 80, or 100%"
                 )),
             };
-            match send_command(DaemonCommand::SetChargeLimit(valid_pct)) {
-                Ok(DaemonResponse::Ok) => println!("charge limit → {valid_pct}%"),
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetChargeLimit(valid_pct)).ok();
+            println!("charge limit → {valid_pct}%");
         }
         Commands::Conservation { state } => {
             let on = match state.to_lowercase().as_str() {
@@ -441,17 +438,11 @@ fn main() {
                 _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
             };
             log::debug!("conservation: state '{state}' → {on}");
-            match send_command(DaemonCommand::SetConservation(on)) {
-                Ok(DaemonResponse::Ok) => {
-                    println!(
-                        "conservation → {}",
-                        if on { "on (~60%)" } else { "off (100%)" }
-                    )
-                }
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetConservation(on)).ok();
+            println!(
+                "conservation → {}",
+                if on { "on (~60%)" } else { "off (100%)" }
+            );
         }
         Commands::Info => match send_command(DaemonCommand::GetDeviceInfo) {
             Ok(DaemonResponse::DeviceInfo(info)) => {
@@ -518,9 +509,9 @@ fn main() {
                     if killed { "privacy kill active" } else { "on" }
                 );
             }
-            Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
-            Err(e) => eprintln!("error: {e}"),
-            _ => eprintln!("error: cannot read camera power"),
+            Ok(DaemonResponse::Error(e)) => fail(e),
+            Err(e) => fail(e),
+            _ => fail("cannot read camera power"),
         },
         Commands::Audio => {
             let d = legion_core::audio::diagnose();
@@ -617,24 +608,18 @@ fn main() {
                      Helps some latency-sensitive games; hurts multi-threaded loads."
                 );
             }
-            match send_command(DaemonCommand::SetSmt(on)) {
-                Ok(DaemonResponse::Ok) => {
-                    println!("smt → {}", if on { "on" } else { "off" });
-                    if let Ok(DaemonResponse::Smt {
-                        logical_cpus,
-                        active,
-                        ..
-                    }) = send_command(DaemonCommand::GetSmt)
-                    {
-                        println!(
-                            "now         {} · {logical_cpus} logical CPUs",
-                            if active { "on" } else { "off" }
-                        );
-                    }
-                }
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
+            send_ok(DaemonCommand::SetSmt(on)).ok();
+            println!("smt → {}", if on { "on" } else { "off" });
+            if let Ok(DaemonResponse::Smt {
+                logical_cpus,
+                active,
+                ..
+            }) = send_command(DaemonCommand::GetSmt)
+            {
+                println!(
+                    "now         {} · {logical_cpus} logical CPUs",
+                    if active { "on" } else { "off" }
+                );
             }
         }
         Commands::Boost => match send_command(DaemonCommand::GetBoost) {
@@ -652,14 +637,8 @@ fn main() {
                 _ => usage_fail("use on or off"),
             };
             log::debug!("set-boost: state '{state}' → {on}");
-            match send_command(DaemonCommand::SetBoost(on)) {
-                Ok(DaemonResponse::Ok) => {
-                    println!("boost → {}", if on { "on" } else { "off" })
-                }
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetBoost(on)).ok();
+            println!("boost → {}", if on { "on" } else { "off" });
         }
         Commands::RgbStatus => match send_command(DaemonCommand::DiagnoseRgb) {
             Ok(DaemonResponse::RgbDiagnosis {
@@ -732,12 +711,8 @@ fn main() {
                 _ => usage_fail(format!("unknown state '{state}' (use on|off)")),
             };
             log::debug!("set-logo: state '{state}' → {on}");
-            match send_command(DaemonCommand::SetLogo(on)) {
-                Ok(DaemonResponse::Ok) => println!("logo → {}", if on { "on" } else { "off" }),
-                Ok(DaemonResponse::Error(e)) => eprintln!("error: {e}"),
-                Err(e) => eprintln!("error: {e}"),
-                _ => eprintln!("error: unexpected response"),
-            }
+            send_ok(DaemonCommand::SetLogo(on)).ok();
+            println!("logo → {}", if on { "on" } else { "off" });
         }
         Commands::Logs { n } => match send_command(DaemonCommand::GetRecentLogs(n)) {
             Ok(DaemonResponse::RecentLogs(text)) => {
@@ -759,12 +734,8 @@ fn main() {
                     valid.join(", ")
                 ));
             }
-            match send_command(DaemonCommand::SetLogLevel(level.clone())) {
-                Ok(DaemonResponse::Ok) => println!("log level → {level}"),
-                Ok(DaemonResponse::Error(e)) => fail(e),
-                Err(e) => fail(e),
-                _ => fail("unexpected response from service"),
-            }
+            send_ok(DaemonCommand::SetLogLevel(level.clone())).ok();
+            println!("log level → {level}");
         }
         Commands::Undervolt => match send_command(DaemonCommand::GetCurveOptimizer) {
             Ok(DaemonResponse::CurveOptimizer(status)) => print_curve_optimizer(&status),
@@ -805,14 +776,8 @@ fn main() {
             match send_command(DaemonCommand::ResetCurveOptimizerAcknowledged { acknowledge: true })
             {
                 Ok(DaemonResponse::CurveOptimizer(status)) => print_curve_optimizer(&status),
-                Ok(DaemonResponse::Error(e)) | Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
-                }
-                _ => {
-                    eprintln!("error: unexpected response");
-                    std::process::exit(1);
-                }
+                Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+                _ => fail("unexpected response from service"),
             }
         }
         Commands::Thermal { command } => match command {
@@ -843,8 +808,7 @@ fn main() {
                 };
                 if let Err(e) = legion_core::thermal::validate(effective_max, acknowledge_high_temp)
                 {
-                    eprintln!("error: {e}");
-                    std::process::exit(2);
+                    usage_fail(e);
                 }
                 match send_command(DaemonCommand::SetThermal {
                     enabled,
@@ -852,14 +816,7 @@ fn main() {
                     acknowledge: acknowledge_high_temp,
                 }) {
                     Ok(DaemonResponse::ThermalStatus(s)) => print_thermal_status(&s),
-                    Ok(DaemonResponse::Error(e)) => {
-                        eprintln!("error: {e}");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        eprintln!("error: {e}");
-                        std::process::exit(1);
-                    }
+                    Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
                     _ => fail("unexpected response"),
                 }
             }
