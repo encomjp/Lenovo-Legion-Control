@@ -1315,6 +1315,15 @@ fn bootstrap_appimage_setup(operation: &str) -> Result<String, String> {
             .unwrap_or_default()
     ));
     let result = (|| -> Result<(), String> {
+        std::fs::create_dir_all(&stage).map_err(|e| format!("cannot create staging dir: {e}"))?;
+        // Owner-only: a predictable /tmp name must never let another local
+        // user swap the payload that root is about to install.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("cannot lock staging dir: {e}"))?;
+        }
         for dir in [
             "usr/local/bin",
             "usr/local/libexec",
