@@ -146,15 +146,21 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
     }
 }
 
-/// One hwmon millidegree file: read + parse with value/error logging, so a
+/// One sysfs numeric file: read + parse with value/error logging, so a
 /// dead sensor input degrades loudly instead of silently becoming `None`.
-fn read_temp_file(path: &Path, label: &str) -> Option<i32> {
+fn read_sysfs_num<T: std::str::FromStr + std::fmt::Display>(path: &Path, label: &str) -> Option<T>
+where
+    T::Err: std::fmt::Debug,
+{
     match fs::read_to_string(path) {
-        Ok(s) => match s.trim().parse::<i32>() {
-            Ok(v) => Some(v),
+        Ok(s) => match s.trim().parse::<T>() {
+            Ok(v) => {
+                log::debug!("thermal: {label} {path:?} → {v}");
+                Some(v)
+            }
             Err(e) => {
                 log::debug!(
-                    "thermal: {label} unparsable {:?} on {}: {e}",
+                    "thermal: {label} unparsable {:?} on {}: {e:?}",
                     s.trim(),
                     path.display()
                 );
@@ -168,6 +174,11 @@ fn read_temp_file(path: &Path, label: &str) -> Option<i32> {
     }
 }
 
+/// One hwmon millidegree file (i32).
+fn read_temp_file(path: &Path, label: &str) -> Option<i32> {
+    read_sysfs_num(path, label)
+}
+
 /// Reads the main CPU temperature (the AMD Tctl sensor, hwmon `temp1_input`)
 /// and a per-CCD temperature via cached hwmon discovery (avoids 10+ readdir/tick).
 pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
@@ -178,31 +189,16 @@ pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
 
     let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
     let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
-    let cpu_temp_2 = match tccd1 {
-        Some(v) => Some(v),
-        None => read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"),
-    };
+    let cpu_temp_2 =
+        tccd1.or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
     (cpu_temp, cpu_temp_2)
 }
 
 pub fn read_cur_max() -> Option<u32> {
-    let policy = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq";
-    match fs::read_to_string(policy) {
-        Ok(s) => match s.trim().parse::<u32>() {
-            Ok(v) => {
-                log::debug!("thermal: policy {policy} → {v}");
-                Some(v)
-            }
-            Err(e) => {
-                log::debug!("thermal: policy {policy} unparsable {:?}: {e}", s.trim());
-                None
-            }
-        },
-        Err(e) => {
-            log::debug!("thermal: policy {policy} unreadable: {e}");
-            None
-        }
-    }
+    read_sysfs_num(
+        Path::new("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"),
+        "policy",
+    )
 }
 
 pub fn write_all_cpus(freq: u32) -> Result<(), String> {
