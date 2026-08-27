@@ -5961,27 +5961,42 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         })
         .activatable(false)
         .build();
+    // Positive states render as a green status pill (like Fix badges), not a
+    // red button that reads as a destructive action.
+    let daemon_suffix = gtk::Box::new(Orientation::Horizontal, 8);
+    daemon_suffix.set_valign(Align::Center);
     let daemon_button = primary_button_tip(
-        if daemon_active { "Enabled" } else { "Enable" },
+        "Enable",
         Some("Uses a narrowly scoped PolicyKit helper; no shell command is accepted"),
     );
-    daemon_button.set_sensitive(!daemon_active);
-    daemon_row.add_suffix(&daemon_button);
+    let daemon_pill = status_pill_tip("Enabled", "ok", Some("legion-control.service is active"));
+    if daemon_active {
+        daemon_suffix.append(&daemon_pill);
+    } else {
+        daemon_suffix.append(&daemon_button);
+    }
+    daemon_row.add_suffix(&daemon_suffix);
     group.add(&daemon_row);
 
     let overlay = toast_overlay.clone();
     let row = daemon_row.clone();
+    let suffix = daemon_suffix.clone();
     let button = daemon_button.clone();
+    let pill = daemon_pill.clone();
     daemon_button.connect_clicked(move |_| {
         button.set_sensitive(false);
         button.set_label("Enabling…");
         let overlay = overlay.clone();
         let row = row.clone();
+        let suffix = suffix.clone();
         let button = button.clone();
+        let pill = pill.clone();
         run_setup_helper("enable-daemon", move |result| match result {
             Ok(_) => {
                 row.set_subtitle("Active — required for privileged hardware controls");
-                button.set_label("Enabled");
+                suffix.remove(&button);
+                pill.set_text("Enabled");
+                suffix.append(&pill);
                 toast_ok(&overlay, "Hardware daemon enabled");
             }
             Err(error) => {
@@ -6020,16 +6035,20 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         .tooltip_text("Unload and remove the optional ryzen_smu DKMS driver")
         .build();
     let install_smu = primary_button_tip(
-        if smu_installed {
-            "Installed"
-        } else {
-            "Install"
-        },
+        "Install",
         Some("Builds the bundled, pinned ryzen_smu source through DKMS using PolicyKit"),
     );
-    install_smu.set_sensitive(!smu_installed);
+    let smu_pill = status_pill_tip(
+        "Installed",
+        "ok",
+        Some("ryzen_smu driver is loaded — Curve Optimizer is available on the CPU page"),
+    );
     smu_actions.append(&remove_smu);
-    smu_actions.append(&install_smu);
+    if smu_installed {
+        smu_actions.append(&smu_pill);
+    } else {
+        smu_actions.append(&install_smu);
+    }
     smu_row.add_suffix(&smu_actions);
     group.add(&smu_row);
 
@@ -6037,6 +6056,8 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let row = smu_row.clone();
     let install = install_smu.clone();
     let remove = remove_smu.clone();
+    let actions = smu_actions.clone();
+    let pill = smu_pill.clone();
     install_smu.connect_clicked(move |_| {
         install.set_sensitive(false);
         install.set_label("Installing…");
@@ -6044,10 +6065,13 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         let row = row.clone();
         let install = install.clone();
         let remove = remove.clone();
+        let actions = actions.clone();
+        let pill = pill.clone();
         run_setup_helper("install-ryzen-smu", move |result| match result {
             Ok(_) => {
                 row.set_subtitle("Installed · no tuning value was written");
-                install.set_label("Installed");
+                actions.remove(&install);
+                actions.append(&pill);
                 remove.set_sensitive(true);
                 toast_ok(
                     &overlay,
