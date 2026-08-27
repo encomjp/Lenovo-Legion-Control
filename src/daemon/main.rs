@@ -30,6 +30,21 @@ static THERMAL_CONFIG: OnceLock<Arc<RwLock<ThermalConfig>>> = OnceLock::new();
 /// Condvar pair used to wake the governor when SetThermal changes the config.
 static THERMAL_NOTIFY: OnceLock<Arc<(Mutex<bool>, Condvar)>> = OnceLock::new();
 
+/// Sleep `total` in `slice`-sized chunks, returning `true` as soon as shutdown
+/// is requested so worker threads stop within ~one slice instead of the full
+/// sleep. All daemon worker loops use this instead of hand-rolled
+/// `for _ in 0..N { if shutdown…; sleep }` blocks.
+fn sleep_interruptible(shutdown: &AtomicBool, total: Duration, slice: Duration) -> bool {
+    let slices = total.as_millis().div_ceil(slice.as_millis()) as u64;
+    for _ in 0..slices {
+        if shutdown.load(Ordering::Relaxed) {
+            return true;
+        }
+        std::thread::sleep(slice);
+    }
+    false
+}
+
 /// Snapshot of last-seen sensor values for throttled logging.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct SensorSnapshot {
@@ -642,14 +657,11 @@ fn thermal_governor(
 
         // Enabled but no temps: cannot compute, sleep 1s
         if cpu_temp.is_none() && cpu_temp_2.is_none() {
-            // respect shutdown with short sleeps
-            for _ in 0..10 {
-                if shutdown.load(Ordering::Relaxed) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            if shutdown.load(Ordering::Relaxed) {
+            if sleep_interruptible(
+                &shutdown,
+                Duration::from_secs(1),
+                Duration::from_millis(100),
+            ) {
                 break;
             }
             continue;
@@ -706,15 +718,13 @@ fn thermal_governor(
             );
         }
 
-        // Sleep 1s when enabled, respecting shutdown
-        // Use segmented sleep so shutdown is noticed within ~100ms
-        for _ in 0..10 {
-            if shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        if shutdown.load(Ordering::Relaxed) {
+        // Sleep 1s when enabled, respecting shutdown (segmented so shutdown
+        // is noticed within ~100ms).
+        if sleep_interruptible(
+            &shutdown,
+            Duration::from_secs(1),
+            Duration::from_millis(100),
+        ) {
             break;
         }
     }
@@ -1090,23 +1100,25 @@ fn rgb_health_str(h: rgb_panic::Health) -> &'static str {
 fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
     // Delay first push so boot sensor settle finishes and first-send
     // machine-id generation has a stable environment.
-    for _ in 0..100 {
-        if shutdown.load(Ordering::Relaxed) {
-            log::info!("telemetry-push thread stopped");
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    if sleep_interruptible(
+        &shutdown,
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ) {
+        log::info!("telemetry-push thread stopped");
+        return;
     }
     loop {
         let cfg = config::get().diagnostics;
         if !cfg.enabled || cfg.auto_interval_secs == 0 {
             // Not opted in or manual-only: re-check every 30 s.
-            for _ in 0..300 {
-                if shutdown.load(Ordering::Relaxed) {
-                    log::info!("telemetry-push thread stopped");
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(100));
+            if sleep_interruptible(
+                &shutdown,
+                Duration::from_secs(30),
+                Duration::from_millis(100),
+            ) {
+                log::info!("telemetry-push thread stopped");
+                return;
             }
             continue;
         }
@@ -1119,13 +1131,13 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
             Err(e) => log::warn!("telemetry push failed: {e}"),
         }
         // Sleep the interval in 100 ms slices so shutdown is prompt.
-        let slices = interval.saturating_mul(10);
-        for _ in 0..slices {
-            if shutdown.load(Ordering::Relaxed) {
-                log::info!("telemetry-push thread stopped");
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        if sleep_interruptible(
+            &shutdown,
+            Duration::from_secs(interval),
+            Duration::from_millis(100),
+        ) {
+            log::info!("telemetry-push thread stopped");
+            return;
         }
     }
 }
@@ -1134,22 +1146,24 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
 /// cleared it. One sysfs read per interval until a repair is needed.
 fn battery_watchdog(shutdown: Arc<AtomicBool>) {
     // Delay first check so boot EC settle finishes.
-    for _ in 0..100 {
-        if shutdown.load(Ordering::Relaxed) {
-            log::info!("battery-watchdog thread stopped");
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    if sleep_interruptible(
+        &shutdown,
+        Duration::from_secs(10),
+        Duration::from_millis(100),
+    ) {
+        log::info!("battery-watchdog thread stopped");
+        return;
     }
     while !shutdown.load(Ordering::Relaxed) {
         // 60 s in 100 ms slices so shutdown is noticed promptly, and silent
         // firmware/EC charge-threshold resets are caught before the battery charges significantly.
-        for _ in 0..600 {
-            if shutdown.load(Ordering::Relaxed) {
-                log::info!("battery-watchdog thread stopped");
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        if sleep_interruptible(
+            &shutdown,
+            Duration::from_secs(60),
+            Duration::from_millis(100),
+        ) {
+            log::info!("battery-watchdog thread stopped");
+            return;
         }
         match battery::reassert_configured_limit() {
             Ok(true) => log::info!("charge limiter re-applied after firmware cleared it"),
@@ -1164,23 +1178,22 @@ fn battery_watchdog(shutdown: Arc<AtomicBool>) {
 fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
     let mut cooldown_ticks = 0u32;
     // Delay first probe so boot USB settle finishes.
-    for _ in 0..40 {
-        if shutdown.load(Ordering::Relaxed) {
-            log::info!("rgb-watchdog thread stopped");
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(500));
+    if sleep_interruptible(
+        &shutdown,
+        Duration::from_secs(20),
+        Duration::from_millis(500),
+    ) {
+        log::info!("rgb-watchdog thread stopped");
+        return;
     }
     while !shutdown.load(Ordering::Relaxed) {
-        for _ in 0..30 {
-            if shutdown.load(Ordering::Relaxed) {
-                log::info!("rgb-watchdog thread stopped");
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-        if shutdown.load(Ordering::Relaxed) {
-            break;
+        if sleep_interruptible(
+            &shutdown,
+            Duration::from_secs(15),
+            Duration::from_millis(500),
+        ) {
+            log::info!("rgb-watchdog thread stopped");
+            return;
         }
         if cooldown_ticks > 0 {
             cooldown_ticks -= 1;
