@@ -2938,11 +2938,6 @@ fn build_cpu_power_page(
         } else {
             "Locked outside Custom mode"
         })
-        .subtitle(if mode == "custom" {
-            "Adjust the watts below on Home → Power mode"
-        } else {
-            "The button below switches Power mode to Custom for you"
-        })
         .activatable(false)
         .build();
     tip(
@@ -3353,9 +3348,7 @@ fn attach_custom_ppt_group(
 
     let peak_row = adw::ActionRow::builder()
         .title("Peak GPU TGP (this laptop)")
-        .subtitle(format!(
-            "{peak_tgp} W — {peak_src} · already available in Performance and Max Power"
-        ))
+        .subtitle(format!("{peak_tgp} W · {peak_src}"))
         .activatable(false)
         .build();
     tip(
@@ -5357,11 +5350,7 @@ fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::Prefe
 
     let status_row = adw::ActionRow::builder()
         .title("Udev rule 99-legion.rules")
-        .subtitle(if installed {
-            "Present — permissions will be restored automatically after reboot"
-        } else {
-            "Missing — lights may need re-fix after every boot"
-        })
+        .subtitle(if installed { "Present" } else { "Missing" })
         .activatable(false)
         .build();
     tip(
@@ -5411,9 +5400,7 @@ fn build_udev_permanent_section(toast_overlay: &adw::ToastOverlay) -> adw::Prefe
                         &pill_c,
                         "udev rule 99-legion.rules is present and looks correct",
                     );
-                    status_c.set_subtitle(
-                        "Present — permissions will be restored automatically after reboot",
-                    );
+                    status_c.set_subtitle("Present");
                     btn_c.set_label("Reinstall permanently");
                     let detail = if msg.is_empty() {
                         "Udev rule installed permanently".to_string()
@@ -6035,9 +6022,9 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let row = adw::ActionRow::builder()
         .title("Legion Control widget")
         .subtitle(if installed {
-            "Installed — add it from Plasma’s widget picker"
+            "Installed"
         } else {
-            "Not installed — requires KDE Plasma 6"
+            "Not installed"
         })
         .activatable(false)
         .build();
@@ -6075,7 +6062,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let preview_c = preview.clone();
     install.connect_clicked(move |_| match install_kde_widget() {
         Ok(()) => {
-            row_c.set_subtitle("Installed — add it from Plasma’s widget picker");
+            row_c.set_subtitle("Installed");
             install_c.set_label("Update widget");
             remove_c.set_sensitive(true);
             preview_c.set_sensitive(true);
@@ -6091,7 +6078,7 @@ fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let preview_c = preview.clone();
     remove.connect_clicked(move |_| match remove_kde_widget() {
         Ok(()) => {
-            row_c.set_subtitle("Not installed — requires KDE Plasma 6");
+            row_c.set_subtitle("Not installed");
             install_c.set_label("Install widget");
             remove_c.set_sensitive(false);
             preview_c.set_sensitive(false);
@@ -6364,11 +6351,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
     let daemon_row = adw::ActionRow::builder()
         .title("Hardware control daemon")
-        .subtitle(if daemon_active {
-            "Active — required for privileged hardware controls"
-        } else {
-            "Inactive — enable it to use hardware controls"
-        })
+        .subtitle(if daemon_active { "Active" } else { "Inactive" })
         .activatable(false)
         .build();
     // Positive states render as a green status pill (like Fix badges), not a
@@ -6403,7 +6386,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         let pill = pill.clone();
         run_setup_helper("enable-daemon", move |result| match result {
             Ok(_) => {
-                row.set_subtitle("Active — required for privileged hardware controls");
+                row.set_subtitle("Active");
                 suffix.remove(&button);
                 pill.set_text("Enabled");
                 suffix.append(&pill);
@@ -6428,11 +6411,11 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         run_daemon_command_async(DaemonCommand::GetCurveOptimizer, move |result| {
             let smu_status = match result {
                 Ok(DaemonResponse::CurveOptimizer(status)) if status.available => {
-                    "Installed · firmware read-only probe passed".to_string()
+                    "Installed".to_string()
                 }
                 Ok(DaemonResponse::CurveOptimizer(status)) => status.reason,
-                _ if smu_installed => "Driver loaded · restart the daemon to probe firmware".into(),
-                _ => "Optional · enables temporary AMD Curve Optimizer controls".into(),
+                _ if smu_installed => "Driver loaded".into(),
+                _ => "Optional".into(),
             };
             smu_row_c.set_subtitle(&smu_status);
         });
@@ -6479,7 +6462,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         let pill = pill.clone();
         run_setup_helper("install-ryzen-smu", move |result| match result {
             Ok(_) => {
-                row.set_subtitle("Installed · no tuning value was written");
+                row.set_subtitle("Installed");
                 actions.remove(&install);
                 actions.append(&pill);
                 remove.set_sensitive(true);
@@ -6508,7 +6491,7 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
         let remove = remove.clone();
         run_setup_helper("remove-ryzen-smu", move |result| match result {
             Ok(_) => {
-                row.set_subtitle("Optional · enables temporary AMD Curve Optimizer controls");
+                row.set_subtitle("Optional");
                 install.set_label("Install");
                 install.set_sensitive(true);
                 toast_ok(&overlay, "AMD tuning backend removed");
