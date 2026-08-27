@@ -5,7 +5,7 @@ use crate::thermal::ThermalConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const VERSION: u32 = 4;
@@ -378,6 +378,29 @@ fn lock_path() -> PathBuf {
     config_path().with_file_name(".settings.lock")
 }
 
+/// Best-effort `create_dir_all` on a path's parent, logging failures.
+fn ensure_parent_dir(path: &Path) {
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            log::debug!("config — create_dir_all({}) failed: {e}", parent.display());
+        }
+    }
+}
+
+/// `settings.json` (or the actual file name) for corrupt-backup / temp names.
+fn settings_file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "settings.json".into())
+}
+
+/// Best-effort temp-file cleanup after a failed write/rename.
+fn cleanup_tmp(tmp: &Path) {
+    if let Err(re) = fs::remove_file(tmp) {
+        log::trace!("config — cleanup of {} returned None: {re}", tmp.display());
+    }
+}
+
 /// Run `f` while holding an exclusive advisory lock on a lockfile next to
 /// settings.json. Serializes read-modify-write cycles between processes
 /// (daemon, GUI, CLI) so concurrent updates cannot clobber each other.
@@ -387,14 +410,7 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
         "config::with_config_lock — acquiring lock at {}",
         path.display()
     );
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            log::debug!(
-                "config::with_config_lock — create_dir_all({}) failed: {e}",
-                parent.display()
-            );
-        }
-    }
+    ensure_parent_dir(&path);
     match fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -485,10 +501,7 @@ fn load_from_disk() -> AppConfig {
             Err(e) => {
                 // A truncated/corrupt file must not silently wipe profiles and
                 // per-key data: preserve it for manual recovery, then reset.
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "settings.json".into());
+                let name = settings_file_name(&path);
                 let backup = path.with_file_name(format!(
                     "{name}.corrupt-{}",
                     chrono::Local::now().format("%Y%m%d-%H%M%S")
@@ -527,14 +540,7 @@ fn write_disk(cfg: &AppConfig) {
         cfg.version,
         path.display()
     );
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            log::debug!(
-                "config::write_disk — create_dir_all({}) failed: {e}",
-                parent.display()
-            );
-        }
-    }
+    ensure_parent_dir(&path);
     let s = match serde_json::to_string_pretty(cfg) {
         Ok(s) => s,
         Err(e) => {
@@ -544,10 +550,7 @@ fn write_disk(cfg: &AppConfig) {
     };
     // Atomic write: temp file in the same directory + rename. A crash or
     // power loss mid-write can never leave a truncated settings.json behind.
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "settings.json".into());
+    let name = settings_file_name(&path);
     let tmp = path.with_file_name(format!("{name}.tmp-{}", std::process::id()));
     use std::io::Write;
     let write_result = fs::File::create(&tmp).and_then(|mut f| {
@@ -570,22 +573,12 @@ fn write_disk(cfg: &AppConfig) {
             }
             Err(e) => {
                 log::warn!("config rename failed ({}): {e}", path.display());
-                if let Err(re) = fs::remove_file(&tmp) {
-                    log::trace!(
-                        "config::write_disk — cleanup of {} returned None: {re}",
-                        tmp.display()
-                    );
-                }
+                cleanup_tmp(&tmp);
             }
         },
         Err(e) => {
             log::warn!("config write failed ({}): {e}", tmp.display());
-            if let Err(re) = fs::remove_file(&tmp) {
-                log::trace!(
-                    "config::write_disk — cleanup of {} returned None: {re}",
-                    tmp.display()
-                );
-            }
+            cleanup_tmp(&tmp);
         }
     }
 }
