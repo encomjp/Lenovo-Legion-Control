@@ -432,13 +432,16 @@ fn build_ui(app: &adw::Application) {
         .and_then(hub_initial_tab)
         .filter(|id| ["fix-audio", "fix-lighting", "fix-logs"].contains(id));
     let fix_page = build_fix_page(&toast_overlay, &daemon_gate, fix_initial);
+    // Shared suppress flag: programmatic telemetry switches (welcome window,
+    // guided setup) must not re-trigger the About page's opt-out nudge.
+    let telemetry_sync: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let (
         about_setup_page,
         about_help_page,
         about_hardware_page,
         welcome_consent,
         welcome_share_switch,
-    ) = build_about_pages(&toast_overlay);
+    ) = build_about_pages(&toast_overlay, &telemetry_sync);
 
     // Lighting hub: the zone ViewStack existed but had no visible switcher —
     // the sidebar used to reset it to "keyboard", leaving zones unreachable.
@@ -1084,6 +1087,7 @@ fn build_ui(app: &adw::Application) {
         Some(&about_tabs),
         &welcome_consent,
         Some(&welcome_share_switch),
+        &telemetry_sync,
     );
 
     // Click the connection strip to re-check the daemon.
@@ -1468,78 +1472,207 @@ fn run_setup_helper(operation: &'static str, done: impl FnOnce(Result<String, St
     );
 }
 
+/// Apply a telemetry enable/disable across every surface at once: persisted
+/// config, the shared consent cell gating Send-now, and the live Setup-page
+/// switch — the latter guarded by `sync` so programmatic changes never
+/// re-trigger the About page's opt-out nudge.
+fn set_telemetry(
+    enabled: bool,
+    consent: &Rc<Cell<bool>>,
+    share: Option<&adw::SwitchRow>,
+    sync: &Rc<Cell<bool>>,
+) {
+    legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+    consent.set(enabled);
+    sync.set(true);
+    if let Some(row) = share {
+        row.set_active(enabled);
+    }
+    sync.set(false);
+}
+
+/// First-launch welcome — a real window (not a cramped alert): brand header,
+/// short intro, one compact telemetry opt-out switch, and horizontal actions.
+/// Any close path marks the welcome seen, so it shows exactly once.
 fn show_welcome_if_needed(
     parent: &impl glib::object::IsA<gtk::Widget>,
     stack: &adw::ViewStack,
     about_tabs: Option<&adw::ViewStack>,
     consent: &Rc<Cell<bool>>,
     share_switch: Option<&adw::SwitchRow>,
+    sync: &Rc<Cell<bool>>,
 ) {
     if legion_core::config::welcome_seen() {
         return;
     }
-    let dialog = adw::AlertDialog::new(
-        Some("Welcome to Legion Control"),
-        Some(
-            "Unofficial community tool for Lenovo Legion laptops.\n\n\
-             Not affiliated with Lenovo. Use at your own risk.\n\n\
-             Choose optional components now, or change them later under About.\n\n\
-             ── Alpha telemetry ──\n\
-             ON by default: one anonymized report per minute (hardware model, distro,\n\
-             sensors, fan/battery stats, self-check results).\n\
-             Never: hostname · username · serials · MACs · IPs · key colors · custom profile names.\n\
-             You can opt out any time under Setup → Alpha diagnostics.",
-        ),
-    );
-    dialog.add_response("ok", "Not now");
-    dialog.add_response("donate", "Donate");
-    dialog.add_response("issues", "Report an issue");
-    dialog.add_response("setup", "First-time setup");
-    dialog.add_response("optout", "Opt out");
-    dialog.set_response_appearance("donate", adw::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("optout", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("setup"));
-    dialog.set_close_response("ok");
-    let stack = stack.clone();
-    let about_tabs = about_tabs.cloned();
-    let consent = consent.clone();
-    let share_switch = share_switch.cloned();
-    dialog.connect_response(None, move |_, response| {
-        legion_core::config::mark_welcome_seen();
-        match response {
-            "optout" => {
-                // Nudge before actually opting out — telemetry stays on unless
-                // they explicitly confirm.
-                let consent_c = consent.clone();
-                let share_c = share_switch.clone();
-                let win = stack.root().and_then(|r| r.downcast::<gtk::Window>().ok());
-                confirm_disable_telemetry(win.as_ref(), move |confirmed| {
-                    if confirmed {
-                        legion_core::config::update(|c| c.diagnostics.enabled = false);
-                        // Mirror the opt-out to the live Setup-page widgets
-                        // (built once at startup), so the switch shows OFF.
-                        consent_c.set(false);
-                        if let Some(row) = share_c.as_ref() {
-                            row.set_active(false);
-                        }
-                    }
-                });
-            }
-            "donate" => open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A"),
-            "issues" => open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new"),
-            "setup" => {
-                // Guided walkthrough instead of a bare tab jump — five
-                // chained dialogs: service, hardware, self-check, telemetry,
-                // summary. The About → Setup shortcut lives on the final
-                // step's dialog instead.
-                run_guided_setup(&stack, about_tabs.as_ref(), &consent, share_switch.as_ref());
-            }
-            _ => {}
-        }
-    });
+
+    let win = adw::Window::builder()
+        .title("Welcome to Legion Control")
+        .modal(true)
+        .default_width(600)
+        .default_height(440)
+        .build();
     let root = parent.as_ref().root();
-    let win = root.and_then(|r| r.downcast::<gtk::Window>().ok());
-    dialog.present(win.as_ref());
+    if let Some(host) = root.and_then(|r| r.downcast::<gtk::Window>().ok()) {
+        win.set_transient_for(Some(&host));
+    }
+
+    // ── brand ──
+    let brand = gtk::Box::new(Orientation::Horizontal, 16);
+    brand.set_valign(Align::Center);
+    brand.append(&color_icon(
+        include_bytes!("../../data/icons/app-mark.svg"),
+        48,
+    ));
+    let brand_text = gtk::Box::new(Orientation::Vertical, 2);
+    let title = gtk::Label::new(Some("Welcome to Legion Control"));
+    title.add_css_class("title-2");
+    title.set_halign(Align::Start);
+    title.set_wrap(true);
+    title.set_xalign(0.0);
+    let tagline = gtk::Label::new(Some(
+        "Unofficial community tool for Lenovo Legion laptops — not affiliated with Lenovo. Use at your own risk.",
+    ));
+    tagline.add_css_class("page-sub");
+    tagline.set_halign(Align::Start);
+    tagline.set_wrap(true);
+    tagline.set_xalign(0.0);
+    brand_text.append(&title);
+    brand_text.append(&tagline);
+    brand.append(&brand_text);
+
+    let intro = gtk::Label::new(Some(
+        "Choose optional components now, or change everything later under About → Setup.",
+    ));
+    intro.set_halign(Align::Start);
+    intro.set_wrap(true);
+    intro.set_xalign(0.0);
+
+    // ── telemetry — one compact switch instead of a wall of buttons ──
+    let telemetry_row = adw::SwitchRow::builder()
+        .title("Share anonymous diagnostics")
+        .subtitle("Anonymized hardware stats · opt out any time")
+        .active(legion_core::config::get().diagnostics.enabled)
+        .build();
+    tip(
+        &telemetry_row,
+        "One anonymized report per minute: hardware model, distro/kernel, sensors, \
+         fan/battery stats, self-check results. NEVER included: hostname, username, \
+         serials, MACs, IPs, key colors, custom profile names. \
+         Change any time under About → Setup.",
+    );
+    let telemetry_group = pref_group("Alpha telemetry", None);
+    telemetry_group.add(&telemetry_row);
+
+    let consent_c0 = consent.clone();
+    let share_c0 = share_switch.cloned();
+    let sync_c0 = sync.clone();
+    let win_c0 = win.clone();
+    telemetry_row.connect_active_notify(move |row| {
+        if row.is_active() {
+            set_telemetry(true, &consent_c0, share_c0.as_ref(), &sync_c0);
+            return;
+        }
+        // Opting out gets the standard nudge before anything changes.
+        let row_c = row.clone();
+        let consent_c = consent_c0.clone();
+        let share_c = share_c0.clone();
+        let sync_c = sync_c0.clone();
+        let win_c = win_c0.clone();
+        confirm_disable_telemetry(Some(win_c.upcast_ref::<gtk::Window>()), move |confirmed| {
+            if confirmed {
+                set_telemetry(false, &consent_c, share_c.as_ref(), &sync_c);
+            } else {
+                sync_c.set(true);
+                row_c.set_active(true);
+                sync_c.set(false);
+            }
+        });
+    });
+
+    // ── actions ──
+    let actions = gtk::Box::new(Orientation::Horizontal, 12);
+    actions.set_halign(Align::End);
+    let later_btn = gtk::Button::with_label("Not now");
+    later_btn.add_css_class("pill-btn");
+    tip(&later_btn, "Skip for now — nothing else changes");
+    let setup_btn = primary_button_tip(
+        "First-time setup",
+        Some("Guided walkthrough: service, hardware, self-check, telemetry"),
+    );
+    actions.append(&later_btn);
+    actions.append(&setup_btn);
+
+    let links = gtk::Box::new(Orientation::Horizontal, 20);
+    links.set_halign(Align::Start);
+    let issues = gtk::LinkButton::builder()
+        .uri("https://github.com/encomjp/lenovo-legion-tool/issues/new")
+        .label("Report an issue")
+        .build();
+    issues.add_css_class("flat");
+    let donate = gtk::LinkButton::builder()
+        .uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A")
+        .label("Donate")
+        .build();
+    donate.add_css_class("flat");
+    links.append(&issues);
+    links.append(&donate);
+
+    // ── layout ──
+    let page = gtk::Box::new(Orientation::Vertical, 22);
+    page.set_margin_top(24);
+    page.set_margin_bottom(24);
+    page.set_margin_start(28);
+    page.set_margin_end(28);
+    page.append(&brand);
+    page.append(&intro);
+    page.append(&telemetry_group);
+    page.append(&actions);
+    page.append(&links);
+
+    let clamp = libadwaita::Clamp::builder().maximum_size(560).build();
+    clamp.set_child(Some(&page));
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .child(&clamp)
+        .build();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+    toolbar.set_content(Some(&scroll));
+    win.set_content(Some(&toolbar));
+
+    // Any close path records the welcome as seen — it shows exactly once.
+    win.connect_close_request(|_| {
+        legion_core::config::mark_welcome_seen();
+        glib::Propagation::Proceed
+    });
+
+    let win_later = win.clone();
+    later_btn.connect_clicked(move |_| {
+        legion_core::config::mark_welcome_seen();
+        win_later.close();
+    });
+    let win_setup = win.clone();
+    let stack_c = stack.clone();
+    let about_tabs_c = about_tabs.cloned();
+    let consent_c = consent.clone();
+    let share_c = share_switch.cloned();
+    let sync_c = sync.clone();
+    setup_btn.connect_clicked(move |_| {
+        legion_core::config::mark_welcome_seen();
+        win_setup.close();
+        run_guided_setup(
+            &stack_c,
+            about_tabs_c.as_ref(),
+            &consent_c,
+            share_c.as_ref(),
+            &sync_c,
+        );
+    });
+
+    win.present();
 }
 
 // ─── First-launch guided setup ──────────────────────────────────────────────
@@ -1594,6 +1727,9 @@ struct SetupCtx {
     about_tabs: Option<adw::ViewStack>,
     consent: Rc<Cell<bool>>,
     share_switch: Option<adw::SwitchRow>,
+    /// Suppresses the About page's opt-out nudge while this context flips the
+    /// live switch programmatically (see [`SetupCtx::disable_telemetry`]).
+    sync: Rc<Cell<bool>>,
 }
 
 /// Guided first-launch walkthrough behind the welcome dialog's "First-time
@@ -1605,6 +1741,7 @@ fn run_guided_setup(
     about_tabs: Option<&adw::ViewStack>,
     consent: &Rc<Cell<bool>>,
     share_switch: Option<&adw::SwitchRow>,
+    sync: &Rc<Cell<bool>>,
 ) {
     // The main view stack lives inside the window — its root is the parent
     // every step dialog is presented on.
@@ -1617,6 +1754,7 @@ fn run_guided_setup(
         about_tabs: about_tabs.cloned(),
         consent: consent.clone(),
         share_switch: share_switch.cloned(),
+        sync: sync.clone(),
     }
     .run(SetupStep::Daemon);
 }
@@ -1844,9 +1982,11 @@ impl SetupCtx {
     fn disable_telemetry(&self) {
         legion_core::config::update(|c| c.diagnostics.enabled = false);
         self.consent.set(false);
+        self.sync.set(true);
         if let Some(row) = self.share_switch.as_ref() {
             row.set_active(false);
         }
+        self.sync.set(false);
     }
 
     /// Step 5 — farewell. Close returns to the main view; the secondary
@@ -6149,6 +6289,7 @@ fn confirm_disable_telemetry(win: Option<&gtk::Window>, on_result: impl FnOnce(b
 /// and the switch itself.
 fn build_diagnostics_section(
     toast_overlay: &adw::ToastOverlay,
+    sync: &Rc<Cell<bool>>,
 ) -> (adw::PreferencesGroup, Rc<Cell<bool>>, adw::SwitchRow) {
     // No long disclosure paragraph here — the switch subtitle and hover tips
     // carry what matters, and the boxed list holds only actionable rows.
@@ -6191,7 +6332,13 @@ fn build_diagnostics_section(
         let overlay = toast_overlay.clone();
         let send_gate = send_btn.clone();
         let consent_gate = consent.clone();
+        let sync_gate = sync.clone();
         share_row.connect_active_notify(move |row| {
+            // Programmatic flips from the welcome window / guided setup are
+            // already nudge-confirmed at their source — never re-ask here.
+            if sync_gate.get() {
+                return;
+            }
             let enabled = row.is_active();
             if enabled {
                 // Turning ON: apply immediately.
@@ -6511,12 +6658,13 @@ fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::Preferenc
 
 fn build_about_pages(
     toast_overlay: &adw::ToastOverlay,
+    sync: &Rc<Cell<bool>>,
 ) -> (
     gtk::Box,
     gtk::Box,
     gtk::Box,
     // Live diagnostics consent state + switch, threaded to
-    // show_welcome_if_needed so its "Share ✓" response can flip them.
+    // show_welcome_if_needed so the welcome window can flip them.
     Rc<Cell<bool>>,
     adw::SwitchRow,
 ) {
@@ -6528,7 +6676,8 @@ fn build_about_pages(
     setup_page.append(&build_updates_section(toast_overlay));
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
-    let (diag_group, diag_consent, diag_share_switch) = build_diagnostics_section(toast_overlay);
+    let (diag_group, diag_consent, diag_share_switch) =
+        build_diagnostics_section(toast_overlay, sync);
     setup_page.append(&diag_group);
 
     let help = pref_group("Help", None);
