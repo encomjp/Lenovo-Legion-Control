@@ -118,62 +118,43 @@ fn parse_sysfs<T: std::str::FromStr>(attr: &str, raw: String) -> Option<T> {
     }
 }
 
-pub fn capacity() -> Option<u32> {
-    let r = read(&format!("{BAT0}/capacity")).and_then(|s| parse_sysfs::<u32>("capacity", s));
-    log::trace!("battery::capacity — result={r:?}");
+/// Read one `BAT0` sysfs attribute, trimmed, with parse + trace logging.
+fn read_attr<T: std::str::FromStr + std::fmt::Debug>(attr: &str) -> Option<T> {
+    let r = read(&format!("{BAT0}/{attr}")).and_then(|s| parse_sysfs::<T>(attr, s));
+    log::trace!("battery::{attr} — result={r:?}");
     r
+}
+
+pub fn capacity() -> Option<u32> {
+    read_attr("capacity")
 }
 
 pub fn status() -> Option<String> {
-    let r = read(&format!("{BAT0}/status"));
-    log::trace!("battery::status — result={r:?}");
-    r
+    read_attr("status")
 }
 
 pub fn voltage() -> Option<f64> {
-    let mv: Option<i64> =
-        read(&format!("{BAT0}/voltage_now")).and_then(|s| parse_sysfs::<i64>("voltage_now", s));
-    let r = mv.map(|v| v as f64 / 1_000_000.0);
-    log::trace!("battery::voltage — result={r:?}");
-    r
+    read_attr::<i64>("voltage_now").map(|v| v as f64 / 1_000_000.0)
 }
 
 pub fn cycles() -> Option<u32> {
-    let r = read(&format!("{BAT0}/cycle_count")).and_then(|s| parse_sysfs::<u32>("cycle_count", s));
-    log::trace!("battery::cycles — result={r:?}");
-    r
+    read_attr("cycle_count")
 }
 
 pub fn power_w() -> Option<f64> {
-    let uw: Option<i64> =
-        read(&format!("{BAT0}/power_now")).and_then(|s| parse_sysfs::<i64>("power_now", s));
-    let r = uw.map(|v| v as f64 / 1_000_000.0);
-    log::trace!("battery::power_w — result={r:?}");
-    r
+    read_attr::<i64>("power_now").map(|v| v as f64 / 1_000_000.0)
 }
 
 pub fn energy_now_wh() -> Option<f64> {
-    let uwh: Option<i64> =
-        read(&format!("{BAT0}/energy_now")).and_then(|s| parse_sysfs::<i64>("energy_now", s));
-    let r = uwh.map(|v| v as f64 / 1_000_000.0);
-    log::trace!("battery::energy_now_wh — result={r:?}");
-    r
+    read_attr::<i64>("energy_now").map(|v| v as f64 / 1_000_000.0)
 }
 
 pub fn energy_full_wh() -> Option<f64> {
-    let uwh: Option<i64> =
-        read(&format!("{BAT0}/energy_full")).and_then(|s| parse_sysfs::<i64>("energy_full", s));
-    let r = uwh.map(|v| v as f64 / 1_000_000.0);
-    log::trace!("battery::energy_full_wh — result={r:?}");
-    r
+    read_attr::<i64>("energy_full").map(|v| v as f64 / 1_000_000.0)
 }
 
 pub fn energy_design_wh() -> Option<f64> {
-    let uwh: Option<i64> = read(&format!("{BAT0}/energy_full_design"))
-        .and_then(|s| parse_sysfs::<i64>("energy_full_design", s));
-    let r = uwh.map(|v| v as f64 / 1_000_000.0);
-    log::trace!("battery::energy_design_wh — result={r:?}");
-    r
+    read_attr::<i64>("energy_full_design").map(|v| v as f64 / 1_000_000.0)
 }
 
 pub fn health_pct() -> Option<f64> {
@@ -202,27 +183,19 @@ pub fn health_pct() -> Option<f64> {
 }
 
 pub fn manufacturer() -> Option<String> {
-    let r = read(&format!("{BAT0}/manufacturer"));
-    log::trace!("battery::manufacturer — result={r:?}");
-    r
+    read_attr("manufacturer")
 }
 
 pub fn model_name() -> Option<String> {
-    let r = read(&format!("{BAT0}/model_name"));
-    log::trace!("battery::model_name — result={r:?}");
-    r
+    read_attr("model_name")
 }
 
 pub fn technology() -> Option<String> {
-    let r = read(&format!("{BAT0}/technology"));
-    log::trace!("battery::technology — result={r:?}");
-    r
+    read_attr("technology")
 }
 
 pub fn charge_types() -> Option<String> {
-    let r = read(&format!("{BAT0}/charge_types"));
-    log::trace!("battery::charge_types — result={r:?}");
-    r
+    read_attr("charge_types")
 }
 
 pub fn conservation_mode() -> Option<bool> {
