@@ -923,6 +923,20 @@ fn build_ui(app: &adw::Application) {
     });
     window.add_action(&donate_action);
 
+    // Ctrl+1…8 jump straight to the rail pages (order mirrors the sidebar).
+    for (idx, id) in FLAT_IDS.iter().enumerate() {
+        let action = gio::SimpleAction::new(&format!("goto-{idx}"), None);
+        let show = show_page.clone();
+        let id = *id;
+        action.connect_activate(move |_, _| {
+            if let Some(title) = page_title(id) {
+                show(id, title);
+            }
+        });
+        window.add_action(&action);
+        app.set_accels_for_action(&format!("win.goto-{idx}"), &[&format!("<Ctrl>{}", idx + 1)]);
+    }
+
     split.set_sidebar(Some(&sidebar_page));
     split.set_content(Some(&content_page));
 
