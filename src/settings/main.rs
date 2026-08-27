@@ -3164,7 +3164,7 @@ fn set_fan_metric(value: &gtk::Label, detail: &gtk::Label, rpm: u32, target: u32
         detail.set_text("Manual target");
     } else {
         value.set_text(&format!("{rpm}"));
-        detail.set_text(&format!("→ {target} rpm"));
+        detail.set_text(&format!("→ {target} RPM"));
     }
 }
 

@@ -122,12 +122,12 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
         if rpm == 0 {
             "Auto".into()
         } else {
-            format!("Auto · {rpm} rpm")
+            format!("Auto · {rpm} RPM")
         }
     } else if rpm == 0 {
-        format!("~{target} rpm")
+        format!("~{target} RPM")
     } else {
-        format!("{rpm} rpm")
+        format!("{rpm} RPM")
     };
     log::debug!("fans::format_rpm_label(target={target}, rpm={rpm}) → '{label}'");
     label
@@ -256,9 +256,9 @@ mod tests {
     #[test]
     fn format_auto_covers_all_combos() {
         assert_eq!(format_rpm_label(0, 0), "Auto");
-        assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 rpm");
-        assert_eq!(format_rpm_label(1500, 0), "~1500 rpm");
-        assert_eq!(format_rpm_label(1500, 1400), "1400 rpm");
+        assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 RPM");
+        assert_eq!(format_rpm_label(1500, 0), "~1500 RPM");
+        assert_eq!(format_rpm_label(1500, 1400), "1400 RPM");
     }
 
     #[test]
