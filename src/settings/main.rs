@@ -395,6 +395,7 @@ fn build_ui(app: &adw::Application) {
     let ppt_group_slot: Rc<RefCell<Option<adw::PreferencesGroup>>> = Rc::new(RefCell::new(None));
     let ppt_scales_slot: PptScales = Rc::new(RefCell::new(Vec::new()));
     let ppt_suppress_slot: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let trend_feed_slot: Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>> = Rc::new(RefCell::new(None));
     let split = adw::NavigationSplitView::new();
     split.set_min_sidebar_width(228.0);
     split.set_max_sidebar_width(280.0);
@@ -470,6 +471,7 @@ fn build_ui(app: &adw::Application) {
                 &ppt_group_slot,
                 &ppt_scales_slot,
                 &ppt_suppress_slot,
+                &trend_feed_slot,
             ),
             PageWidth::Wide,
         ),
@@ -1802,6 +1804,7 @@ fn build_overview(
     ppt_group_slot: &Rc<RefCell<Option<adw::PreferencesGroup>>>,
     ppt_scales_slot: &PptScales,
     ppt_suppress_slot: &Rc<Cell<bool>>,
+    trend_feed_slot: &Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>>,
 ) -> gtk::Box {
     let page = page_lede("");
 
@@ -2001,6 +2004,90 @@ fn build_overview(
         ppt_suppress_slot,
     );
 
+    // Temperature trend — a 5-minute CPU/GPU sparkline, giving Home the
+    // same at-a-glance history the KDE widget already has.
+    {
+        const HISTORY_CAP: usize = 150; // 2 s poll → ~5 min
+        const MIN_T: f64 = 30.0;
+        const MAX_T: f64 = 100.0;
+        let history: Rc<RefCell<std::collections::VecDeque<(f64, f64)>>> =
+            Rc::new(RefCell::new(std::collections::VecDeque::new()));
+
+        let (sec_trend, trend_card) = section_tip("Temperature · last 5 min", None);
+        tip(
+            &trend_card,
+            "CPU (red) and GPU (amber) package temperature, sampled every 2 s",
+        );
+        let area = gtk::DrawingArea::new();
+        area.set_height_request(88);
+        area.set_hexpand(true);
+        let area_hist = history.clone();
+        area.set_draw_func(move |_, cr, w, h| {
+            let w = w as f64;
+            let h = h as f64;
+            if w < 10.0 || h < 10.0 {
+                return;
+            }
+            // Horizontal guides at 40/55/70/85 °C.
+            cr.set_line_width(1.0);
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.05);
+            for t in [40.0, 55.0, 70.0, 85.0] {
+                let y = h - (t - MIN_T) / (MAX_T - MIN_T) * h;
+                cr.move_to(0.0, y);
+                cr.line_to(w, y);
+            }
+            let _ = cr.stroke();
+
+            let hist = area_hist.borrow();
+            if hist.len() >= 2 {
+                // Right-aligned: the line grows leftward into the fixed window.
+                let dx = w / (HISTORY_CAP as f64 - 1.0);
+                let x0 = w - (hist.len() as f64 - 1.0) * dx;
+                let y_of = |t: f64| h - ((t.clamp(MIN_T, MAX_T) - MIN_T) / (MAX_T - MIN_T)) * h;
+                for (idx, r, g, b) in [(0usize, 0.784, 0.063, 0.180), (1, 0.851, 0.596, 0.102)] {
+                    cr.set_source_rgba(r, g, b, 0.95);
+                    cr.set_line_width(1.6);
+                    let mut first = true;
+                    for (i, point) in hist.iter().enumerate() {
+                        let t = if idx == 0 { point.0 } else { point.1 };
+                        let x = x0 + i as f64 * dx;
+                        let y = y_of(t);
+                        if first {
+                            cr.move_to(x, y);
+                            first = false;
+                        } else {
+                            cr.line_to(x, y);
+                        }
+                    }
+                    let _ = cr.stroke();
+                }
+            } else {
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.30);
+                cr.select_font_face(
+                    "Sans",
+                    gtk::cairo::FontSlant::Normal,
+                    gtk::cairo::FontWeight::Normal,
+                );
+                cr.set_font_size(11.0);
+                cr.move_to(10.0, h / 2.0 + 4.0);
+                let _ = cr.show_text("collecting samples…");
+            }
+        });
+        trend_card.append(&area);
+        page.append(&sec_trend);
+
+        // Feed the history from the dashboard poll (values mirror the chips).
+        let history_feed = history.clone();
+        trend_feed_slot.replace(Some(Rc::new(move |cpu: f64, gpu: f64| {
+            let mut hist = history_feed.borrow_mut();
+            hist.push_back((cpu, gpu));
+            while hist.len() > HISTORY_CAP {
+                hist.pop_front();
+            }
+            area.queue_draw();
+        })));
+    }
+
     if let Some(pct) = legion_core::battery::capacity() {
         bat_v.set_text(&format!("{pct}%"));
         bat_d.set_text(&legion_core::battery::status().unwrap_or_default());
@@ -2008,6 +2095,7 @@ fn build_overview(
 
     let cpu_chip_c = cpu_chip.clone();
     let gpu_chip_c = gpu_chip.clone();
+    let trend_feed_poll = trend_feed_slot.clone();
     let mode_drop_poll = drop.clone();
     let choices_poll = choices.clone();
     let profile_guard_poll = profile_guard.clone();
@@ -2117,6 +2205,9 @@ fn build_overview(
                 }
 
                 set_fan_metrics_from_sensors(&fan_metric_labels, &s);
+                if let Some(feed) = trend_feed_poll.borrow().as_ref() {
+                    feed(c.max(0.0), g.max(0.0));
+                }
                 bat_v.set_text(&format!("{}%", s.battery_pct));
                 bat_d.set_text(&friendly_profile(&s.profile));
             } else {
