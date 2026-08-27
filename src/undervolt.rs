@@ -306,6 +306,12 @@ pub fn status() -> CurveOptimizerStatus {
     }
 }
 
+/// `Some(v)` iff every value in `values` equals `v` (empty slice → `None`).
+fn uniform(values: &[i16]) -> Option<i16> {
+    let first = *values.first()?;
+    values.iter().all(|v| *v == first).then_some(first)
+}
+
 /// Apply one temporary all-core offset and verify all 16 cores by read-back.
 pub fn set_all(offset: i16) -> Result<CurveOptimizerStatus, String> {
     if !offset_allowed(offset) {
@@ -318,18 +324,14 @@ pub fn set_all(offset: i16) -> Result<CurveOptimizerStatus, String> {
     if !before.available {
         return Err(before.reason);
     }
-    let previous_offset = before
-        .current
-        .first()
-        .copied()
-        .filter(|v| before.current.iter().all(|x| x == v) && *v != offset);
+    let previous_offset = uniform(&before.current).filter(|v| *v != offset);
     let _guard = ACCESS
         .lock()
         .map_err(|_| "Curve Optimizer access lock is poisoned")?;
     let encoded = u32::from(offset as u16);
     send(SET_ALL_CORE_CO, encoded)?;
     let readback = read_all_16()?;
-    if readback.iter().any(|value| *value != offset) {
+    if uniform(&readback) != Some(offset) {
         return Err(format!("SMU read-back mismatch after apply: {readback:?}"));
     }
     drop(_guard);
@@ -359,7 +361,7 @@ pub fn reset_to_baseline() -> Result<CurveOptimizerStatus, String> {
     if baseline.len() != 16 {
         return Err("No complete boot baseline is available".into());
     }
-    if baseline.iter().all(|value| *value == baseline[0]) {
+    if uniform(&baseline).is_some() {
         return set_all(baseline[0]);
     }
     Err("Per-core baseline restore is not enabled; reboot safely restores firmware defaults".into())
@@ -431,7 +433,7 @@ pub fn set_persistence(enabled: bool, offset: i16) -> Result<CurveOptimizerPersi
     if !current.available {
         return Err(current.reason);
     }
-    if current.current.iter().any(|value| *value != offset) {
+    if uniform(&current.current) != Some(offset) {
         return Err("Apply and verify this offset before enabling it at startup".into());
     }
     write_persistence_config(&PersistenceConfig {
