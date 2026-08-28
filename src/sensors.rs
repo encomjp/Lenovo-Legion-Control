@@ -162,6 +162,50 @@ pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
     find_hwmon(name).into_iter().next()
 }
 
+/// Read temp/power/clock from the amdgpu hwmon that is NOT the iGPU.
+/// Multiple `amdgpu` hwmon devices exist on hybrid systems (iGPU + dGPU);
+/// each hwmon has a `device` symlink — resolve its PCI address and pick the
+/// one whose slot differs from the iGPU's (integrated GPUs live on the CPU's
+/// PCI address; dGPUs sit on their own). When only one amdgpu hwmon exists
+/// the machine is APU-only and there is no dGPU to report.
+fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
+    let cards = find_hwmon("amdgpu");
+    if cards.len() < 2 {
+        return None;
+    }
+    // Resolve each hwmon's PCI address (e.g. "0000:08:00.0").
+    let mut slots: Vec<(PathBuf, String)> = Vec::new();
+    for hw in &cards {
+        // /sys/class/hwmon/hwmonN/device → ../../…/0000:08:00.0
+        let addr = std::fs::read_link(hw.join("device"))
+            .ok()
+            .and_then(|l| l.to_string_lossy().split('/').next_back().map(str::to_string))
+            .unwrap_or_default();
+        slots.push((hw.clone(), addr));
+    }
+    if slots.len() < 2 {
+        return None;
+    }
+    // Heuristic: the dGPU is the card whose PCI address does NOT share the
+    // first card's bus. Sort by slot and prefer the later address (dGPUs
+    // enumerate after the iGPU on AMD hybrid laptops); require distinct
+    // addresses so we never pick the same device twice.
+    slots.sort_by(|a, b| a.1.cmp(&b.1));
+    let (gpu_hw, _) = slots.last()?.clone();
+    if gpu_hw == slots[0].0 {
+        return None;
+    }
+    let temp = read_int(&gpu_hw.join("temp1_input")).map(|v| v as f64 / 1000.0);
+    let power = read_int(&gpu_hw.join("power1_average"))
+        .or_else(|| read_int(&gpu_hw.join("power1_input")))
+        .map(|v| v as f64 / 1_000_000.0);
+    let clock = read_int(&gpu_hw.join("freq1_input")).map(|v| v as f64 / 1_000_000.0);
+    if temp.is_none() && power.is_none() {
+        return None;
+    }
+    Some((temp.unwrap_or(-1.0), power.unwrap_or(-1.0), clock.unwrap_or(-1.0)))
+}
+
 /// Read all sensors and return a snapshot.
 pub fn read_all() -> SensorReadings {
     let mut s = SensorReadings::default();
@@ -270,6 +314,23 @@ pub fn read_all() -> SensorReadings {
     s.dgpu_temp = dgpu_data.temp.unwrap_or(-1.0);
     s.dgpu_power = dgpu_data.power.unwrap_or(-1.0);
     s.dgpu_clock = dgpu_data.clock.unwrap_or(-1.0);
+
+    // ─── AMD dGPU fallback (amdgpu hwmon) ───
+    // On machines without nvidia-smi (Radeon RX 7000M/8000M class LOQs, or
+    // NVIDIA-less variants) the dGPU still exposes temp/power via a second
+    // amdgpu hwmon — distinguish it from the iGPU hwmon by PCI slot: the
+    // dGPU sits on a different bus address than the iGPU (which shares the
+    // CPU's slot).
+    if s.dgpu_temp < 0.0 {
+        if let Some((temp, power, clock)) = amd_dgpu_hwmon_read() {
+            s.dgpu_temp = temp;
+            s.dgpu_power = power;
+            s.dgpu_clock = clock;
+            log::debug!(
+                "sensors::read_all: AMD dGPU hwmon temp={temp:.1}°C power={power:.2}W clock={clock:.0}MHz"
+            );
+        }
+    }
 
     // ─── NVMe SSDs (prefer Composite label; fall back to temp1) ───
     let mut nvme_drives = 0usize;

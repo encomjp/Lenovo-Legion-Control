@@ -256,42 +256,62 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
 /// Best-effort dGPU name from PCI vendor/device IDs when nvidia-smi has no
 /// data (runtime-suspended GPU). Scans drm cards for vendor 0x10de (NVIDIA),
 /// then resolves the name via /usr/share/hwdata/pci.ids or lspci.
+/// Discrete-GPU PCI vendors to name-resolve. NVIDIA dGPUs are the norm, but
+/// AMD dGPUs exist in the fleet (Radeon RX 7000M/8000M class LOQs) and deserve
+/// a resolved name too.
+const GPU_VENDORS: [(&str, &str); 2] = [("0x10de", "10de"), ("0x1002", "1002")];
+
+/// Resolve a dGPU/iGPU marketing name via lspci for the first card whose
+/// vendor matches a known GPU vendor. Works for NVIDIA and AMD alike.
 fn pci_gpu_name() -> Option<String> {
-    const NVIDIA: &str = "0x10de";
     let entries = std::fs::read_dir("/sys/class/drm").ok()?;
     for entry in entries.flatten() {
         let dev = entry.path().join("device");
-        if std::fs::read_to_string(dev.join("vendor"))
-            .map(|v| v.trim().eq_ignore_ascii_case(NVIDIA))
-            .unwrap_or(false)
+        let Some(vendor) = std::fs::read_to_string(dev.join("vendor"))
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| GPU_VENDORS.iter().any(|(known, _)| known.eq_ignore_ascii_case(v)))
+        else {
+            continue;
+        };
+        let Some((_label, lspci_vendor)) = GPU_VENDORS.iter().find(|(known, _)| {
+            vendor
+                .eq_ignore_ascii_case(known)
+        })
+        else {
+            continue;
+        };
+        let device_id = std::fs::read_to_string(dev.join("device"))
+            .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
+            .ok()?;
+        log::debug!("device detect: GPU PCI device id {lspci_vendor}:{device_id}");
+        // lspci -d with the device id already filters to the right chip;
+        // the "-s ::00" slot filter restricts to the VGA function — dGPUs
+        // (and NVIDIA in particular) often expose an audio controller at .1.
+        // Default (non-numeric) output carries the resolved name after the
+        // first ": " separator.
+        if let Ok(out) = std::process::Command::new("lspci")
+            .args(["-d", &format!("{lspci_vendor}:{device_id}"), "-s", "::00"])
+            .output()
         {
-            let device_id = std::fs::read_to_string(dev.join("device"))
-                .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
-                .ok()?;
-            log::debug!("device detect: nvidia PCI device id {device_id:?}");
-            // lspci -d with the device id already filters to the right chip;
-            // the "-s ::00" slot filter restricts to the VGA function —
-            // NVIDIA dGPUs also expose an audio controller at .1. Default
-            // (non-numeric) output carries the resolved name after the
-            // first ": " separator.
-            if let Ok(out) = std::process::Command::new("lspci")
-                .args(["-d", &format!("10de:{device_id}"), "-s", "::00"])
-                .output()
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(rest) = text
+                .lines()
+                .next()
+                .and_then(|l| l.split_once(": "))
+                .map(|(_, n)| n.trim().to_string())
+                .filter(|n| !n.is_empty())
             {
-                let text = String::from_utf8_lossy(&out.stdout);
-                if let Some(rest) = text
-                    .lines()
-                    .next()
-                    .and_then(|l| l.split_once(": "))
-                    .map(|(_, n)| n.trim().to_string())
-                    .filter(|n| !n.is_empty())
-                {
-                    return Some(clean_gpu_name(rest));
-                }
+                return Some(clean_gpu_name(rest));
             }
-            // Fall back to the raw PCI id — still better than "Unknown".
-            return Some(format!("NVIDIA GPU (10de:{device_id})"));
         }
+        // Fall back to the raw PCI id — still better than "Unknown".
+        let short = if lspci_vendor.eq_ignore_ascii_case("10de") {
+            "NVIDIA"
+        } else {
+            "AMD"
+        };
+        return Some(format!("{short} GPU ({lspci_vendor}:{device_id})"));
     }
     None
 }
@@ -306,9 +326,20 @@ fn clean_gpu_name(raw: String) -> String {
             return t[open + 1..close].to_string();
         }
     }
-    t.strip_prefix("NVIDIA Corporation ")
-        .unwrap_or(t)
-        .to_string()
+    let stripped = t
+        .strip_prefix("NVIDIA Corporation ")
+        .unwrap_or(t);
+    // AMD names: "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge
+    // [Radeon Graphics] (rev d4)" without brackets already handled above;
+    // strip the corporate prefix and "(rev …)" tail when unbracketed.
+    let stripped = stripped
+        .strip_prefix("Advanced Micro Devices, Inc. [AMD/ATI] ")
+        .unwrap_or(stripped);
+    if let Some(rev) = stripped.find(" (rev ") {
+        stripped[..rev].trim().to_string()
+    } else {
+        stripped.to_string()
+    }
 }
 
 fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapability>) {

@@ -709,6 +709,21 @@ pub fn expected_tgp_from_gpu_name(gpu: &str) -> Option<u32> {
             Some(150)
         } else if g.contains("4070") || g.contains("4060") {
             Some(140)
+        } else if g.contains("radeon") {
+            // Radeon RX 7000M/8000M mobile SKUs (LOQ/Legion AMD dGPUs).
+            // PSREF peak-power bands: 7800M/8800M ≈ 180 W, 7700M/8700M
+            // ≈ 145 W, 7600M/8600M ≈ 90 W, 7400M/890M ≈ 65 W.
+            if g.contains("7800m") || g.contains("8800m") || g.contains("7900m") {
+                Some(180)
+            } else if g.contains("7700m") || g.contains("8700m") {
+                Some(145)
+            } else if g.contains("7600m") || g.contains("8600m") {
+                Some(90)
+            } else if g.contains("7400m") || g.contains("890m") || g.contains("8050m") {
+                Some(65)
+            } else {
+                None
+            }
         } else {
             None
         };
