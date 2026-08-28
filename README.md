@@ -72,18 +72,17 @@
 <tr>
 <td align="center"><a href="docs/assets/screenshots/10-lighting-more.png"><img src="docs/assets/screenshots/10-lighting-more.png" width="260" alt="More"></a><br><b>Lighting · More</b><br><sub>brightness · all zones</sub></td>
 <td align="center"><a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" width="260" alt="Battery"></a><br><b>Battery</b><br><sub>health · limit · status</sub></td>
-<td align="center"><a href="docs/assets/screenshots/12-fix-audio.png"><img src="docs/assets/screenshots/12-fix-audio.png" width="260" alt="Fix Audio"></a><br><b>Fix · Speakers</b><br><sub>AW88399 amp</sub></td>
+<td align="center"><a href="docs/assets/screenshots/12-profiles.png"><img src="docs/assets/screenshots/12-profiles.png" width="260" alt="Profiles"></a><br><b>Profiles</b><br><sub>save · load · preset</sub></td>
 </tr>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/13-fix-rgb.png"><img src="docs/assets/screenshots/13-fix-rgb.png" width="260" alt="Fix RGB"></a><br><b>Fix · RGB Fix</b><br><sub>auto-fix + permanent udev</sub></td>
-<td align="center"><a href="docs/assets/screenshots/14-fix-logs.png"><img src="docs/assets/screenshots/14-fix-logs.png" width="260" alt="Logs"></a><br><b>Fix · Logs</b><br><sub>daemon journal</sub></td>
-<td align="center"><a href="docs/assets/screenshots/15-profiles.png"><img src="docs/assets/screenshots/15-profiles.png" width="260" alt="Profiles"></a><br><b>Profiles</b><br><sub>save · load · preset</sub></td>
+<td align="center"><a href="docs/assets/screenshots/13-settings-setup.png"><img src="docs/assets/screenshots/13-settings-setup.png" width="260" alt="Settings Setup"></a><br><b>Settings · Setup</b><br><sub>updates · daemon · diagnostics</sub></td>
+<td align="center"><a href="docs/assets/screenshots/14-settings-fix.png"><img src="docs/assets/screenshots/14-settings-fix.png" width="260" alt="Settings Fix"></a><br><b>Settings · Fix</b><br><sub>speakers · RGB · udev · logs</sub></td>
+<td align="center"><a href="docs/assets/screenshots/15-settings-hardware.png"><img src="docs/assets/screenshots/15-settings-hardware.png" width="260" alt="Settings Hardware"></a><br><b>Settings · Hardware</b><br><sub>DMI · EC · lighting</sub></td>
 </tr>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/16-about-setup.png"><img src="docs/assets/screenshots/16-about-setup.png" width="260" alt="Setup"></a><br><b>About · Setup</b><br><sub>updates · daemon · diagnostics</sub></td>
-<td align="center"><a href="docs/assets/screenshots/17-about-hardware.png"><img src="docs/assets/screenshots/17-about-hardware.png" width="260" alt="Hardware"></a><br><b>About · Hardware</b><br><sub>DMI · EC · lighting · storage</sub></td>
-<td align="center"><a href="docs/assets/screenshots/18-about-help.png"><img src="docs/assets/screenshots/18-about-help.png" width="260" alt="Help"></a><br><b>About · Help</b><br><sub>links · legal</sub></td>
+<td align="center"><a href="docs/assets/screenshots/16-settings-help.png"><img src="docs/assets/screenshots/16-settings-help.png" width="260" alt="Settings Help"></a><br><b>Settings · Help</b><br><sub>links · legal</sub></td>
 <td align="center"><a href="docs/assets/screenshots/19-widget.png"><img src="docs/assets/screenshots/19-widget.png" width="260" alt="KDE Plasma widget"></a><br><b>KDE widget</b><br><sub>gauges · controls · plasma</sub></td>
+<td></td>
 </tr>
 </table>
 
@@ -108,7 +107,7 @@ magick page.xwd page.png
 #    briefly replaced and then restarted automatically
 ```
 
-All 18 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are produced this way. Run `scripts/capture-screenshots.sh` to regenerate.
+All 17 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are produced this way. Run `scripts/capture-screenshots.sh` to regenerate.
 
 </details>
 

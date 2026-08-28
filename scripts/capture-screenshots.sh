@@ -44,13 +44,11 @@ PAGES=(
   "lighting-logo" "09-lighting-logo"
   "lighting-more" "10-lighting-more"
   "battery-status" "11-battery"
-  "fix-audio" "12-fix-audio"
-  "fix-lighting" "13-fix-rgb"
-  "fix-logs" "14-fix-logs"
-  "profiles" "15-profiles"
-  "about-setup" "16-about-setup"
-  "about-hardware" "17-about-hardware"
-  "about-help" "18-about-help"
+  "profiles" "12-profiles"
+  "about-setup" "13-settings-setup"
+  "fix" "14-settings-fix"
+  "about-hardware" "15-settings-hardware"
+  "about-help" "16-settings-help"
 )
 
 BIN="$(dirname "$0")/../target/debug/legion-settings"
@@ -84,9 +82,13 @@ done
 kill $OB || true
 kill $XVFB || true
 wait $XVFB 2>/dev/null || true
-echo "Restarting hidden instance..."
-nohup "$BIN" --hidden > /tmp/legion_restart.log 2>&1 &
-sleep 1
-ps aux | grep legion-settings | grep -v grep | head
+# Only restart the tray instance if one was running before the capture —
+# never launch the app on the user's desktop from a screenshot run.
+if pgrep -f "legion-settings --hidden" >/dev/null 2>&1; then
+  echo "Restarting hidden instance..."
+  nohup "$BIN" --hidden > /tmp/legion_restart.log 2>&1 &
+  sleep 1
+  ps aux | grep legion-settings | grep -v grep | head
+fi
 echo "Done — images in $OUTDIR"
 ls -lh "$OUTDIR"
