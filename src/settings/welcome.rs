@@ -94,7 +94,7 @@ pub(crate) fn show_welcome_if_needed(
     let telemetry_group = pref_group("Alpha telemetry", None);
     telemetry_group.add(&telemetry_row);
     let privacy_link = gtk::LinkButton::with_label(
-        "https://github.com/encomjp/lenovo-legion-tool#alpha-telemetry-opt-out",
+        "https://github.com/encomjp/Lenovo-Legion-Control#alpha-telemetry-opt-out",
         "Privacy policy — what is sent and what is never collected",
     );
     privacy_link.add_css_class("flat");

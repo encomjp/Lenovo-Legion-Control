@@ -953,7 +953,7 @@ fn build_ui(app: &adw::Application) {
 
     let report_action = gio::SimpleAction::new("report-issue", None);
     report_action.connect_activate(|_, _| {
-        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
+        open_uri("https://github.com/encomjp/Lenovo-Legion-Control/issues/new");
     });
     window.add_action(&report_action);
 

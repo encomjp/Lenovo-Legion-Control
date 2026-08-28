@@ -12,8 +12,8 @@
 <p align="center">
   <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"><img src="https://img.shields.io/badge/license-GPL--2.0--only-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.87%2B-orange.svg" alt="Rust"></a>
-  <a href="https://github.com/encomjp/lenovo-legion-tool/releases"><img src="https://img.shields.io/github/v/release/encomjp/lenovo-legion-tool?label=release&color=c8102e" alt="Release"></a>
-  <a href="https://github.com/encomjp/lenovo-legion-tool/issues"><img src="https://img.shields.io/github/issues/encomjp/lenovo-legion-tool?color=6b7280" alt="Issues"></a>
+  <a href="https://github.com/encomjp/Lenovo-Legion-Control/releases"><img src="https://img.shields.io/github/v/release/encomjp/Lenovo-Legion-Control?label=release&color=c8102e" alt="Release"></a>
+  <a href="https://github.com/encomjp/Lenovo-Legion-Control/issues"><img src="https://img.shields.io/github/issues/encomjp/Lenovo-Legion-Control?color=6b7280" alt="Issues"></a>
   <img src="https://img.shields.io/badge/wayland-%26%20X11-2ecc71.svg" alt="Wayland+X11">
   <img src="https://img.shields.io/badge/KDE_Plasma-6-1e88e5.svg" alt="KDE">
 </p>
@@ -23,7 +23,7 @@
   <a href="docs/USAGE.md">Usage</a> ·
   <a href="docs/HARDWARE-AND-HID.md">Hardware & HID</a> ·
   <a href="docs/TROUBLESHOOTING.md">Troubleshooting</a> ·
-  <a href="https://github.com/encomjp/lenovo-legion-tool/issues/new">Report an issue</a>
+  <a href="https://github.com/encomjp/Lenovo-Legion-Control/issues/new">Report an issue</a>
 </p>
 
 <p align="center">
@@ -133,7 +133,7 @@ All 17 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are prod
 
 ## Get started
 
-**Recommended — the AppImage.** One file, no dependencies, works on every x86_64 Linux distribution (Ubuntu, Fedora, Arch/CachyOS, openSUSE, Debian, …). Download it from the [latest release](https://github.com/encomjp/lenovo-legion-tool/releases/latest), make it executable, and run:
+**Recommended — the AppImage.** One file, no dependencies, works on every x86_64 Linux distribution (Ubuntu, Fedora, Arch/CachyOS, openSUSE, Debian, …). Download it from the [latest release](https://github.com/encomjp/Lenovo-Legion-Control/releases/latest), make it executable, and run:
 
 ```bash
 chmod +x legion-control-0.1.1-x86_64.AppImage
@@ -148,7 +148,7 @@ The first-launch walkthrough can enable the privileged daemon (one PolicyKit pro
 The source installer supports **Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed**. GUI needs Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config`, C toolchain.
 
 ```bash
-git clone https://github.com/encomjp/lenovo-legion-tool.git
+git clone https://github.com/encomjp/Lenovo-Legion-Control.git
 cd lenovo-legion-tool
 ./install.sh
 # variants: ./install.sh -y | --user | --widget | --help
@@ -209,7 +209,7 @@ lsusb -d 048d:c197
 
 ## Project
 
-Repository: <https://github.com/encomjp/lenovo-legion-tool>
+Repository: <https://github.com/encomjp/Lenovo-Legion-Control>
 
 Licensed under [GPL-2.0-only](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). Spectrum notes build on community reverse-engineering: [legion-spectrum-control](https://github.com/alstergee/legion-spectrum-control) and [LenovoLegionToolkit](https://github.com/BartoszCichecki/LenovoLegionToolkit).
 

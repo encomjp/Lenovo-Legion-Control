@@ -8,7 +8,7 @@
         "Id": "com.github.encomjp.legioncontrol",
         "License": "GPL-2.0+",
         "Version": "0.1.0",
-        "Website": "https://github.com/encomjp/lenovo-legion-tool"
+        "Website": "https://github.com/encomjp/Lenovo-Legion-Control"
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-API-Minimum-Version": "6.0",

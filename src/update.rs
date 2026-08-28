@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
-pub const GITHUB_REPO: &str = "encomjp/lenovo-legion-tool";
+pub const GITHUB_REPO: &str = "encomjp/Lenovo-Legion-Control";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub struct ReleaseInfo {
     pub is_newer: bool,
 }
 
-/// Check GitHub for the latest release of `encomjp/lenovo-legion-tool`.
+/// Check GitHub for the latest release of `encomjp/Lenovo-Legion-Control`.
 /// Runs with a 5-second timeout and fails gracefully if offline.
 pub fn check_latest_release() -> Result<ReleaseInfo, String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
@@ -28,7 +28,7 @@ pub fn check_latest_release() -> Result<ReleaseInfo, String> {
 
     let output = Command::new("curl")
         .args([
-            "-s",
+            "-sL",
             "-S",
             "--max-time",
             "5",

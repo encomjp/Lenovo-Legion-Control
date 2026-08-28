@@ -18,7 +18,7 @@ The AppImage is a single executable file. It bundles the settings GUI, CLI, and 
 
 ### 1. Download and run
 
-Grab `legion-control-<version>-x86_64.AppImage` from the [latest release](https://github.com/encomjp/lenovo-legion-tool/releases/latest), then:
+Grab `legion-control-<version>-x86_64.AppImage` from the [latest release](https://github.com/encomjp/Lenovo-Legion-Control/releases/latest), then:
 
 ```bash
 chmod +x legion-control-0.1.1-x86_64.AppImage

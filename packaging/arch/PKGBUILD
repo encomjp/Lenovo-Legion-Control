@@ -3,7 +3,7 @@ pkgver=0.1.1
 pkgrel=1
 pkgdesc='Lenovo Legion hardware control daemon, CLI, GTK app, and KDE widget'
 arch=('x86_64')
-url='https://github.com/encomjp/lenovo-legion-tool'
+url='https://github.com/encomjp/Lenovo-Legion-Control'
 license=('GPL-2.0-only')
 depends=('gtk4' 'libadwaita' 'systemd-libs' 'polkit')
 makedepends=('rust>=1.87' 'cargo' 'pkgconf')

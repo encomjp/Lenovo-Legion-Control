@@ -19,7 +19,7 @@ pub(crate) fn show_about_dialog(parent: &impl glib::object::IsA<gtk::Widget>) {
              Not affiliated with Lenovo.",
         )
         .website("https://github.com/encomjp/")
-        .issue_url("https://github.com/encomjp/lenovo-legion-tool/issues/new")
+        .issue_url("https://github.com/encomjp/Lenovo-Legion-Control/issues/new")
         .license_type(gtk::License::Gpl20Only)
         .developers(["europeanpepe (encomjp)"])
         .copyright("© europeanpepe / encomjp")
@@ -31,7 +31,7 @@ pub(crate) fn show_about_dialog(parent: &impl glib::object::IsA<gtk::Widget>) {
     );
     about.add_link(
         "Report an issue",
-        "https://github.com/encomjp/lenovo-legion-tool/issues/new",
+        "https://github.com/encomjp/Lenovo-Legion-Control/issues/new",
     );
     about.add_link(
         "Spectrum protocol notes",
@@ -783,14 +783,14 @@ pub(crate) fn build_about_pages(
         .build();
     tip(
         &report_row,
-        "Opens https://github.com/encomjp/lenovo-legion-tool/issues/new — report bugs or request features",
+        "Opens https://github.com/encomjp/Lenovo-Legion-Control/issues/new — report bugs or request features",
     );
     report_row.connect_activated(|_| {
-        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
+        open_uri("https://github.com/encomjp/Lenovo-Legion-Control/issues/new");
     });
     let report_open = flat_open_button("Opens GitHub in your browser");
     report_open.connect_clicked(|_| {
-        open_uri("https://github.com/encomjp/lenovo-legion-tool/issues/new");
+        open_uri("https://github.com/encomjp/Lenovo-Legion-Control/issues/new");
     });
     report_row.add_suffix(&report_open);
     help.add(&report_row);

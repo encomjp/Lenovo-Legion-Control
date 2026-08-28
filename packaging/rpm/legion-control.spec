@@ -3,7 +3,7 @@ Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Lenovo Legion hardware control suite
 License:        GPL-2.0-only
-URL:            https://github.com/encomjp/lenovo-legion-tool
+URL:            https://github.com/encomjp/Lenovo-Legion-Control
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  cargo >= 1.87
