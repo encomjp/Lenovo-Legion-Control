@@ -63,7 +63,13 @@ pub const DEFAULT_TELEMETRY_KEY: &str =
 /// via override or configured endpoint.
 pub const DEFAULT_TAILSCALE_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
 
-pub const REPORT_SCHEMA_VERSION: u32 = 1;
+pub const REPORT_SCHEMA_VERSION: u32 = 2;
+
+/// Deep-report cadence: full sensor dump sent on daemon launch, every hour,
+/// and whenever the capability digest changes (new fan channels, amp bound,
+/// model detected differently …). Minute pushes stay small (schema v1 body
+/// plus a `deep: null` marker).
+pub const DEEP_INTERVAL_SECS: u64 = 3600;
 
 /// Response-body echo cap for error strings (diagnosable, never verbatim-huge).
 const MAX_ERR_BODY_CHARS: usize = 300;
@@ -103,6 +109,43 @@ pub struct DiagnosticsReport {
     /// Detailed hardware inventory (CPU, GPU, RAM, storage, display).
     #[serde(default)]
     pub hardware: HardwareInfo,
+    /// Deep diagnostic block — present only on launch / hourly /
+    /// capability-change reports. Null on the 1-minute heartbeat pushes.
+    #[serde(default)]
+    pub deep: Option<DeepReport>,
+}
+
+/// Everything a deep report carries beyond the normal one. Kept separate so
+/// minute pushes stay small while deep pushes land only when they carry new
+/// information (launch, hourly, capability change).
+#[derive(Debug, Default, Serialize)]
+pub struct DeepReport {
+    /// Why this deep report was sent: "launch", "hourly", "capability-change".
+    pub reason: String,
+    /// Raw `nvidia-smi -q` output (trimmed), or amdgpu sysfs equivalent.
+    pub gpu_detailed: Option<String>,
+    /// Every hwmon chip with every readable input/label — full fleet sensor
+    /// visibility for new-model bring-up.
+    pub hwmon_dump: Vec<HwmonChipDump>,
+    /// Fan sysfs detail: all fanN_* attrs per backend, including unreadable
+    /// ones (with the error kind) so missing-permission bugs are visible.
+    pub fan_detail: Vec<(String, String)>,
+    /// Battery sysfs detail: every file in the battery dir + its value.
+    pub battery_detail: Vec<(String, String)>,
+    /// Installed support software: ryzen_smu (DKMS state), dkms, kernel
+    /// headers, aw88399 firmware, GPU driver version.
+    pub installed_software: Vec<(String, String)>,
+    /// Digest of capability-relevant state — lets the server group models
+    /// and spot new hardware variants.
+    pub capability_digest: String,
+}
+
+/// One hwmon chip: name + every readable (attribute, value) pair.
+#[derive(Debug, Serialize)]
+pub struct HwmonChipDump {
+    pub hwmon: String,
+    pub name: String,
+    pub attrs: Vec<(String, String)>,
 }
 
 /// Detailed static & topological hardware inventory for deep telemetry
@@ -503,6 +546,7 @@ pub fn collect() -> DiagnosticsReport {
         self_checks: run_self_checks(),
         system_info,
         hardware,
+        deep: None,
     };
 
     // Sections built inline above — traced from the finished report so every
@@ -546,6 +590,179 @@ pub fn collect() -> DiagnosticsReport {
     );
 
     report
+}
+
+/// Compute the capability digest — a hash of everything that, when it
+/// changes, should trigger a deep report (model, fan channels, amp state,
+/// installed software). Minute reports don't carry it; the scheduler
+/// compares consecutive digests.
+pub fn capability_digest() -> String {
+    let dev = device::detect();
+    let caps = &dev.capabilities;
+    let key = format!(
+        "{}|{}|{}|{}|{}|{}|{}",
+        dev.model,
+        dev.machine_type,
+        caps.fan_backend,
+        caps.fans.len(),
+        caps.platform_profiles.len(),
+        crate::audio::diagnose().health as u8,
+        battery::charge_types().is_some(),
+    );
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in key.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Collect the deep block: full hwmon walk, GPU detailed dump, fan sysfs
+/// detail, battery detail, installed-software detection. Heavier than
+/// `collect()` (subprocess + sysfs walk) — only called at launch / hourly /
+/// capability change / explicit send.
+fn collect_deep(reason: &str) -> DeepReport {
+    let mut deep = DeepReport::default();
+    deep.reason = reason.to_string();
+
+    // ─── GPU detailed: nvidia-smi -q, else amdgpu sysfs walk ───
+    deep.gpu_detailed = crate::dgpu::detailed_query();
+
+    // ─── hwmon dump: every chip, every readable attr ───
+    for entry in std::fs::read_dir("/sys/class/hwmon")
+        .map(|d| d.flatten().collect::<Vec<_>>())
+        .unwrap_or_default()
+    {
+        let hw_path = entry.path();
+        let hw_name = entry.file_name().to_string_lossy().into_owned();
+        let chip = std::fs::read_to_string(hw_path.join("name"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let mut attrs = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&hw_path) {
+            for a in entries.flatten() {
+                let aname = a.file_name().to_string_lossy().into_owned();
+                // Skim to sensor-relevant attrs; skip device symlinks/power.
+                if aname.starts_with("device")
+                    || aname.starts_with("power")
+                    || aname == "uevent"
+                    || aname == "subsystem"
+                {
+                    continue;
+                }
+                match std::fs::read_to_string(a.path()) {
+                    Ok(v) => attrs.push((aname, v.trim().to_string())),
+                    Err(e) => attrs.push((aname, format!("<{}>", e.kind() as i32))),
+                }
+            }
+            attrs.sort();
+        }
+        deep.hwmon_dump.push(HwmonChipDump {
+            hwmon: hw_name,
+            name: chip,
+            attrs,
+        });
+    }
+    deep.hwmon_dump.sort_by(|a, b| a.hwmon.cmp(&b.hwmon));
+
+    // ─── fan detail: every fanN_* attr on every fan-ish hwmon ───
+    for chip in &deep.hwmon_dump {
+        if chip.name.contains("wmi")
+            || chip.name.contains("legion")
+            || chip.name.contains("yoga")
+        {
+            for (attr, val) in &chip.attrs {
+                if attr.starts_with("fan") {
+                    deep.fan_detail
+                        .push((format!("{}/{}", chip.hwmon, attr), val.clone()));
+                }
+            }
+        }
+    }
+
+    // ─── battery detail: every file in the power_supply battery dir ───
+    for dir_name in ["BAT0", "BAT1", "BAT2", "BATT"] {
+        let dir = format!("/sys/class/power_supply/{dir_name}");
+        if !std::path::Path::new(&dir).is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let fname = e.file_name().to_string_lossy().into_owned();
+                let val = std::fs::read_to_string(e.path())
+                    .map(|v| v.trim().to_string())
+                    .unwrap_or_else(|e| format!("<{}>", e.kind() as i32));
+                deep.battery_detail
+                    .push((format!("{dir_name}/{fname}"), val));
+            }
+        }
+        break; // only the first present battery — keeps the payload bounded
+    }
+
+    // ─── installed support software ───
+    let sw = &mut deep.installed_software;
+    let push = |sw: &mut Vec<(String, String)>, k: &str, v: String| sw.push((k.into(), v));
+    push(sw, "ryzen_smu_loaded", Path::new("/sys/kernel/ryzen_smu_drv").is_dir().to_string());
+    push(
+        sw,
+        "ryzen_smu_dkms_registered",
+        std::process::Command::new("dkms")
+            .arg("status")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.contains("ryzen_smu")))
+            .unwrap_or(false)
+            .to_string(),
+    );
+    push(
+        sw,
+        "dkms_installed",
+        std::process::Command::new("dkms")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+            .to_string(),
+    );
+    push(
+        sw,
+        "kernel_headers",
+        Path::new(&format!(
+            "/lib/modules/{}/build",
+            report_os_kernel()
+        ))
+        .is_dir()
+        .to_string(),
+    );
+    push(
+        sw,
+        "aw88399_firmware",
+        Path::new("/lib/firmware/aw88399_acf.bin").is_file().to_string(),
+    );
+    if let Some(ver) = std::fs::read_to_string("/sys/module/nvidia/version")
+        .ok()
+        .map(|s| s.trim().to_string())
+    {
+        push(sw, "nvidia_driver", ver);
+    }
+    push(
+        sw,
+        "amdgpu_loaded",
+        Path::new("/sys/module/amdgpu").is_dir().to_string(),
+    );
+    push(sw, "kernel", {
+        std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    });
+
+    deep.capability_digest = capability_digest();
+    deep
+}
+
+fn report_os_kernel() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Parse a single `/proc/cpuinfo` line's `core id` value, tolerating both
@@ -1266,11 +1483,79 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     log::debug!("diagnostics send → endpoint {endpoint}");
     let mut report = collect();
     report.machine_id = machine_id.clone();
+    // Deep-report policy is decided by the caller (scheduler/CLI): the
+    // scheduler stamps `deep` on launch/hourly/change; manual sends from
+    // CLI/GUI always carry deep data (they are explicit diagnostics runs).
     let resp = send(&report, &endpoint)?;
     config::update(|c| {
         c.diagnostics.last_sent = Some(chrono::Utc::now().to_rfc3339());
     });
     Ok(resp)
+}
+
+/// Collect + send with a deep block attached (launch / hourly /
+/// capability-change / explicit CLI-GUI sends). Same consent contract as
+/// [`collect_and_send`].
+pub fn collect_and_send_deep(override_url: Option<&str>, reason: &str) -> Result<String, String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let last = LAST_SEND_MS.load(Ordering::Relaxed);
+    if last > 0 && now_ms - last < 10_000 {
+        return Err(
+            "diagnostics were sent less than 10 seconds ago — skipping duplicate send".into(),
+        );
+    }
+    LAST_SEND_MS.store(now_ms, Ordering::Relaxed);
+
+    let cfg = config::get().diagnostics;
+    let machine_id = if cfg.machine_id.is_empty() {
+        ensure_machine_id()
+    } else {
+        cfg.machine_id.clone()
+    };
+    let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
+    log::debug!("diagnostics send (deep, {reason}) → endpoint {endpoint}");
+    let mut report = collect();
+    report.machine_id = machine_id.clone();
+    report.deep = Some(collect_deep(reason));
+    let resp = send(&report, &endpoint)?;
+    config::update(|c| {
+        c.diagnostics.last_sent = Some(chrono::Utc::now().to_rfc3339());
+    });
+    Ok(resp)
+}
+
+/// Mint-or-load the pseudonymous machine id (shared by both send paths).
+fn ensure_machine_id() -> String {
+    let cfg = config::get().diagnostics;
+    if !cfg.machine_id.is_empty() {
+        return cfg.machine_id.clone();
+    }
+    // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
+    // (bounded read — never unbounded EOF on this char device).
+    let mut b = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read as _;
+        let _ = f.read_exact(&mut b);
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let pid = std::process::id() as u128;
+        b = (now ^ (pid << 64)).to_be_bytes();
+    }
+    b[6] = (b[6] & 0x0F) | 0x40;
+    b[8] = (b[8] & 0x3F) | 0x80;
+    let id = format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    );
+    config::update(|c| c.diagnostics.machine_id = id.clone());
+    id
 }
 
 #[cfg(test)]

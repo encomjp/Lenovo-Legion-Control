@@ -884,7 +884,7 @@ fn main() {
                         "endpoint from config/default"
                     }
                 );
-                match diagnostics::collect_and_send(endpoint.as_deref()) {
+                match diagnostics::collect_and_send_deep(endpoint.as_deref(), "manual") {
                     Ok(resp) => println!("sent ✓ {}", resp.chars().take(200).collect::<String>()),
                     Err(e) => {
                         eprintln!("error: {e}");

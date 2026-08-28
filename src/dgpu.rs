@@ -143,6 +143,23 @@ pub fn smi_query(query: &str) -> Option<String> {
     value
 }
 
+/// Full `nvidia-smi -q` dump (trimmed of the noisy header). Returns None on
+/// AMD-only machines. Cap ~16 KB — deep reports only, never minute pushes.
+pub fn detailed_query() -> Option<String> {
+    let raw = smi_run(&["-q"])?;
+    // Trim the fixed header block (timestamp etc.) — keep from "Driver" on.
+    let body = match raw.find("Driver Version") {
+        Some(i) => &raw[i..],
+        None => raw.as_str(),
+    };
+    const MAX: usize = 32 * 1024;
+    let mut out: String = body.chars().take(MAX).collect();
+    if body.len() > MAX {
+        out.push_str("\n… [truncated]");
+    }
+    Some(out)
+}
+
 /// Batch snapshot of dGPU metrics in a single subprocess execution.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DgpuMetrics {

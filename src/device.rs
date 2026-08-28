@@ -394,6 +394,21 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
         log::trace!("fan probe: no legion_hwmon hwmon");
     }
 
+    // yogafan (kernel 7.1+): the only fan source on IdeaPad Gaming/Yoga
+    // (no lenovo_wmi_other at all) — read-only tachometer, no target/min/max.
+    if let Some(hw) = crate::sensors::hwmon_by_name("yogafan") {
+        let fans = collect_fans_from_hwmon(&hw, profile);
+        if !fans.is_empty() {
+            log::debug!(
+                "fan probe: backend yogafan at {} ({} fans, read-only)",
+                hw.display(),
+                fans.len()
+            );
+            return ("yogafan".into(), fans);
+        }
+        log::trace!("fan probe: yogafan present but exposes no fan channels");
+    }
+
     // Profile fallbacks when no hwmon yet (daemon early boot, missing module).
     if let Some(p) = profile {
         log::debug!(

@@ -43,8 +43,15 @@ fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
                 log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
                 return Some(("legion_hwmon".into(), hw));
             }
+            // yogafan (kernel 7.1+): IdeaPad/Yoga/LOQ tachometer via ACPI EC.
+            // On IdeaPad Gaming 3 (82K2) there is no lenovo_wmi_other at all —
+            // this is the only fan source (read-only: no target/min/max attrs).
+            if let Some(hw) = hwmon_by_name("yogafan") {
+                log::debug!("fans::fan_hwmon: backend yogafan at {}", hw.display());
+                return Some(("yogafan".into(), hw));
+            }
             log::warn!(
-                "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon) — fan control unavailable"
+                "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon / yogafan) — fan control unavailable"
             );
             None
         })

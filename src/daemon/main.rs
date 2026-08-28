@@ -1108,6 +1108,8 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
         log::info!("telemetry-push thread stopped");
         return;
     }
+    let mut last_deep: Option<(std::time::Instant, String)> = None;
+    let mut first_push = true;
     loop {
         let cfg = config::get().diagnostics;
         if !cfg.enabled || cfg.auto_interval_secs == 0 {
@@ -1123,7 +1125,41 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
             continue;
         }
         let interval = cfg.auto_interval_secs.clamp(15, 3600) as u64;
-        match legion_core::diagnostics::collect_and_send(None) {
+        // Deep-report policy: on launch, hourly, or when the capability
+        // digest changed (new fan channels, amp bound, model re-detected…).
+        // Minute pushes otherwise go out shallow (deep: null).
+        let should_deep = if first_push {
+            first_push = false;
+            Some("launch")
+        } else {
+            let digest = legion_core::diagnostics::capability_digest();
+            let now = std::time::Instant::now();
+            match &last_deep {
+                Some((t, d)) => {
+                    if &digest != d {
+                        Some("capability-change")
+                    } else if now.duration_since(*t)
+                        >= Duration::from_secs(
+                            legion_core::diagnostics::DEEP_INTERVAL_SECS,
+                        )
+                    {
+                        Some("hourly")
+                    } else {
+                        None
+                    }
+                }
+                None => Some("launch"),
+            }
+        };
+        let result = match should_deep {
+            Some(reason) => {
+                let digest = legion_core::diagnostics::capability_digest();
+                last_deep = Some((std::time::Instant::now(), digest));
+                legion_core::diagnostics::collect_and_send_deep(None, reason)
+            }
+            None => legion_core::diagnostics::collect_and_send(None),
+        };
+        match result {
             Ok(_) => log::debug!("telemetry push sent (interval {interval}s, gzip)"),
             Err(e) if e.contains("skipping duplicate send") => {
                 log::trace!("telemetry push dedup-skipped: {e}");
