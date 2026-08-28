@@ -228,7 +228,29 @@ fn hub_page(
     let tabs = adw::ViewStack::new();
     tabs.set_vexpand(true);
     for (page, id, title) in children {
-        tabs.add_titled(&page_shell(&page), Some(id), title);
+        let w = page_shell(&page);
+        // ViewSwitcher shows an icon when the page has one — missing icons
+        // render as the red image-missing tile the user reported. Use a
+        // valid symbolic icon per tab so the pill never falls back to the
+        // placeholder; Wide policy will then show icon + title cleanly.
+        let icon = match id {
+            "setup" => "preferences-system-symbolic",
+            "fix" => "applications-engineering-symbolic",
+            "hardware" => "computer-symbolic",
+            "help" => "help-about-symbolic",
+            "features" => "applications-engineering-symbolic",
+            "tuning" => "applications-system-symbolic",
+            "power" => "battery-symbolic",
+            "keyboard" => "input-keyboard-symbolic",
+            "front" => "video-display-symbolic",
+            "rear" => "video-display-symbolic",
+            "logo" => "emblem-favorite-symbolic",
+            "more" => "open-menu-symbolic",
+            _ => "preferences-other-symbolic",
+        };
+        tabs.add_titled_with_icon(&w, Some(id), title, icon);
+        let p = tabs.page(&w);
+        p.set_needs_attention(false);
     }
     if let Some(id) = initial {
         if tabs.child_by_name(id).is_some() {
