@@ -50,6 +50,14 @@ use std::time::{Duration, SystemTime};
 /// secret sent by [`send`] (env `LEGION_TELEMETRY_KEY`).
 pub const DEFAULT_WAN_ENDPOINT: &str = "https://telemetry.adrian-kozlowski.de/v1/diagnostics";
 
+/// Shared secret expected by the default WAN collector, compiled in so
+/// release builds authenticate out of the box — no per-machine systemd
+/// drop-in required. `LEGION_TELEMETRY_KEY` overrides it (its purpose is
+/// spam throttling, not confidentiality: the payload is anonymous). Rotate
+/// the value on the collector AND here in lockstep.
+pub const DEFAULT_TELEMETRY_KEY: &str =
+    "193c4ca1a0ad0eedb2a2c758416066a4c3885046beb1da50d60fd3a20eb6b9f9";
+
 /// Legacy/dev collector on the operator's IONOS VPS — plain HTTP, reachable
 /// only inside the tailnet. Value frozen for existing dev setups; select it
 /// via override or configured endpoint.
@@ -946,15 +954,19 @@ fn create_header_temp(key: &str) -> Result<std::path::PathBuf, String> {
     )
 }
 
-/// Optional shared secret for the WAN collector, read per-send from the
-/// environment (`LEGION_TELEMETRY_KEY`). `None` when unset or empty. The
-/// value must never appear in logs or error strings — [`send`] writes it to
-/// a private 0600 header temp file ([`create_header_temp`]) instead of the
-/// argument vector and passes curl `-H @<path>` ([`build_curl_args`]).
+/// Optional shared secret for the WAN collector: the compiled-in
+/// [`DEFAULT_TELEMETRY_KEY`] unless the operator overrides it per-send via
+/// the environment (`LEGION_TELEMETRY_KEY`). `None` when the override is
+/// set to empty. The value must never appear in logs or error strings —
+/// [`send`] writes it to a private 0600 header temp file
+/// ([`create_header_temp`]) instead of the argument vector and passes curl
+/// `-H @<path>` ([`build_curl_args`]).
 fn telemetry_key_from_env() -> Option<String> {
-    std::env::var("LEGION_TELEMETRY_KEY")
-        .ok()
-        .filter(|k| !k.is_empty())
+    match std::env::var("LEGION_TELEMETRY_KEY") {
+        Ok(k) if !k.is_empty() => Some(k),
+        Ok(_) => None, // explicitly overridden off
+        Err(_) => Some(DEFAULT_TELEMETRY_KEY.to_string()),
+    }
 }
 
 /// Trim a candidate telemetry key and drop blank results, so no empty or
@@ -1344,6 +1356,24 @@ mod tests {
         assert_eq!(resolve_endpoint(None, "http://y"), "http://y");
         assert_eq!(resolve_endpoint(None, ""), DEFAULT_WAN_ENDPOINT);
         assert_eq!(resolve_endpoint(Some(""), "http://y"), "http://y");
+    }
+
+    /// Key resolution: unset env falls back to the compiled-in default,
+    /// a non-empty override wins, and an empty override disables the
+    /// secret header entirely.
+    #[test]
+    fn telemetry_key_resolution() {
+        let _env = lock_env();
+        std::env::remove_var("LEGION_TELEMETRY_KEY");
+        assert_eq!(
+            telemetry_key_from_env().as_deref(),
+            Some(DEFAULT_TELEMETRY_KEY)
+        );
+        std::env::set_var("LEGION_TELEMETRY_KEY", "custom");
+        assert_eq!(telemetry_key_from_env().as_deref(), Some("custom"));
+        std::env::set_var("LEGION_TELEMETRY_KEY", "");
+        assert_eq!(telemetry_key_from_env(), None);
+        std::env::remove_var("LEGION_TELEMETRY_KEY");
     }
 
     /// Option-injection hardening: an override that does not start with an
