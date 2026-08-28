@@ -93,6 +93,13 @@ pub(crate) fn show_welcome_if_needed(
     );
     let telemetry_group = pref_group("Alpha telemetry", None);
     telemetry_group.add(&telemetry_row);
+    let privacy_link = gtk::LinkButton::with_label(
+        "https://github.com/encomjp/lenovo-legion-tool#alpha-telemetry-opt-out",
+        "Privacy policy — what is sent and what is never collected",
+    );
+    privacy_link.add_css_class("flat");
+    privacy_link.set_halign(Align::Start);
+    privacy_link.set_margin_start(4);
 
     let consent_c0 = consent.clone();
     let share_c0 = share_switch.cloned();
@@ -142,6 +149,7 @@ pub(crate) fn show_welcome_if_needed(
     page.append(&brand);
     page.append(&intro);
     page.append(&telemetry_group);
+    page.append(&privacy_link);
     page.append(&actions);
 
     let clamp = libadwaita::Clamp::builder().maximum_size(560).build();
@@ -457,9 +465,8 @@ impl SetupCtx {
         );
     }
 
-    /// Step 4 — telemetry opt-in. Enable flips config + live controls and
-    /// shows a confirmation (with the anonymous id when one exists); Skip
-    /// falls straight through to the final step.
+    /// Step 4 — telemetry opt-in. ON by default; Keep is the suggested
+    /// red/destructive top button and links to the privacy policy.
     fn telemetry_step(self) {
         let dialog = setup_step_dialog(
             SetupStep::Telemetry,
@@ -472,6 +479,17 @@ impl SetupCtx {
             [("keep", "Keep on"), ("optout", "Opt out")],
             "keep",
         );
+        // Keep ON — red (destructive) and still the default / top button.
+        dialog.set_response_appearance("keep", adw::ResponseAppearance::Destructive);
+        let policy = gtk::LinkButton::with_label(
+            "https://github.com/encomjp/lenovo-legion-tool#alpha-telemetry-opt-out",
+            "Privacy policy",
+        );
+        policy.add_css_class("flat");
+        let extra = gtk::Box::new(Orientation::Horizontal, 0);
+        extra.set_halign(Align::Center);
+        extra.append(&policy);
+        dialog.set_extra_child(Some(&extra));
         let ctx = self.clone();
         self.present(dialog, move |response| match response {
             "optout" => {
