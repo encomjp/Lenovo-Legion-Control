@@ -1199,6 +1199,69 @@ fn build_ui(app: &adw::Application) {
     } else {
         window.present();
     }
+
+    // ─── Startup update notification ───
+    // One background GitHub check ~8 s after launch (let the daemon probe
+    // finish first). Newer release → visible banner on Home + toast, and a
+    // prompt dialog when the window is visible. Silent when up to date or
+    // when the check fails (offline machines must not see error noise).
+    {
+        let banner_u = banner.clone();
+        let overlay_u = toast_overlay.clone();
+        let win_u = window.clone();
+        glib::timeout_add_local_once(Duration::from_secs(8), move || {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(legion_core::update::check_latest_release());
+            });
+            glib::timeout_add_local(Duration::from_millis(200), move || {
+                match rx.try_recv() {
+                    Ok(result) => match result {
+                        Ok(info) if info.is_newer => {
+                            let msg = format!(
+                                "New version available: v{} (installed v{})",
+                                info.version,
+                                legion_core::update::CURRENT_VERSION
+                            );
+                            banner_u.set_title(&msg);
+                            banner_u.set_button_label(Some("Open release"));
+                            banner_u.set_revealed(true);
+                            {
+                                let url = info.html_url.clone();
+                                let overlay_n = overlay_u.clone();
+                                banner_u.connect_button_clicked(move |_| {
+                                    let _ = gtk4::gio::AppInfo::launch_default_for_uri(
+                                        &url,
+                                        None::<&gtk4::gio::AppLaunchContext>,
+                                    );
+                                    let _ = &overlay_n;
+                                });
+                            }
+                            if !hidden {
+                                let info_c = info.clone();
+                                glib::timeout_add_local_once(
+                                    Duration::from_millis(400),
+                                    move || {
+                                        about::prompt_update_dialog(&info_c);
+                                    },
+                                );
+                            }
+                            log::info!("update check: {} available", info.version);
+                        }
+                        Ok(info) => {
+                            log::debug!("update check: up to date (latest v{})", info.version);
+                        }
+                        Err(e) => {
+                            log::debug!("update check failed (silent): {e}");
+                        }
+                    },
+                    Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
+                }
+                glib::ControlFlow::Break
+            });
+        });
+    }
 }
 
 fn apply_conn_status(

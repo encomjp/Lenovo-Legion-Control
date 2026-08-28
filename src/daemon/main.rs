@@ -1160,7 +1160,10 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
             None => legion_core::diagnostics::collect_and_send(None),
         };
         match result {
-            Ok(_) => log::debug!("telemetry push sent (interval {interval}s, gzip)"),
+            Ok(_) => log::debug!(
+                "telemetry push sent (interval {interval}s, gzip, deep={:?})",
+                should_deep
+            ),
             Err(e) if e.contains("skipping duplicate send") => {
                 log::trace!("telemetry push dedup-skipped: {e}");
             }
