@@ -14,6 +14,12 @@ DeviceAllow=/dev/hidraw* rw
 DeviceAllow=/dev/input/* rw
 DeviceAllow=/dev/bus/usb/* rw
 DeviceAllow=char-usb_device rw
+# GPU telemetry: nvidia-smi needs the NVIDIA char devices; without these
+# NVML init fails (exit 255) and dGPU temp/power report -1 in telemetry.
+DeviceAllow=/dev/nvidia* rw
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=char-nvidia-uvm rw
+DeviceAllow=char-drm rw
 ProtectSystem=false
 ProtectHome=read-only
 PrivateTmp=true

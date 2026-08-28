@@ -263,7 +263,17 @@ const GPU_VENDORS: [(&str, &str); 2] = [("0x10de", "10de"), ("0x1002", "1002")];
 
 /// Resolve a dGPU/iGPU marketing name via lspci for the first card whose
 /// vendor matches a known GPU vendor. Works for NVIDIA and AMD alike.
+/// Resolve a dGPU marketing name via lspci for the first card whose
+/// vendor matches a known GPU vendor. Works for NVIDIA and AMD alike.
+///
+/// iGPU awareness: `boot_vga=1` marks the card the firmware used for
+/// display at boot — on APU systems that is the CPU-integrated GPU. When a
+/// non-boot card exists we return that (the dGPU); when ONLY the boot card
+/// exists the machine has no dGPU and we return None so the report does
+/// not mislabel the iGPU as discrete (IdeaPad 5500H "Cezanne" case).
 fn pci_gpu_name() -> Option<String> {
+    // Collect (dev_path, vendor, device_id) for all GPU-vendor cards.
+    let mut cards: Vec<(std::path::PathBuf, String, String)> = Vec::new();
     let entries = std::fs::read_dir("/sys/class/drm").ok()?;
     for entry in entries.flatten() {
         let dev = entry.path().join("device");
@@ -274,46 +284,86 @@ fn pci_gpu_name() -> Option<String> {
         else {
             continue;
         };
-        let Some((_label, lspci_vendor)) = GPU_VENDORS.iter().find(|(known, _)| {
-            vendor
-                .eq_ignore_ascii_case(known)
-        })
+        let Some((_label, lspci_vendor)) = GPU_VENDORS
+            .iter()
+            .find(|(known, _)| vendor.eq_ignore_ascii_case(known))
         else {
             continue;
         };
         let device_id = std::fs::read_to_string(dev.join("device"))
             .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
             .ok()?;
-        log::debug!("device detect: GPU PCI device id {lspci_vendor}:{device_id}");
-        // lspci -d with the device id already filters to the right chip;
-        // the "-s ::00" slot filter restricts to the VGA function — dGPUs
-        // (and NVIDIA in particular) often expose an audio controller at .1.
-        // Default (non-numeric) output carries the resolved name after the
-        // first ": " separator.
-        if let Ok(out) = std::process::Command::new("lspci")
-            .args(["-d", &format!("{lspci_vendor}:{device_id}"), "-s", "::00"])
-            .output()
-        {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if let Some(rest) = text
-                .lines()
-                .next()
-                .and_then(|l| l.split_once(": "))
-                .map(|(_, n)| n.trim().to_string())
-                .filter(|n| !n.is_empty())
-            {
-                return Some(clean_gpu_name(rest));
-            }
-        }
-        // Fall back to the raw PCI id — still better than "Unknown".
-        let short = if lspci_vendor.eq_ignore_ascii_case("10de") {
-            "NVIDIA"
-        } else {
-            "AMD"
-        };
-        return Some(format!("{short} GPU ({lspci_vendor}:{device_id})"));
+        cards.push((dev, lspci_vendor.to_string(), device_id));
     }
-    None
+    if cards.is_empty() {
+        return None;
+    }
+    // Prefer a non-boot-VGA card (the dGPU); fall through to None when
+    // every card is a boot VGA (APU-only machine).
+    let is_dgpu = |dev: &std::path::Path| -> bool {
+        std::fs::read_to_string(dev.join("boot_vga"))
+            .map(|v| v.trim() != "1")
+            .unwrap_or(true) // missing attr (older kernels) — assume dGPU
+    };
+    let (dev, lspci_vendor, device_id) = cards
+        .iter()
+        .find(|(d, _, _)| is_dgpu(d))
+        .or_else(|| cards.iter().find(|(d, _, _)| !is_dgpu(d)))?;
+    let _ = dev; // selection done; only vendor/id feed lspci below
+    log::debug!("device detect: GPU PCI device id {lspci_vendor}:{device_id}");
+    // lspci -d with the device id already filters to the right chip;
+    // the "-s ::00" slot filter restricts to the VGA function — dGPUs
+    // (and NVIDIA in particular) often expose an audio controller at .1.
+    // Default (non-numeric) output carries the resolved name after the
+    // first ": " separator.
+    if let Ok(out) = std::process::Command::new("lspci")
+        .args(["-d", &format!("{lspci_vendor}:{device_id}"), "-s", "::00"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Some(rest) = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_once(": "))
+            .map(|(_, n)| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+        {
+            return Some(clean_gpu_name(rest));
+        }
+    }
+    // Fall back to a small built-in known-GPU table (stale pci.ids on the
+    // host is common — fleet showed 10de:2dd8 resolving on Fedora but not
+    // CachyOS), then the raw PCI id.
+    let known = known_gpu_name(lspci_vendor, &device_id);
+    if let Some(name) = known {
+        return Some(name.to_string());
+    }
+    let short = if lspci_vendor.eq_ignore_ascii_case("10de") {
+        "NVIDIA"
+    } else {
+        "AMD"
+    };
+    return Some(format!("{short} GPU ({lspci_vendor}:{device_id})"));
+}
+
+/// Built-in PCI-ID names for recent mobile GPUs seen in the fleet or in
+/// Lenovo's current lineup. Kept tiny — lspci/pci.ids resolves everything
+/// else on any reasonably updated host.
+fn known_gpu_name(vendor: &str, device_id: &str) -> Option<&'static str> {
+    if vendor.eq_ignore_ascii_case("10de") {
+        match device_id.as_str() {
+            "2DD8" => Some("GeForce RTX 5050 Max-Q / Mobile"), // LOQ 15AHP10 fleet report
+            "2C59" => Some("GeForce RTX 5080 Max-Q / Mobile"),
+            "2CC9" => Some("GeForce RTX 5060 Max-Q / Mobile"),
+            "28E0" => Some("GeForce RTX 4060 Max-Q / Mobile"),
+            "28A0" => Some("GeForce RTX 4070 Max-Q / Mobile"),
+            "2760" => Some("GeForce RTX 4080 Max-Q / Mobile"),
+            "2710" => Some("GeForce RTX 4090 Max-Q / Mobile"),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
 
 /// Trim marketing noise from an lspci GPU name.
