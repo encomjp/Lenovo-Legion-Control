@@ -4,10 +4,10 @@ Last updated: 2026-08-28
 
 ## Next up
 
-### Ship v0.1.1
-- Artifacts built at `888d14f` (AppImage, deb, rpm, Arch) in `lenovo-legion-tool/packaging/out/` + `packaged/`.
-- Waiting on a fresh first-run validation of the new 5-step guided setup (welcome → Enable service autoinstall → Startup & tuning (autostart + daemon boot-enable + ryzen_smu) → Hardware → SelfCheck) on a wiped host.
-- Then: `gh release create v0.1.1` + upload the four artifacts (AppImage, deb, rpm, Arch pkg).
+### ~~Ship v0.1.1~~ — SHIPPED 2026-08-28
+- Artifacts built at `10f6f69` (slug fix) (AppImage, deb, rpm, Arch) in `lenovo-legion-tool/packaging/out/` + `packaged/`.
+- Published: https://github.com/encomjp/Lenovo-Legion-Control/releases/tag/v0.1.1 (AppImage, tar.gz, deb, rpm, Arch pkg); repo public.
+
 
 ### Fresh first-run validation checklist
 - [ ] Welcome: telemetry ON default + privacy-policy link, red "Keep on" first.
