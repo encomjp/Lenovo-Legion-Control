@@ -99,10 +99,15 @@ fn detect_uncached() -> DeviceInfo {
             name
         }
         None => {
-            log::debug!(
-                "device detect: gpu detection via nvidia-smi returned nothing — using \"Unknown\""
-            );
-            "Unknown".into()
+            // nvidia-smi returns nothing when the dGPU is runtime-suspended
+            // (LOQ fleet report: dgpu_probe "powered down"). Fall back to a
+            // PCI-ID lookup on /sys/class/drm so the report still names the
+            // chip instead of "Unknown".
+            log::debug!("device detect: nvidia-smi empty — falling back to PCI ID lookup");
+            pci_gpu_name().unwrap_or_else(|| {
+                log::debug!("device detect: pci lookup found nothing — using \"Unknown\"");
+                "Unknown".to_string()
+            })
         }
     };
     let cpu = match read_cpu_model() {
@@ -246,6 +251,75 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
         platform_profiles,
         has_custom_profile: has_custom,
     }
+}
+
+/// Best-effort dGPU name from PCI vendor/device IDs when nvidia-smi has no
+/// data (runtime-suspended GPU). Scans drm cards for vendor 0x10de (NVIDIA),
+/// then resolves the name via /usr/share/hwdata/pci.ids or lspci.
+fn pci_gpu_name() -> Option<String> {
+    const NVIDIA: &str = "0x10de";
+    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
+    for entry in entries.flatten() {
+        let dev = entry.path().join("device");
+        if std::fs::read_to_string(dev.join("vendor"))
+            .map(|v| v.trim().eq_ignore_ascii_case(NVIDIA))
+            .unwrap_or(false)
+        {
+            let device_id = std::fs::read_to_string(dev.join("device"))
+                .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
+                .ok()?;
+            log::debug!("device detect: nvidia PCI device id {device_id:?}");
+            // Prefer lspci (resolves even without pci.ids installed). The
+            // ":00" class filter restricts to the VGA function — NVIDIA
+            // dGPUs also expose an audio controller at .1 which would
+            // otherwise pollute the match.
+            if let Ok(out) = std::process::Command::new("lspci")
+                .args(["-d", &format!("10de:{device_id}"), "-s", "::00"])
+                .output()
+            {
+                let text = String::from_utf8_lossy(&out.stdout);
+                for line in text.lines() {
+                    // "01:00.0 0302: 10de:2c59 (rev a1)"
+                    let cols: Vec<&str> = line.split_whitespace().collect();
+                    if cols.len() >= 3 && cols[2].eq_ignore_ascii_case(&format!("10de:{device_id}"))
+                    {
+                        if let Ok(name) = std::process::Command::new("lspci")
+                            .args(["-d", &format!("10de:{device_id}"), "-s", "::00"])
+                            .output()
+                        {
+                            let named = String::from_utf8_lossy(&name.stdout);
+                            if let Some(rest) = named
+                                .lines()
+                                .next()
+                                .and_then(|l| l.split_once(": "))
+                                .map(|(_, n)| n.trim().to_string())
+                            {
+                                return Some(clean_gpu_name(rest));
+                            }
+                        }
+                    }
+                }
+            }
+            // Fall back to the raw PCI id — still better than "Unknown".
+            return Some(format!("NVIDIA GPU (10de:{device_id})"));
+        }
+    }
+    None
+}
+
+/// Trim marketing noise from an lspci GPU name.
+fn clean_gpu_name(raw: String) -> String {
+    let t = raw.trim();
+    // "NVIDIA Corporation AD106M [RTX 4070 Max-Q / Mobile]" → keep the
+    // bracketed marketing name when present, else the plain tail.
+    if let (Some(open), Some(close)) = (t.find('['), t.rfind(']')) {
+        if open < close {
+            return t[open + 1..close].to_string();
+        }
+    }
+    t.strip_prefix("NVIDIA Corporation ")
+        .unwrap_or(t)
+        .to_string()
 }
 
 fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapability>) {

@@ -254,9 +254,11 @@ fn classify(
         }
         let summary = format!("Smart amp not working — missing {}", why.join(" / "));
         details.push(
-            "Soft reset cannot invent the AW88399 driver. Need aw88399_acf.bin + \
-             CONFIG_SND_HDA_SCODEC_AW88399* (CachyOS patched kernel or \
-             github.com/marco-giunta/legion-pro7-gen10-audio)."
+            "Soft reset cannot invent the AW88399 driver. Need aw88399_acf.bin in \
+             /lib/firmware + CONFIG_SND_HDA_SCODEC_AW88399* (kernel 7.3+ ships it; \
+             on CachyOS 7.2 it is already built in — usually only the firmware \
+             file is missing). Reference: \
+             github.com/marco-giunta/legion-pro7-gen10-audio."
                 .into(),
         );
         return (Health::HardwareBroken, summary, details, soft);
@@ -586,8 +588,19 @@ fn looks_like_gen10_smart_amp_model() -> bool {
     let ver = std::fs::read_to_string("/sys/class/dmi/id/product_version")
         .unwrap_or_default()
         .to_uppercase();
-    const HINTS: &[&str] = &["16AFR10H", "16IAX10H", "16IRX10", "16IAX10", "16ARP10"];
-    HINTS.iter().any(|h| ver.contains(h))
+    let name = std::fs::read_to_string("/sys/class/dmi/id/product_name")
+        .unwrap_or_default()
+        .to_uppercase();
+    const HINTS: &[&str] = &[
+        // Legion Pro 7 / Pro 7i Gen 10 (16AFR10H / 16IAX10H) — the reference
+        // AW88399 models; R9000P ADR10(H) and Y9000P IAX10 share the amp per
+        // marco-giunta/legion-pro7-gen10-audio; LOQ 15IRX10/15IAX10 match the
+        // "Gen 10 IRX/IAX" naming. Checked against product_version AND
+        // product_name (83JG-style DMI names differ between the two files).
+        "16AFR10H", "16IAX10H", "16IRX10", "16IAX10", "16ARP10", "ADR10", "IAX10H",
+        "83RU", "83JG", "R9000P", "Y9000P",
+    ];
+    HINTS.iter().any(|h| ver.contains(h) || name.contains(h))
 }
 
 /// Prefer the Realtek/ALC onboard card (not NVIDIA HDMI).

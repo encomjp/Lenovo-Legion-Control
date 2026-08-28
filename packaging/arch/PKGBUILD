@@ -1,5 +1,5 @@
 pkgname=legion-control
-pkgver=0.1.2
+pkgver=0.1.3
 pkgrel=1
 pkgdesc='Lenovo Legion hardware control daemon, CLI, GTK app, and KDE widget'
 arch=('x86_64')
