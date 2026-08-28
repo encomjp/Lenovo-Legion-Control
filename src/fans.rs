@@ -15,6 +15,24 @@ fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
     BACKEND
         .get_or_init(|| {
             if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
+                // Some models (LOQ 15AHP10/83JG) bind lenovo_wmi_other but the
+                // EC tachometer reads 0 — yogafan carries the live RPM there.
+                if let Some(yw) = hwmon_by_name("yogafan") {
+                    let any_live = (1..=4).any(|id| {
+                        std::fs::read_to_string(yw.join(format!("fan{id}_input")))
+                            .ok()
+                            .and_then(|s| s.trim().parse::<u32>().ok())
+                            .unwrap_or(0)
+                            > 0
+                    });
+                    if any_live {
+                        log::debug!(
+                            "fans::fan_hwmon: lenovo_wmi_other reads 0 — using yogafan at {}",
+                            yw.display()
+                        );
+                        return Some(("yogafan".into(), yw));
+                    }
+                }
                 log::debug!(
                     "fans::fan_hwmon: backend lenovo_wmi_other at {}",
                     hw.display()

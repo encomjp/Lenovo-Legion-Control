@@ -546,6 +546,17 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         source: "LenovoLegionLinux legion-laptop.c",
     },
     ModelProfile {
+        machine_type: Some("83JG"),
+        bios_prefix: "R8CN",
+        marketing: "LOQ 15AHP10",
+        series: "LOQ",
+        gen: 10,
+        fans: FanLayout::Two,
+        fan_rpm_fallback: FALLBACK_2FAN,
+        notes: "2025 LOQ (Ryzen 200-series). EC IT5508 locked: lenovo_wmi_other hwmon reads 0 RPM, ACPI temp paths error -5 (WMI3 works). RPM lives in yogafan hwmon (EC 0xFE/0xFF via \\_SB.PCI0.LPC0.EC0.FANS/FA2S, 16-bit). PPT: SPL 25-48 W, SPPT 35-43 W, FPPT 45-53 W.",
+        source: "fleet telemetry (83JG) + LenovoLegionLinux #384/#453/#467 + kernel yogafan.c",
+    },
+    ModelProfile {
         machine_type: None,
         bios_prefix: "R3CN",
         marketing: "LOQ 15IRX10",

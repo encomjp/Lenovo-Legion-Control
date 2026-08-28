@@ -252,6 +252,22 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
     if let Some(hw) = crate::sensors::hwmon_by_name("lenovo_wmi_other") {
         let fans = collect_fans_from_hwmon(&hw, profile);
         if !fans.is_empty() {
+            // Some models (LOQ 15AHP10/83JG, LenovoLegionLinux #384) bind
+            // lenovo_wmi_other but the EC reports 0 RPM — the real tachometer
+            // lives in the yogafan hwmon. Prefer yogafan when it has nonzero
+            // readings.
+            if let Some(yw) = crate::sensors::hwmon_by_name("yogafan") {
+                let yfans = collect_fans_from_hwmon(&yw, profile);
+                if yfans.iter().any(|f| f.current_rpm > 0)
+                    && fans.iter().all(|f| f.current_rpm == 0)
+                {
+                    log::debug!(
+                        "fan probe: lenovo_wmi_other reads 0 RPM — yogafan backend at {} has live values",
+                        yw.display()
+                    );
+                    return ("yogafan".into(), yfans);
+                }
+            }
             log::debug!(
                 "fan probe: backend lenovo_wmi_other at {} ({} fans)",
                 hw.display(),
