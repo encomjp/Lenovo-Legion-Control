@@ -190,7 +190,6 @@ pub(crate) fn show_welcome_if_needed(
             }
         });
     }
-
         page.append(&telemetry_group);
     page.append(&privacy_link);
     page.append(&actions);
