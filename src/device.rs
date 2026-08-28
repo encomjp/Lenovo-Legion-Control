@@ -269,35 +269,24 @@ fn pci_gpu_name() -> Option<String> {
                 .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
                 .ok()?;
             log::debug!("device detect: nvidia PCI device id {device_id:?}");
-            // Prefer lspci (resolves even without pci.ids installed). The
-            // ":00" class filter restricts to the VGA function — NVIDIA
-            // dGPUs also expose an audio controller at .1 which would
-            // otherwise pollute the match.
+            // lspci -d with the device id already filters to the right chip;
+            // the "-s ::00" slot filter restricts to the VGA function —
+            // NVIDIA dGPUs also expose an audio controller at .1. Default
+            // (non-numeric) output carries the resolved name after the
+            // first ": " separator.
             if let Ok(out) = std::process::Command::new("lspci")
                 .args(["-d", &format!("10de:{device_id}"), "-s", "::00"])
                 .output()
             {
                 let text = String::from_utf8_lossy(&out.stdout);
-                for line in text.lines() {
-                    // "01:00.0 0302: 10de:2c59 (rev a1)"
-                    let cols: Vec<&str> = line.split_whitespace().collect();
-                    if cols.len() >= 3 && cols[2].eq_ignore_ascii_case(&format!("10de:{device_id}"))
-                    {
-                        if let Ok(name) = std::process::Command::new("lspci")
-                            .args(["-d", &format!("10de:{device_id}"), "-s", "::00"])
-                            .output()
-                        {
-                            let named = String::from_utf8_lossy(&name.stdout);
-                            if let Some(rest) = named
-                                .lines()
-                                .next()
-                                .and_then(|l| l.split_once(": "))
-                                .map(|(_, n)| n.trim().to_string())
-                            {
-                                return Some(clean_gpu_name(rest));
-                            }
-                        }
-                    }
+                if let Some(rest) = text
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split_once(": "))
+                    .map(|(_, n)| n.trim().to_string())
+                    .filter(|n| !n.is_empty())
+                {
+                    return Some(clean_gpu_name(rest));
                 }
             }
             // Fall back to the raw PCI id — still better than "Unknown".
