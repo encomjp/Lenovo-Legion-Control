@@ -36,3 +36,7 @@ __pycache__/
 # Nested repo (lenovo-legion-tool has its own git repo + remote)
 lenovo-legion-tool/
 .zcode/
+
+# Agent scratch / internal notes — never publish
+AGENTS.md
+docs/superpowers/
