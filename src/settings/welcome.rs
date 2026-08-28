@@ -72,7 +72,7 @@ pub(crate) fn show_welcome_if_needed(
     brand.append(&brand_text);
 
     let intro = gtk::Label::new(Some(
-        "Choose optional components now, or change everything later under About → Setup.",
+        "Choose optional components now, or change everything later under Settings → Setup.",
     ));
     intro.set_halign(Align::Start);
     intro.set_wrap(true);
@@ -89,7 +89,7 @@ pub(crate) fn show_welcome_if_needed(
         "One anonymized report per minute: hardware model, distro/kernel, sensors, \
          fan/battery stats, self-check results. NEVER included: hostname, username, \
          serials, MACs, IPs, key colors, custom profile names. \
-         Change any time under About → Setup.",
+         Change any time under Settings → Setup.",
     );
     let telemetry_group = pref_group("Alpha telemetry", None);
     telemetry_group.add(&telemetry_row);
@@ -135,7 +135,7 @@ pub(crate) fn show_welcome_if_needed(
     tip(&later_btn, "Skip for now — nothing else changes");
     let setup_btn = primary_button_tip(
         "First-time setup",
-        Some("Guided walkthrough: service, hardware, self-check, telemetry"),
+        Some("Guided walkthrough: service, hardware, self-check"),
     );
     actions.append(&later_btn);
     actions.append(&setup_btn);
@@ -204,27 +204,24 @@ pub(crate) fn show_welcome_if_needed(
 /// and chains into the next via its response handler.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SetupStep {
-    /// Probe the privileged control service over IPC.
+    /// Probe the privileged control service over IPC (autoinstalls if missing).
     Daemon,
     /// Identify model, machine type, CPU, GPU, and fan channels.
     Hardware,
     /// Read-only self-checks plus the fault scan.
     SelfCheck,
-    /// Opt-out choice for anonymous diagnostics.
-    Telemetry,
     /// Summary; closing returns to the main view.
     Done,
 }
 
 impl SetupStep {
-    /// 1-based position for dialog titles ("First-time setup (2/5) — …").
+    /// 1-based position for dialog titles ("First-time setup (2/4) — …").
     fn number(self) -> usize {
         match self {
             SetupStep::Daemon => 1,
             SetupStep::Hardware => 2,
             SetupStep::SelfCheck => 3,
-            SetupStep::Telemetry => 4,
-            SetupStep::Done => 5,
+            SetupStep::Done => 4,
         }
     }
 
@@ -233,8 +230,7 @@ impl SetupStep {
         match self {
             SetupStep::Daemon => SetupStep::Hardware,
             SetupStep::Hardware => SetupStep::SelfCheck,
-            SetupStep::SelfCheck => SetupStep::Telemetry,
-            SetupStep::Telemetry | SetupStep::Done => SetupStep::Done,
+            SetupStep::SelfCheck | SetupStep::Done => SetupStep::Done,
         }
     }
 }
@@ -255,8 +251,8 @@ pub(crate) struct SetupCtx {
 }
 
 /// Guided first-launch walkthrough behind the welcome dialog's "First-time
-/// setup" response: five chained alert dialogs (service probe, hardware
-/// identity, self-check, telemetry opt-in, summary). Every probe runs on a
+/// setup" response: four chained alert dialogs (service probe/autoinstall,
+/// hardware identity, self-check, summary). Every probe runs on a
 /// `dispatch_async` worker thread; each dialog appears once its result is in.
 pub(crate) fn run_guided_setup(
     stack: &adw::ViewStack,
@@ -287,7 +283,6 @@ impl SetupCtx {
             SetupStep::Daemon => self.daemon_step(),
             SetupStep::Hardware => self.hardware_step(),
             SetupStep::SelfCheck => self.selfcheck_step(),
-            SetupStep::Telemetry => self.telemetry_step(),
             SetupStep::Done => self.done_step(),
         }
     }
@@ -328,7 +323,10 @@ impl SetupCtx {
         });
     }
 
-    /// Step 1 — is the privileged control service reachable?
+    /// Step 1 — is the privileged control service reachable? If not, offer
+    /// one-click autoinstall via the PolicyKit helper (the same path the
+    /// Settings → Setup Enable button uses). Retry re-probes; Enable runs
+    /// `start_legion_control()` off-thread and advances on success.
     fn daemon_step(self) {
         // Connecting to the socket can block briefly — probe off-thread.
         dispatch_async(
@@ -347,13 +345,58 @@ impl SetupCtx {
                     );
                     self.present(dialog, |_| Some(SetupStep::Hardware));
                 }
-                Err(_) => self.retryable_failure(
-                    SetupStep::Daemon,
-                    "Control service",
-                    "Control service is not running.",
-                    "Run:\nsudo systemctl enable --now legion-control\n\n\
-                     You can continue without it — detection and self-checks work.",
-                ),
+                Err(_) => {
+                    let dialog = setup_step_dialog(
+                        SetupStep::Daemon,
+                        "Control service",
+                        "Control service is not running.\n\n\
+                         Enable it now? One system prompt will install and start \
+                         the privileged service.\n\n\
+                         You can continue without it — detection and self-checks work.",
+                        [
+                            ("enable", "Enable service"),
+                            ("continue", "Continue anyway"),
+                        ],
+                        "enable",
+                    );
+                    dialog.set_response_appearance("enable", adw::ResponseAppearance::Suggested);
+                    let ctx = self.clone();
+                    let ctx_for_closure = ctx.clone();
+                    dialog.connect_response(None, move |_, response| {
+                        match response {
+                            "enable" => {
+                                let ctx2 = ctx_for_closure.clone();
+                                // One authorized transaction — same helper the
+                                // Settings page uses; shows the system password prompt.
+                                dispatch_async(
+                                    || start_legion_control().map(|_| ()),
+                                    "Enable service stopped without a result",
+                                    move |res| match res {
+                                        Ok(()) => {
+                                            let ok_dialog = setup_step_dialog(
+                                                SetupStep::Daemon,
+                                                "Control service",
+                                                "✓ Control service enabled and running.",
+                                                [("continue", "Continue")],
+                                                "continue",
+                                            );
+                                            ctx2.present(ok_dialog, |_| Some(SetupStep::Hardware));
+                                        }
+                                        Err(e) => ctx2.retryable_failure(
+                                            SetupStep::Daemon,
+                                            "Control service",
+                                            "Could not enable service.",
+                                            &e,
+                                        ),
+                                    },
+                                );
+                            }
+                            "continue" => ctx_for_closure.clone().run(SetupStep::Hardware),
+                            _ => {}
+                        }
+                    });
+                    dialog.present(ctx.win.as_ref());
+                }
             },
         );
     }
@@ -453,7 +496,7 @@ impl SetupCtx {
                         [("continue", "Continue")],
                         "continue",
                     );
-                    self.present(dialog, |_| Some(SetupStep::Telemetry));
+                    self.present(dialog, |_| Some(SetupStep::Done));
                 }
                 Err(error) => self.retryable_failure(
                     SetupStep::SelfCheck,
@@ -465,50 +508,7 @@ impl SetupCtx {
         );
     }
 
-    /// Step 4 — telemetry opt-in. ON by default; Keep is the suggested
-    /// red/destructive top button and links to the privacy policy.
-    fn telemetry_step(self) {
-        let dialog = setup_step_dialog(
-            SetupStep::Telemetry,
-            "Anonymous diagnostics",
-            "ON by default: one anonymized report per minute.\n\n\
-             Included: hardware model, distro/kernel, sensors,\n\
-             fan/battery stats, self-check results.\n\
-             Never: hostname · username · serials · MACs · IPs · key colors.\n\n\
-             Turn it off now to opt out, or later under Setup → Alpha diagnostics.",
-            [("keep", "Keep on"), ("optout", "Opt out")],
-            "keep",
-        );
-        // Keep ON — red (destructive) and still the default / top button.
-        dialog.set_response_appearance("keep", adw::ResponseAppearance::Destructive);
-        let policy = gtk::LinkButton::with_label(
-            "https://github.com/encomjp/lenovo-legion-tool#alpha-telemetry-opt-out",
-            "Privacy policy",
-        );
-        policy.add_css_class("flat");
-        let extra = gtk::Box::new(Orientation::Horizontal, 0);
-        extra.set_halign(Align::Center);
-        extra.append(&policy);
-        dialog.set_extra_child(Some(&extra));
-        let ctx = self.clone();
-        self.present(dialog, move |response| match response {
-            "optout" => {
-                // Nudge before actually opting out — telemetry stays on unless
-                // they explicitly confirm. Route to Done only after the nudge settles.
-                let ctx2 = ctx.clone();
-                let win = ctx2.win.clone();
-                confirm_disable_telemetry(win.as_ref(), move |confirmed| {
-                    if confirmed {
-                        ctx2.disable_telemetry();
-                    }
-                    ctx2.run(SetupStep::Done);
-                });
-                None
-            }
-            _ => Some(SetupStep::Done),
-        });
-    }
-
+    #[allow(dead_code)]
     /// Flip every telemetry surface off at once: persisted config, the
     /// shared consent cell gating Send-now, and the live Setup-page switch.
     fn disable_telemetry(&self) {
@@ -521,8 +521,8 @@ impl SetupCtx {
         self.sync.set(false);
     }
 
-    /// Step 5 — farewell. Close returns to the main view; the secondary
-    /// button keeps the old About → Setup shortcut within reach.
+    /// Step 4 — farewell. Close returns to the main view; the secondary
+    /// button keeps the old Settings → Setup shortcut within reach.
     fn done_step(self) {
         let dialog = setup_step_dialog(
             SetupStep::Done,

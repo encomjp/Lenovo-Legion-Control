@@ -169,9 +169,8 @@ const PAGE_TITLES: &[(&str, &str)] = &[
     ("cooling-fans", "Cooling"),
     ("lighting", "Lighting"),
     ("battery-status", "Battery"),
-    ("fix", "Fix"),
     ("profiles", "Profiles"),
-    ("about", "About"),
+    ("about", "Settings"),
 ];
 
 fn page_title(name: &str) -> Option<&'static str> {
@@ -185,11 +184,11 @@ fn page_title(name: &str) -> Option<&'static str> {
 fn top_level_page(id: &str) -> &'static str {
     match id {
         "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" => "cpu",
-        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" => "about",
+        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" | "fix"
+        | "fix-audio" | "fix-lighting" | "fix-logs" => "about",
         "lighting" | "lighting-keyboard" | "lighting-front" | "lighting-rear" | "lighting-logo"
         | "lighting-more" => "lighting",
         "battery-status" | "battery-limit" => "battery-status",
-        "fix" | "fix-audio" | "fix-lighting" | "fix-logs" => "fix",
         "cooling-fans" => "cooling-fans",
         "profiles" => "profiles",
         _ => "overview",
@@ -206,14 +205,14 @@ fn hub_initial_tab(id: &str) -> Option<&'static str> {
         "about-setup" => Some("setup"),
         "about-hardware" | "about-storage" => Some("hardware"),
         "about-help" => Some("help"),
+        "fix" | "fix-audio" => Some("fix"),
+        "fix-lighting" => Some("fix"),
+        "fix-logs" => Some("fix"),
         "lighting-keyboard" => Some("keyboard"),
         "lighting-front" => Some("front"),
         "lighting-rear" => Some("rear"),
         "lighting-logo" => Some("logo"),
         "lighting-more" => Some("more"),
-        "fix-audio" => Some("fix-audio"),
-        "fix-lighting" => Some("fix-lighting"),
-        "fix-logs" => Some("fix-logs"),
         _ => None,
     }
 }
@@ -274,7 +273,7 @@ fn wait_for_daemon_socket() -> Result<(), String> {
 
 /// Try to start the service without prompting, then use one authorized setup
 /// transaction. Do not chain run0 and pkexec: both can open an auth dialog.
-fn start_legion_control() -> Result<(), String> {
+pub(crate) fn start_legion_control() -> Result<(), String> {
     log::info!("trying to start daemon via: systemctl start legion-control");
     match std::process::Command::new("systemctl")
         .args(["start", "legion-control"])
@@ -345,7 +344,7 @@ fn is_version_skew_error(e: &str) -> bool {
 /// GTK main loop via a 100 ms poll. Nothing in `work` may touch widgets.
 /// If the worker dies before sending (panic), `done` receives
 /// `Err(stopped_msg)`.
-fn dispatch_async<T, F>(
+pub(crate) fn dispatch_async<T, F>(
     work: F,
     stopped_msg: &'static str,
     done: impl FnOnce(Result<T, String>) + 'static,
@@ -439,13 +438,10 @@ fn build_ui(app: &adw::Application) {
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
     let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
-    let fix_initial = legion_page_req
-        .as_deref()
-        .and_then(hub_initial_tab)
-        .filter(|id| ["fix-audio", "fix-lighting", "fix-logs"].contains(id));
-    let fix_page = build_fix_page(&toast_overlay, &daemon_gate, fix_initial);
+    // Fix is now a tab inside Settings — keep the left rail short.
+    let fix_compact = build_fix_compact(&toast_overlay, &daemon_gate);
     // Shared suppress flag: programmatic telemetry switches (welcome window,
-    // guided setup) must not re-trigger the About page's opt-out nudge.
+    // guided setup) must not re-trigger the Settings page's opt-out nudge.
     let telemetry_sync: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let (
         about_setup_page,
@@ -481,6 +477,7 @@ fn build_ui(app: &adw::Application) {
     let (about_hub, about_tabs) = hub_page(
         vec![
             (about_setup_page, "setup", "Setup"),
+            (fix_compact, "fix", "Fix"),
             (about_hardware_page, "hardware", "Hardware"),
             (about_help_page, "help", "Help"),
         ],
@@ -519,7 +516,6 @@ fn build_ui(app: &adw::Application) {
         Some("battery-status"),
         "Battery",
     );
-    stack.add_titled(&page_shell(&fix_page), Some("fix"), "Fix");
     stack.add_titled(
         &page_shell(&build_profiles_page(
             &toast_overlay,
@@ -530,7 +526,7 @@ fn build_ui(app: &adw::Application) {
         Some("profiles"),
         "Profiles",
     );
-    stack.add_titled(&about_hub, Some("about"), "About");
+    stack.add_titled(&about_hub, Some("about"), "Settings");
 
     let sidebar_box = gtk::Box::new(Orientation::Vertical, 0);
     let brand = gtk::Box::new(Orientation::Horizontal, 12);
@@ -593,19 +589,14 @@ fn build_ui(app: &adw::Application) {
             "Status and charge limit",
         ),
         (
-            include_bytes!("../../data/icons/fix.svg"),
-            "Fix",
-            "Diagnostics and repair — speakers, Spectrum RGB, service logs",
-        ),
-        (
             include_bytes!("../../data/icons/profiles.svg"),
             "Profiles",
             "Save and restore presets",
         ),
         (
             include_bytes!("../../data/icons/about.svg"),
-            "About",
-            "Setup, hardware, help",
+            "Settings",
+            "Setup, fix, hardware, help",
         ),
     ] {
         let row = adw::ActionRow::builder()
@@ -907,14 +898,14 @@ fn build_ui(app: &adw::Application) {
     );
     stack.add_titled(&cpu_hub, Some("cpu"), "CPU");
 
-    // One flat list: row order mirrors the rail above.
+    // One flat list: row order mirrors the rail above. Fix lives inside
+    // Settings — keep the rail short.
     const FLAT_IDS: &[&str] = &[
         "overview",
         "cpu",
         "cooling-fans",
         "lighting",
         "battery-status",
-        "fix",
         "profiles",
         "about",
     ];
@@ -2100,7 +2091,7 @@ mod tests {
                 let _ = hub;
                 let valid = match top {
                     "cpu" => ["features", "tuning", "power"].contains(&tab),
-                    "about" => ["setup", "hardware", "help"].contains(&tab),
+                    "about" => ["setup", "fix", "hardware", "help"].contains(&tab),
                     "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
                     "lighting" => ["keyboard", "front", "rear", "logo", "more"].contains(&tab),
                     _ => false,

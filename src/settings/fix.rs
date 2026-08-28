@@ -194,6 +194,17 @@ pub(crate) fn build_fix_logs_page(
     page
 }
 
+/// Compact Fix for embedding inside Settings — one scrollable page with
+/// the three diagnostics as stacked cards, no extra ViewSwitcher.
+pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
+    let page = page_lede("");
+    page.append(&build_speakers_section(toast_overlay));
+    page.append(&build_lighting_reset_section(toast_overlay, gate));
+    page.append(&build_udev_permanent_section(toast_overlay));
+    page.append(&build_logs_section(toast_overlay, gate));
+    page
+}
+
 pub(crate) fn build_lighting_reset_section(
     toast_overlay: &adw::ToastOverlay,
     gate: &DaemonGate,
