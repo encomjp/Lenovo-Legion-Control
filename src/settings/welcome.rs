@@ -135,7 +135,7 @@ pub(crate) fn show_welcome_if_needed(
     tip(&later_btn, "Skip for now — nothing else changes");
     let setup_btn = primary_button_tip(
         "First-time setup",
-        Some("Guided walkthrough: service, hardware, self-check"),
+        Some("Guided walkthrough: service, startup & tuning, hardware, self-check"),
     );
     actions.append(&later_btn);
     actions.append(&setup_btn);
@@ -206,6 +206,9 @@ pub(crate) fn show_welcome_if_needed(
 pub(crate) enum SetupStep {
     /// Probe the privileged control service over IPC (autoinstalls if missing).
     Daemon,
+    /// Start-on-boot choice: login autostart + daemon systemd enable,
+    /// optional AMD tuning backend (Curve Optimizer undervolt).
+    Startup,
     /// Identify model, machine type, CPU, GPU, and fan channels.
     Hardware,
     /// Read-only self-checks plus the fault scan.
@@ -215,20 +218,22 @@ pub(crate) enum SetupStep {
 }
 
 impl SetupStep {
-    /// 1-based position for dialog titles ("First-time setup (2/4) — …").
+    /// 1-based position for dialog titles ("First-time setup (2/5) — …").
     fn number(self) -> usize {
         match self {
             SetupStep::Daemon => 1,
-            SetupStep::Hardware => 2,
-            SetupStep::SelfCheck => 3,
-            SetupStep::Done => 4,
+            SetupStep::Startup => 2,
+            SetupStep::Hardware => 3,
+            SetupStep::SelfCheck => 4,
+            SetupStep::Done => 5,
         }
     }
 
     /// The step that follows this one (Done is its own successor).
     fn next(self) -> Self {
         match self {
-            SetupStep::Daemon => SetupStep::Hardware,
+            SetupStep::Daemon => SetupStep::Startup,
+            SetupStep::Startup => SetupStep::Hardware,
             SetupStep::Hardware => SetupStep::SelfCheck,
             SetupStep::SelfCheck | SetupStep::Done => SetupStep::Done,
         }
@@ -251,9 +256,10 @@ pub(crate) struct SetupCtx {
 }
 
 /// Guided first-launch walkthrough behind the welcome dialog's "First-time
-/// setup" response: four chained alert dialogs (service probe/autoinstall,
-/// hardware identity, self-check, summary). Every probe runs on a
-/// `dispatch_async` worker thread; each dialog appears once its result is in.
+/// setup" response: five chained alert dialogs (service probe/autoinstall,
+/// startup & tuning, hardware identity, self-check, summary). Every probe
+/// runs on a `dispatch_async` worker thread; each dialog appears once its
+/// result is in.
 pub(crate) fn run_guided_setup(
     stack: &adw::ViewStack,
     about_tabs: Option<&adw::ViewStack>,
@@ -281,6 +287,7 @@ impl SetupCtx {
     fn run(self, step: SetupStep) {
         match step {
             SetupStep::Daemon => self.daemon_step(),
+            SetupStep::Startup => self.startup_step(),
             SetupStep::Hardware => self.hardware_step(),
             SetupStep::SelfCheck => self.selfcheck_step(),
             SetupStep::Done => self.done_step(),
@@ -343,7 +350,7 @@ impl SetupCtx {
                         [("continue", "Continue")],
                         "continue",
                     );
-                    self.present(dialog, |_| Some(SetupStep::Hardware));
+                    self.present(dialog, |_| Some(SetupStep::Startup));
                 }
                 Err(_) => {
                     let dialog = setup_step_dialog(
@@ -380,7 +387,7 @@ impl SetupCtx {
                                                 [("continue", "Continue")],
                                                 "continue",
                                             );
-                                            ctx2.present(ok_dialog, |_| Some(SetupStep::Hardware));
+                                            ctx2.present(ok_dialog, |_| Some(SetupStep::Startup));
                                         }
                                         Err(e) => ctx2.retryable_failure(
                                             SetupStep::Daemon,
@@ -391,7 +398,7 @@ impl SetupCtx {
                                     },
                                 );
                             }
-                            "continue" => ctx_for_closure.clone().run(SetupStep::Hardware),
+                            "continue" => ctx_for_closure.clone().run(SetupStep::Startup),
                             _ => {}
                         }
                     });
@@ -401,7 +408,129 @@ impl SetupCtx {
         );
     }
 
-    /// Step 2 — what machine is this?
+    /// Step 2 — start on boot + optional AMD tuning backend (undervolt).
+    /// One prompt, two switches. Apply also ENABLES the systemd unit so the
+    /// daemon — not just the app — comes up on boot.
+    fn startup_step(self) {
+        let dialog = setup_step_dialog(
+            SetupStep::Startup,
+            "Startup & tuning",
+            "Pick what Legion Control sets up now — change it any time under \
+             Settings → Setup.",
+            [("apply", "Apply"), ("skip", "Skip")],
+            "apply",
+        );
+
+        let autostart_switch = adw::SwitchRow::builder()
+            .title("Launch at login")
+            .subtitle("App starts hidden to tray")
+            .active(true)
+            .build();
+        tip(
+            &autostart_switch,
+            "Adds Legion Control to Desktop autostart (~/.config/autostart) and \
+             enables the legion-control systemd unit so the hardware daemon also \
+             starts on boot.",
+        );
+        let co_switch = adw::SwitchRow::builder()
+            .title("Install AMD tuning backend")
+            .subtitle("Curve Optimizer undervolt (ryzen_smu via DKMS)")
+            .active(true)
+            .build();
+        tip(
+            &co_switch,
+            "Builds and loads the bundled ryzen_smu kernel module through DKMS \
+             (one admin prompt). Needed for Curve Optimizer on the CPU page.",
+        );
+
+        let extra = gtk::Box::new(Orientation::Vertical, 2);
+        extra.set_margin_top(8);
+        extra.set_margin_bottom(8);
+        extra.set_margin_start(12);
+        extra.set_margin_end(12);
+        extra.append(&autostart_switch);
+        extra.append(&co_switch);
+        dialog.set_extra_child(Some(&extra));
+
+        let ctx = self.clone();
+        let ctx_for_closure = ctx.clone();
+        dialog.connect_response(None, move |_, response| {
+            match response {
+                "apply" => {
+                    let want_autostart = autostart_switch.is_active();
+                    let want_co = co_switch.is_active();
+                    let ctx2 = ctx_for_closure.clone();
+                    // Everything here can prompt (pkexec) or touch the disk —
+                    // run off-thread so the dialog never freezes.
+                    dispatch_async(
+                        move || {
+                            let mut report: Vec<String> = Vec::new();
+                            if want_autostart {
+                                set_autostart(true)?;
+                                report.push("App will launch at login (hidden to tray)".into());
+                                // Make sure the daemon also starts on boot: the
+                                // helper's enable-daemon stages + `enable --now`.
+                                let enabled = std::process::Command::new("systemctl")
+                                    .args(["is-enabled", "legion-control"])
+                                    .output()
+                                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                    .unwrap_or_default();
+                                if enabled == "enabled" {
+                                    report.push("Daemon already enabled for boot".into());
+                                } else {
+                                    run_setup_helper_blocking("enable-daemon")?;
+                                    report.push("Daemon enabled for boot".into());
+                                }
+                                if !daemon_ok() {
+                                    start_legion_control()?;
+                                }
+                            }
+                            if want_co {
+                                run_setup_helper_blocking("install-ryzen-smu")?;
+                                report.push(
+                                    "AMD tuning backend installed — Curve Optimizer is \
+                                     on the CPU page"
+                                        .into(),
+                                );
+                            }
+                            Ok(report)
+                        },
+                        "Startup setup stopped without a result",
+                        move |result| match result {
+                            Ok(report) => {
+                                let body = if report.is_empty() {
+                                    "Nothing selected — you can change this later \
+                                     under Settings → Setup."
+                                        .to_string()
+                                } else {
+                                    format!("✓ Done.\n\n{}", report.join("\n"))
+                                };
+                                let ok_dialog = setup_step_dialog(
+                                    SetupStep::Startup,
+                                    "Startup & tuning",
+                                    &body,
+                                    [("continue", "Continue")],
+                                    "continue",
+                                );
+                                ctx2.present(ok_dialog, |_| Some(SetupStep::Hardware));
+                            }
+                            Err(e) => ctx2.retryable_failure(
+                                SetupStep::Startup,
+                                "Startup & tuning",
+                                "Setup could not complete.",
+                                &e,
+                            ),
+                        },
+                    );
+                }
+                "skip" => ctx_for_closure.clone().run(SetupStep::Hardware),
+                _ => {}
+            }
+        });
+        dialog.present(ctx.win.as_ref());
+    }
+
+    /// Step 3 — what machine is this?
     fn hardware_step(self) {
         // Full DMI + GPU probing may spawn nvidia-smi (up to ~3 s) — worker
         // thread keeps the main loop responsive.
@@ -452,7 +581,7 @@ impl SetupCtx {
         );
     }
 
-    /// Step 3 — read-only health checks plus anomaly scan.
+    /// Step 4 — read-only health checks plus anomaly scan.
     fn selfcheck_step(self) {
         // Both probes are fast (<200 ms) but stay off-thread so a slow EC
         // read can never stall the main loop.
@@ -521,7 +650,7 @@ impl SetupCtx {
         self.sync.set(false);
     }
 
-    /// Step 4 — farewell. Close returns to the main view; the secondary
+    /// Step 5 — farewell. Close returns to the main view; the secondary
     /// button keeps the old Settings → Setup shortcut within reach.
     fn done_step(self) {
         let dialog = setup_step_dialog(

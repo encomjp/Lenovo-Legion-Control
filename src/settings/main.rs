@@ -418,7 +418,7 @@ fn apply_charge_limit(pct: u32, done: impl FnOnce(Result<(), String>) + 'static)
     );
 }
 
-fn daemon_ok() -> bool {
+pub(crate) fn daemon_ok() -> bool {
     matches!(
         send_command(DaemonCommand::GetProfile),
         Ok(DaemonResponse::Profile(_))
@@ -1428,7 +1428,7 @@ fn run_daemon_command_async(
 }
 
 /// Run one fixed PolicyKit setup operation synchronously.
-fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
+pub(crate) fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
     if setup_helper_path().is_none() {
         if appimage_root().is_some() {
             log::info!("bootstrap: staging stable setup helper via one PolicyKit transaction");

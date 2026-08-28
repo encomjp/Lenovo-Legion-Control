@@ -2,71 +2,6 @@
 
 use super::*;
 
-pub(crate) fn build_fix_audio_page(toast_overlay: &adw::ToastOverlay) -> gtk::Box {
-    let page = page_lede("");
-    page.append(&build_speakers_section(toast_overlay));
-    page
-}
-
-/// One "Fix" destination with an internal switcher instead of three sidebar
-/// rows — keeps the rail short while all diagnostics stay one click away.
-pub(crate) fn build_fix_page(
-    toast_overlay: &adw::ToastOverlay,
-    gate: &DaemonGate,
-    initial: Option<&str>,
-) -> gtk::Box {
-    let page = page_lede("");
-
-    let inner = adw::ViewStack::new();
-    inner.set_vexpand(true);
-    inner.add_titled(
-        &page_shell(&build_fix_audio_page(toast_overlay)),
-        Some("fix-audio"),
-        "Speakers",
-    );
-    inner.add_titled(
-        &page_shell(&build_fix_lighting_page(toast_overlay, gate)),
-        Some("fix-lighting"),
-        "RGB Fix",
-    );
-    inner.add_titled(
-        &page_shell(&build_fix_logs_page(toast_overlay, gate)),
-        Some("fix-logs"),
-        "Logs",
-    );
-    if let Some(id) = initial {
-        if inner.child_by_name(id).is_some() {
-            inner.set_visible_child_name(id);
-        }
-    }
-
-    // Same horizontal tab bar as the CPU/About/Lighting hubs.
-    let switcher = adw::ViewSwitcher::new();
-    switcher.set_stack(Some(&inner));
-    switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
-    switcher.set_halign(Align::Center);
-    tip(
-        &switcher,
-        "Speaker audio issues · stuck or dark Spectrum RGB · recent control-service output",
-    );
-    let bar = gtk::Box::new(Orientation::Vertical, 0);
-    bar.add_css_class("hub-bar");
-    bar.append(&switcher);
-    page.append(&bar);
-    page.append(&inner);
-    page
-}
-
-pub(crate) fn build_fix_lighting_page(
-    toast_overlay: &adw::ToastOverlay,
-    gate: &DaemonGate,
-) -> gtk::Box {
-    let page = page_lede("");
-    page.append(&build_lighting_reset_section(toast_overlay, gate));
-    page.append(&build_udev_permanent_section(toast_overlay));
-    page
-}
-
 pub(crate) fn udev_rule_installed() -> bool {
     for path in [
         "/etc/udev/rules.d/99-legion.rules",
@@ -185,17 +120,8 @@ pub(crate) fn build_udev_permanent_section(
     group
 }
 
-pub(crate) fn build_fix_logs_page(
-    toast_overlay: &adw::ToastOverlay,
-    gate: &DaemonGate,
-) -> gtk::Box {
-    let page = page_lede("");
-    page.append(&build_logs_section(toast_overlay, gate));
-    page
-}
-
 /// Compact Fix for embedding inside Settings — one scrollable page with
-/// the three diagnostics as stacked cards, no extra ViewSwitcher.
+/// the diagnostics as stacked cards, no extra ViewSwitcher.
 pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("");
     page.append(&build_speakers_section(toast_overlay));
