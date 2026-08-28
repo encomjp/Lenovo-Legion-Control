@@ -184,6 +184,67 @@ pub fn read_metrics_batch() -> DgpuMetrics {
     }
 }
 
+/// True when this machine HAS a discrete NVIDIA GPU. Stable per boot —
+/// resolved once from the PCI scan (dGPU = a GPU-vendor card that is not
+/// boot_vga) plus nvidia-smi availability. Used to distinguish "no dGPU
+/// hardware" (IdeaPad) from "dGPU powered down" (LOQ RTX 5050 idle).
+pub fn discrete_present() -> bool {
+    static PRESENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PRESENT.get_or_init(|| {
+        // nvidia-smi resolvable → NVIDIA dGPU present (it only exists with
+        // the driver stack installed).
+        if find_nvidia_smi().is_some() {
+            return true;
+        }
+        // AMD hybrid: second GPU-vendor card that is not boot_vga.
+        let mut gpu_cards = 0;
+        let mut non_boot = 0;
+        if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+            for entry in entries.flatten() {
+                let dev = entry.path().join("device");
+                let vendor = std::fs::read_to_string(dev.join("vendor"))
+                    .map(|v| v.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                if vendor != "0x10de" && vendor != "0x1002" {
+                    continue;
+                }
+                gpu_cards += 1;
+                let boot = std::fs::read_to_string(dev.join("boot_vga"))
+                    .map(|v| v.trim() == "1")
+                    .unwrap_or(false);
+                if !boot {
+                    non_boot += 1;
+                }
+            }
+        }
+        gpu_cards >= 2 && non_boot >= 1
+    })
+}
+
+/// Lifecycle label for the dGPU chip: Ok when reading metrics, Off when the
+/// hardware exists but reports nothing (runtime-suspended), None when there
+/// is no discrete GPU at all. Once a real reading is seen this boot, the
+/// card is remembered as Present — a subsequent nvidia-smi failure then
+/// reads "Inactive" (driver asleep), not "absent".
+pub fn discrete_state() -> &'static str {
+    static EVER_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !discrete_present() {
+        return "absent";
+    }
+    let metrics = read_metrics_batch();
+    if metrics.temp.is_some() {
+        EVER_LIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+        return "active";
+    }
+    if EVER_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+        "inactive"
+    } else {
+        // Never live this boot AND nvidia-smi absent → likely no dGPU or
+        // driver unloaded; either way the card never reported in.
+        "off"
+    }
+}
+
 pub fn read_temp() -> Option<f64> {
     read_metrics_batch().temp
 }

@@ -221,19 +221,37 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
 }
 
 pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
+    // Changelog preview: first ~600 chars of the release body, markdown
+    // headers/headings stripped to plain lines for the label.
+    let changelog: String = info
+        .body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('|')) // skip tables
+        .map(|l| l.trim_start_matches('#').trim())
+        .filter(|l| !l.is_empty())
+        .take(14)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let changelog_short: String = changelog.chars().take(600).collect();
+
     let dialog = adw::AlertDialog::new(
         Some("Update Available"),
         Some(&format!(
             "A new version of Legion Control is available!\n\n\
              Installed: v{}\n\
              Latest:    v{} ({})\n\n\
-             Would you like to open the GitHub release page to download the latest package?",
+             What's new:\n{}",
             legion_core::update::CURRENT_VERSION,
             info.version,
-            info.name
+            info.name,
+            if changelog_short.is_empty() {
+                "(see release page)".to_string()
+            } else {
+                changelog_short
+            }
         )),
     );
-    dialog.add_response("open", "View Release");
+    dialog.add_response("open", "View Release & Changelog");
     dialog.add_response("later", "Remind me later");
     dialog.set_default_response(Some("open"));
     dialog.set_close_response("later");

@@ -325,11 +325,17 @@ pub fn scan_faults() -> Vec<Fault> {
     }
 
     // ── Hot package with zero airflow ────────────────────────────────────
+    // Only fire when fan RPMs are actually READABLE and all read 0 — on
+    // machines where the tachometer is unavailable (IdeaPad on kernels
+    // without yogafan) every read returns None, which is "unknown", not
+    // "fans off" (fleet false-positive at 81°C).
     let hottest = s.cpu_temp.max(s.dgpu_temp.max(-1.0));
-    let any_airflow = fans::ids()
-        .iter()
-        .any(|id| fans::read_rpm(*id).unwrap_or(0) > 0);
-    if hottest >= 80.0 && !any_airflow {
+    let fan_ids = fans::ids();
+    let readings: Vec<Option<u32>> =
+        fan_ids.iter().map(|id| fans::read_rpm(*id)).collect();
+    let any_readable = readings.iter().any(|r| r.is_some());
+    let any_airflow = readings.iter().any(|r| r.unwrap_or(0) > 0);
+    if hottest >= 80.0 && any_readable && !any_airflow {
         out.push(fault(
             "fans_off_while_hot",
             Severity::Warning,
@@ -448,8 +454,18 @@ pub fn scan_faults() -> Vec<Fault> {
     let cfg = config::get().thermal;
     if cfg.enabled {
         if let Some(cur) = thermal::read_cur_max() {
+            // Cap threshold must respect THIS CPU's ceiling — MAX_FULL is the
+            // 5.46 GHz reference (9955HX3D); a 4.28 GHz APU parked at its own
+            // policy max is not "throttled" (IdeaPad fleet false-positive).
+            let policy_max = std::fs::read_to_string(
+                "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+            )
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(thermal::MAX_FULL);
+            let cap_threshold = policy_max.saturating_sub(100_000);
             let restore_mc = (cfg.max_temp as i32 - 7) * 1000;
-            if cur < thermal::MAX_FULL.saturating_sub(100_000) && temp_mc(&s) < restore_mc - 3_000 {
+            if cur < cap_threshold && temp_mc(&s) < restore_mc - 3_000 {
                 out.push(fault(
                     "throttled_without_heat",
                     Severity::Warning,

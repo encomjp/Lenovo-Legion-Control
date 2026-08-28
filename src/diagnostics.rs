@@ -179,6 +179,11 @@ pub struct GpuDetail {
     pub driver_version: Option<String>,
     pub vram_total_mb: Option<u64>,
     pub pci_id: Option<String>,
+    /// dGPU lifecycle: "active" (reading metrics), "inactive" (present but
+    /// runtime-suspended after a live reading), "off" (present, never live
+    /// this boot), "absent" (no discrete GPU).
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -904,6 +909,9 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         driver_version: driver_ver,
         vram_total_mb: None,
         pci_id: None,
+        // active | inactive | off | absent — lets the portal render an
+        // honest dGPU status instead of a bare -1 sentinel.
+        state: Some(crate::dgpu::discrete_state().to_string()),
     };
 
     // 3. Memory totals from /proc/meminfo
