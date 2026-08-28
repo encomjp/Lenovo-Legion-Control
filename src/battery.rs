@@ -24,8 +24,6 @@ use std::sync::OnceLock;
 /// before any explicit request the watchdog must not touch anything.
 static DESIRED_LIMIT: AtomicU32 = AtomicU32::new(0);
 
-const BAT0: &str = "/sys/class/power_supply/BAT0";
-
 static CONSERVATION_PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
 
 /// Find conservation_mode sysfs path by scanning /sys (the PCI path varies
@@ -118,9 +116,26 @@ fn parse_sysfs<T: std::str::FromStr>(attr: &str, raw: String) -> Option<T> {
     }
 }
 
-/// Read one `BAT0` sysfs attribute, trimmed, with parse + trace logging.
+/// Resolve the battery sysfs directory. Legion models expose BAT0, but some
+/// (LOQ 15AHP10 observed in fleet telemetry) enumerate as BAT1/BAT0 in a
+/// different order or BATT — probe instead of hardcoding.
+fn bat_dir() -> std::path::PathBuf {
+    const BASE: &str = "/sys/class/power_supply";
+    for name in ["BAT0", "BAT1", "BAT2", "BATT"] {
+        let dir = std::path::PathBuf::from(format!("{BASE}/{name}"));
+        if dir.join("capacity").is_file() || dir.join("status").is_file() {
+            log::trace!("battery::bat_dir — using {}", dir.display());
+            return dir;
+        }
+    }
+    // Fall back to the historical constant so error messages stay stable.
+    std::path::PathBuf::from(format!("{BASE}/BAT0"))
+}
+
+/// Read one battery sysfs attribute from the probed battery dir, trimmed,
+/// with parse + trace logging.
 fn read_attr<T: std::str::FromStr + std::fmt::Debug>(attr: &str) -> Option<T> {
-    let r = read(&format!("{BAT0}/{attr}")).and_then(|s| parse_sysfs::<T>(attr, s));
+    let r = read(&format!("{}/{attr}", bat_dir().display())).and_then(|s| parse_sysfs::<T>(attr, s));
     log::trace!("battery::{attr} — result={r:?}");
     r
 }
@@ -259,10 +274,11 @@ fn set_conservation_file(on: bool) -> std::io::Result<()> {
 
 fn set_charge_type(val: &str) -> std::io::Result<()> {
     log::trace!("battery::set_charge_type(val={val})");
-    let res = std::fs::write(format!("{BAT0}/charge_types"), val);
+    let path = bat_dir().join("charge_types");
+    let res = std::fs::write(&path, val);
     match &res {
         Ok(()) => log::debug!("battery::set_charge_type — wrote charge_types={val}"),
-        Err(e) => log::debug!("battery::set_charge_type — write failed: {e}"),
+        Err(e) => log::debug!("battery::set_charge_type — write to {} failed: {e}", path.display()),
     }
     res
 }
