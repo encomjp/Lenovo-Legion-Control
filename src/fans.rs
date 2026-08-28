@@ -50,6 +50,14 @@ fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
                 log::debug!("fans::fan_hwmon: backend yogafan at {}", hw.display());
                 return Some(("yogafan".into(), hw));
             }
+            // EC direct fallback for old kernels (7.0) without yogafan or
+            // for models where WMI reports 0 RPM. Reads EC registers via
+            // ec_sys debugfs, as done by lenovo-fan-monitor (0xE3/0xE7 for
+            // LOQ, 0x06 for IdeaPad). Only used when no hwmon exists.
+            if let Some((name, _)) = ec_fallback_rpms() {
+                log::info!("fans::fan_hwmon: EC fallback {name} available");
+                return Some(("ec-fallback".into(), PathBuf::from(format!("/tmp/ec-fallback-{name}"))));
+            }
             log::warn!(
                 "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon / yogafan) — fan control unavailable"
             );
@@ -96,6 +104,18 @@ fn read_fan_u32(fan: u8, caller: &str, path: &std::path::Path) -> Option<u32> {
 }
 
 pub fn read_rpm(fan: u8) -> Option<u32> {
+    // EC fallback path: read directly from EC registers.
+    if fan_hwmon().map(|(n, _)| n.as_str() == "ec-fallback").unwrap_or(false) {
+        if let Some((_, rpms)) = ec_fallback_rpms() {
+            let idx = match fan {
+                1 => 0,
+                2 | 4 => 1,
+                _ => return None,
+            };
+            return rpms.get(idx).copied().filter(|&v| v > 0);
+        }
+        return None;
+    }
     let path = fan_path(fan, "input")?;
     read_fan_u32(fan, "read_rpm", &path)
 }
@@ -244,6 +264,50 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
             Err(std::io::Error::new(e.kind(), ctx))
         }
     }
+}
+
+/// EC direct fallback: read fan RPMs via ec_sys debugfs.
+/// Returns (sensor_name, [cpu_rpm, gpu_rpm]) if readable and plausible.
+/// Probes known EC layouts: LOQ 15IRH8 (0xE3/0xE7 16-bit LE) and
+/// IdeaPad Gaming 3 (0x06 8-bit *100). Validates 500-7500 RPM range.
+fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
+    use std::io::Read;
+    const EC_IO: &str = "/sys/kernel/debug/ec/ec0/io";
+    // Try to ensure ec_sys is loaded if the file doesn't exist.
+    if !std::path::Path::new(EC_IO).exists() {
+        let _ = std::process::Command::new("modprobe")
+            .args(["ec_sys", "write_support=1"])
+            .output();
+        if !std::path::Path::new(EC_IO).exists() {
+            return None;
+        }
+    }
+    let mut buf = vec![0u8; 256];
+    let mut f = std::fs::File::open(EC_IO).ok()?;
+    f.read_exact(&mut buf).ok()?;
+    // Probe LOQ layout (0xE3/0xE4 LE 16-bit CPU, 0xE7/0xE8 GPU)
+    let loq_cpu = u16::from_le_bytes([buf[0xE3], buf[0xE4]]) as u32;
+    let loq_gpu = u16::from_le_bytes([buf[0xE7], buf[0xE8]]) as u32;
+    let loq_valid = (500..=7500).contains(&loq_cpu) || (500..=7500).contains(&loq_gpu);
+    if loq_valid {
+        return Some(("loq-ec".to_string(), vec![loq_cpu, loq_gpu]));
+    }
+    // Probe IdeaPad layout (0x06 8-bit *100, single fan or dual at 0x06/0x07)
+    let idea_cpu = buf[0x06] as u32 * 100;
+    let idea_gpu = buf[0x07] as u32 * 100;
+    let idea_valid = (500..=6000).contains(&idea_cpu) || (500..=6000).contains(&idea_gpu);
+    if idea_valid {
+        // If only one fan has data, duplicate to second slot for UI.
+        let gpu = if idea_gpu > 0 { idea_gpu } else { idea_cpu };
+        return Some(("ideapad-ec".to_string(), vec![idea_cpu, gpu]));
+    }
+    // Legion alternative (0xC5E0/0xC5E2 via EC RAM, but ec_sys may not expose there)
+    let leg_cpu = u16::from_le_bytes([buf[0xE0], buf[0xE1]]) as u32;
+    let leg_gpu = u16::from_le_bytes([buf[0xE2], buf[0xE3]]) as u32;
+    if (500..=7500).contains(&leg_cpu) || (500..=7500).contains(&leg_gpu) {
+        return Some(("legion-ec".to_string(), vec![leg_cpu, leg_gpu]));
+    }
+    None
 }
 
 /// Set all discovered fans to auto mode.

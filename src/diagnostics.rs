@@ -1573,23 +1573,26 @@ fn dmi_product_uuid() -> Option<String> {
 }
 
 /// Mint-or-load the pseudonymous machine id (shared by both send paths).
-/// Resolution order:
-///   1. settings.json (existing installs keep their id)
-///   2. shared store /var/lib/legion-control/machine-id (daemon + GUI agree)
-///   3. DMI product UUID (deterministic per machine, survives reinstalls)
+/// Resolution order (converges daemon + GUI which have different $HOME):
+///   1. shared store /var/lib/legion-control/machine-id (canonical, survives
+///      reinstalls, shared between root daemon and user GUI)
+///   2. settings.json (legacy, for existing installs — backfills the store)
+///   3. DMI product UUID (deterministic per machine, survives wipes)
 ///   4. fresh random UUID v4 (persisted to both the store and settings)
 fn ensure_machine_id() -> String {
+    // Canonical shared store wins — daemon and GUI converge here.
+    if let Some(id) = read_machine_id_file() {
+        let cfg = config::get().diagnostics;
+        if cfg.machine_id != id {
+            config::update(|c| c.diagnostics.machine_id = id.clone());
+        }
+        return id;
+    }
     let cfg = config::get().diagnostics;
     if !cfg.machine_id.is_empty() {
-        // Backfill the shared store so other contexts converge on this id.
-        if read_machine_id_file().is_none() {
-            write_machine_id_file(&cfg.machine_id);
-        }
+        // Legacy path: no shared file yet — promote settings.json id.
+        write_machine_id_file(&cfg.machine_id);
         return cfg.machine_id.clone();
-    }
-    if let Some(id) = read_machine_id_file() {
-        config::update(|c| c.diagnostics.machine_id = id.clone());
-        return id;
     }
     if let Some(id) = dmi_product_uuid() {
         write_machine_id_file(&id);
