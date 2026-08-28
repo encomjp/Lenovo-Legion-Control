@@ -133,6 +133,18 @@ All 17 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are prod
 
 ## Get started
 
+**Recommended — the AppImage.** One file, no dependencies, works on every x86_64 Linux distribution (Ubuntu, Fedora, Arch/CachyOS, openSUSE, Debian, …). Download it from the [latest release](https://github.com/encomjp/lenovo-legion-tool/releases/latest), make it executable, and run:
+
+```bash
+chmod +x legion-control-0.1.1-x86_64.AppImage
+./legion-control-0.1.1-x86_64.AppImage
+```
+
+The first-launch walkthrough can enable the privileged daemon (one PolicyKit prompt), set up start-on-boot, and install the AMD undervolt backend for you — see [Installation](docs/INSTALLATION.md).
+
+<details>
+<summary><b>Alternative install methods</b></summary>
+
 The source installer supports **Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed**. GUI needs Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config`, C toolchain.
 
 ```bash
@@ -142,6 +154,10 @@ cd lenovo-legion-tool
 # variants: ./install.sh -y | --user | --widget | --help
 # do not mix native package + source installer — see docs/INSTALLATION.md
 ```
+
+Native `.deb` / `.rpm` / Arch packages are built via `./packaging/build-all.sh` into `packaging/out/`.
+
+</details>
 
 After installation:
 

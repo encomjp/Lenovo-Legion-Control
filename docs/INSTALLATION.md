@@ -1,15 +1,143 @@
 # Installing Legion Control
 
-This guide covers the installation paths implemented by this repository:
+This guide covers every installation path implemented by this repository:
 
-- the source installer, [`install.sh`](../install.sh);
+- **the portable AppImage — recommended** (works on every x86_64 Linux distribution);
 - native Debian, RPM, and Arch packages built from [`packaging/`](../packaging/);
+- the source installer, [`install.sh`](../install.sh);
 - a manual source installation; and
 - the optional KDE Plasma widget and AMD kernel modules.
 
-Do not mix a native package installation with the source installer. Native packages install the main binaries under `/usr/bin`; the source installer normally installs them under `/usr/local/bin`. The repository explicitly says these installation methods should not be installed at the same time.
+> **Do not mix installation methods.** The AppImage and source installer stage the daemon under `/usr/local/bin`; native packages install it under `/usr/bin`. Pick one method and stay with it. If you switch, fully remove the previous one first (see [Uninstalling](#uninstalling)).
 
-## Supported distributions and prerequisites
+---
+
+## Recommended: the AppImage
+
+The AppImage is a single executable file. It bundles the settings GUI, CLI, and daemon and needs **no system dependencies** — no GTK/libadwaita install, no package manager, no build tools. It runs on essentially every current x86_64 Linux distribution (Ubuntu, Fedora, Arch/CachyOS, openSUSE, Debian, Mint, NixOS-with-FUSE, …).
+
+### 1. Download and run
+
+Grab `legion-control-<version>-x86_64.AppImage` from the [latest release](https://github.com/encomjp/lenovo-legion-tool/releases/latest), then:
+
+```bash
+chmod +x legion-control-0.1.1-x86_64.AppImage
+./legion-control-0.1.1-x86_64.AppImage
+```
+
+You can run it from anywhere — `~/Downloads`, `~/Applications`, a USB stick. Nothing is installed until you ask for it.
+
+**FUSE note:** AppImages need FUSE 2 at runtime. If your distribution does not ship it, install it once (`sudo apt install libfuse2`, `sudo dnf install fuse`, `sudo pacman -S libfuse2`) or run without FUSE:
+
+```bash
+./legion-control-0.1.1-x86_64.AppImage --appimage-extract-and-run
+```
+
+### 2. First launch
+
+The welcome window appears once: it explains the anonymous telemetry (on by default, with a privacy-policy link) and offers a **guided setup** that walks through:
+
+1. **Control service** — if the privileged daemon is not running, one click enables it. You get a single PolicyKit password prompt; the app stages `legion-daemon`, the `legion-control.service` unit, the PolicyKit policy, the setup helper, and the bundled `ryzen_smu` source onto the host (under `/usr/local/...`), then enables and starts the service.
+2. **Startup & tuning** — optional (both default on): *Launch at login* writes the desktop autostart entry **and enables the systemd unit, so the daemon also starts on boot**, and *Install AMD tuning backend* builds the `ryzen_smu` DKMS module for Curve Optimizer undervolting.
+3. **Hardware** — model, machine type, CPU/GPU, fan channels.
+4. **Self-check** — read-only health checks.
+
+### 3. What the AppImage does and does not install
+
+Staged on the host by the one-click Enable (only what systemd needs):
+
+- `/usr/local/bin/legion-daemon`
+- `/usr/local/libexec/legion-control-setup`
+- `/etc/systemd/system/legion-control.service`
+- `/usr/share/polkit-1/actions/com.encomjp.legion-control.policy`
+- `/usr/local/lib/legion-control/ryzen_smu/`
+
+**Not** installed automatically: the HID udev rule for Spectrum RGB. Without it the daemon cannot open the lighting controller until you approve the rule. Install it permanently from **Settings → Fix → Permanent fix (udev) → Install permanently** (one PolicyKit prompt), then log out/in or run:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger -s hidraw
+```
+
+### 4. Starting on boot
+
+Either accept **Launch at login** in the guided setup, or later toggle **CPU → Tuning → Launch at login**. It adds `~/.config/autostart/com.encomjp.legion-settings.desktop` (app starts hidden to tray) and enables `legion-control.service`, so both the app and the daemon come up on boot.
+
+### 5. Updating
+
+Replace the AppImage file with the newer one. The staged daemon is **not** overwritten automatically (systemd needs stable paths), so refresh it once:
+
+```bash
+sudo systemctl disable --now legion-control
+sudo rm -f /usr/local/bin/legion-daemon /etc/systemd/system/legion-control.service
+```
+
+Then start the new AppImage and click **Enable** again (Settings → Setup, or the banner) — it re-stages the bundled daemon and helper and starts the service. The GUI detects a daemon/GUI version mismatch and tells you when this is needed.
+
+### 6. Uninstalling the AppImage
+
+```bash
+sudo systemctl disable --now legion-control
+sudo rm -f /usr/local/bin/legion-daemon /usr/local/libexec/legion-control-setup \
+  /etc/systemd/system/legion-control.service \
+  /usr/share/polkit-1/actions/com.encomjp.legion-control.policy \
+  /etc/udev/rules.d/99-legion.rules
+sudo rm -rf /usr/local/lib/legion-control
+sudo systemctl daemon-reload
+rm -rf ~/.config/legion-control          # settings (optional)
+rm -f ~/.config/autostart/com.encomjp.legion-settings.desktop  # autostart (optional)
+```
+
+Then delete the AppImage file itself.
+
+---
+
+## Native packages
+
+Native packages install the binaries under `/usr/bin`, the service under the distribution's systemd unit directory, udev rules under `/usr/lib/udev/rules.d/`, the PolicyKit helper, the desktop entry, icons, and the bundled `ryzen_smu` source. They enable/start `legion-control.service` and reload/trigger udev during installation. They do not install or load the optional DKMS modules automatically.
+
+Build all formats from the repository root:
+
+```bash
+./packaging/build-all.sh
+```
+
+This removes old package artifacts from `packaging/out/`, creates a source archive, and builds in Docker containers. The outputs are written to [`packaging/out/`](../packaging/out/):
+
+- `legion-control_<version>_amd64.deb`;
+- `legion-control-<version>-1.<dist>.x86_64.rpm`; and
+- `legion-control-<version>-1-x86_64.pkg.tar.zst`.
+
+Install the package that matches the host distribution:
+
+```bash
+# Debian/Ubuntu
+sudo apt install ./packaging/out/legion-control_*_amd64.deb
+
+# Fedora/RPM-based systems
+sudo dnf install ./packaging/out/legion-control-*.x86_64.rpm
+
+# Arch/CachyOS
+sudo pacman -U ./packaging/out/legion-control-*-x86_64.pkg.tar.zst
+```
+
+The native package service uses [`packaging/common/legion-control.service`](../packaging/common/legion-control.service), whose daemon path is `/usr/bin/legion-daemon`.
+
+---
+
+## Source installer
+
+From the repository root:
+
+```bash
+./install.sh
+```
+
+The default flow installs dependencies, builds release binaries with Cargo, installs `legion-cli`, `legion-daemon`, and `legion-settings`, installs the PolicyKit setup helper and bundled `third_party/ryzen_smu` source, installs the desktop entry and icons, installs HID udev rules, and enables the root `legion-control` systemd service.
+
+`legion-daemon` is a system-service binary, not a user-facing command. It provides the privileged hardware operations; the CLI and GTK settings application communicate with it. The installer uses [`data/systemd/legion-control.system.service`](../data/systemd/legion-control.system.service), whose `ExecStart` is `/usr/local/bin/legion-daemon`.
+
+### Supported distributions and prerequisites
 
 The current GTK build requires all of the following minimum versions:
 
@@ -29,31 +157,7 @@ The repository's documented target families are:
 
 Ubuntu 22.04 does not provide the required GTK/libadwaita versions for this build. Debian 12 (Bookworm) is not a supported baseline for the current GUI build either: `install.sh` can offer to rewrite apt sources from Bookworm to Trixie to obtain the required libraries, but this is a system-source change, not native Debian 12 support. If accepted, the installer creates `.bak.bookworm` backups for sources it changes and installs the required development packages from Trixie. Review that behavior before accepting it.
 
-### Native package prerequisites
-
-The native package build uses clean containers defined in [`packaging/build-all.sh`](../packaging/build-all.sh):
-
-- Ubuntu `24.04` for the Debian package;
-- Fedora `42` for the RPM; and
-- `archlinux:latest` for the Arch package.
-
-The package build requires Docker, a checked-out repository, and the release build artifacts generated inside each container. The package-specific build scripts use the following floors and runtime dependencies:
-
-- Debian package: GTK 4 `>= 4.14`, libadwaita `>= 1.5`, `libudev1`, `systemd`, and `policykit-1` at runtime; `plasma-workspace`, `dkms`, `make`, and `linux-headers-generic` are suggestions.
-- RPM: Cargo/Rust `>= 1.87`, GTK 4 `>= 4.14`, libadwaita `>= 1.5`, and `libudev` for building; `systemd` and `polkit` at runtime; Plasma 6 and DKMS are suggestions.
-- Arch package: `gtk4`, `libadwaita`, `systemd-libs`, and `polkit` at runtime; `rust>=1.87`, Cargo, and `pkgconf` for building. Plasma, DKMS, and `linux-headers` are optional dependencies.
-
-## Source installer
-
-From the repository root:
-
-```bash
-./install.sh
-```
-
-The default flow installs dependencies, builds release binaries with Cargo, installs `legion-cli`, `legion-daemon`, and `legion-settings`, installs the PolicyKit setup helper and bundled `third_party/ryzen_smu` source, installs the desktop entry and icons, installs HID udev rules, and enables the root `legion-control` systemd service.
-
-`legion-daemon` is a system-service binary, not a user-facing command. It provides the privileged hardware operations; the CLI and GTK settings application communicate with it. The installer uses [`data/systemd/legion-control.system.service`](../data/systemd/legion-control.system.service), whose `ExecStart` is `/usr/local/bin/legion-daemon`.
+(All of these requirements are already satisfied inside the AppImage — one more reason it is the recommended path.)
 
 ### Installer flags
 
@@ -137,37 +241,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 Reload the shell environment or source `$HOME/.cargo/env` before running Cargo yourself.
 
-## Native packages
-
-Native packages install the binaries under `/usr/bin`, the service under the distribution's systemd unit directory, udev rules under `/usr/lib/udev/rules.d/`, the PolicyKit helper, the desktop entry, icons, and the bundled `ryzen_smu` source. They enable/start `legion-control.service` and reload/trigger udev during installation. They do not install or load the optional DKMS modules automatically.
-
-Build all formats from the repository root:
-
-```bash
-./packaging/build-all.sh
-```
-
-This removes old package artifacts from `packaging/out/`, creates a source archive, and builds in Docker containers. The outputs are written to [`packaging/out/`](../packaging/out/):
-
-- `legion-control_<version>_amd64.deb`;
-- `legion-control-<version>-1.<dist>.x86_64.rpm`; and
-- `legion-control-<version>-1-x86_64.pkg.tar.zst`.
-
-Install the package that matches the host distribution:
-
-```bash
-# Debian/Ubuntu
-sudo apt install ./packaging/out/legion-control_*_amd64.deb
-
-# Fedora/RPM-based systems
-sudo dnf install ./packaging/out/legion-control-*.x86_64.rpm
-
-# Arch/CachyOS
-sudo pacman -U ./packaging/out/legion-control-*-x86_64.pkg.tar.zst
-```
-
-The native package service uses [`packaging/common/legion-control.service`](../packaging/common/legion-control.service), whose daemon path is `/usr/bin/legion-daemon`.
-
 ## Manual source installation
 
 Use this path when you need to control each installed file yourself. It is the same system-service layout used by the source installer, so do not use it alongside a native package.
@@ -198,7 +271,7 @@ The manual sequence above does not install the PolicyKit setup helper, desktop e
 
 ## KDE Plasma widget
 
-The widget requires KDE Plasma 6 (the repository says it was tested on Plasma 6.7.3), `kpackagetool6`, an installed `legion-cli`, and an active `legion-control` daemon. Its scripts search `/usr/local/bin/legion-cli`, `/usr/bin/legion-cli`, and `~/.local/bin/legion-cli`; if you used a different prefix, ensure the installer also placed the user CLI copy in `~/.local/bin` or otherwise use one of those supported paths.
+The widget requires KDE Plasma 6, `kpackagetool6`, an installed `legion-cli`, and an active `legion-control` daemon. Its scripts search `/usr/local/bin/legion-cli`, `/usr/bin/legion-cli`, and `~/.local/bin/legion-cli`; if you used a different prefix, ensure the installer also placed the user CLI copy in `~/.local/bin` or otherwise use one of those supported paths.
 
 Install it for the current user:
 
@@ -214,7 +287,7 @@ From the repository root, the underlying package command is:
 kpackagetool6 --type Plasma/Applet -i kde-widget/package
 ```
 
-If the install operation fails (for example, because the package already exists), [`kde-widget/install.sh`](../kde-widget/install.sh) attempts an update with `-u`. No Plasma restart is performed. Add the widget from Plasma's widget picker: right-click the desktop, choose **Add Widgets**, and search for **Legion Control**.
+If the install operation fails (for example, because the package already exists), [`kde-widget/install.sh`](../kde-widget/install.sh) attempts an update with `-u`. No Plasma restart is performed. Add the widget from Plasma's widget picker: right-click the desktop, choose **Add Widgets**, and search for **Legion Control**. You can also install it from the app: **Settings → Setup → KDE Plasma widget → Install widget**.
 
 Remove the per-user widget with:
 
@@ -232,7 +305,9 @@ The module needs DKMS, a compiler, and headers matching the running kernel. The 
 
 ### AMD Curve Optimizer backend
 
-`ryzen_smu` is bundled as source but is opt-in. To install it through the source installer:
+`ryzen_smu` is bundled as source but is opt-in. The easiest way to install it is **Settings → Setup → AMD tuning backend → Install**, or accept *Install AMD tuning backend* in the first-launch guided setup — both run the bundled pinned source through DKMS via the PolicyKit helper.
+
+From the source installer:
 
 ```bash
 ./install.sh --with-ryzen-smu
@@ -250,7 +325,7 @@ cd ryzen_smu
 sudo make dkms-install
 
 # Arch, using an AUR helper
- yay -S ryzen_smu-dkms-git
+  yay -S ryzen_smu-dkms-git
 ```
 
 The repository also supports a manual module build:
@@ -291,6 +366,10 @@ To rebuild native packages from the current checkout:
 ./packaging/build-all.sh
 ```
 
+### AppImage updates
+
+See [Updating](#5-updating) in the AppImage section: replace the file, refresh the staged daemon, click Enable again.
+
 ### Source rebuilds
 
 After rebuilding manually, replace the binaries in the prefix used by the installation. For the default `/usr/local` system installation:
@@ -323,6 +402,10 @@ sudo pacman -R legion-control
 ```
 
 Package removal does **not** document deletion of per-user settings, logs, the Plasma widget, or optional DKMS state. Remove those separately only if desired. Remove the widget with `./kde-widget/uninstall.sh` (as the desktop user), and remove the optional `ryzen_smu` module with the setup helper's `remove-ryzen-smu` operation when it was installed by that helper.
+
+### AppImage
+
+See [Uninstalling the AppImage](#6-uninstalling-the-appimage) for the exact staged-file list and removal commands.
 
 ### Source or manual installs
 
@@ -396,6 +479,7 @@ The repository does not claim that every Lenovo Legion model or every optional k
 
 ## Repository paths referenced by this guide
 
+- [`packaging/appimage/AppRun`](../packaging/appimage/AppRun) and [`packaging/build-appimage.sh`](../packaging/build-appimage.sh) — the recommended AppImage.
 - [`install.sh`](../install.sh) — source installer and flags.
 - [`packaging/README.md`](../packaging/README.md) — native-package policy.
 - [`packaging/build-all.sh`](../packaging/build-all.sh) — containerized package build.
@@ -408,4 +492,4 @@ The repository does not claim that every Lenovo Legion model or every optional k
 - [`third_party/ryzen_smu/README.md`](../third_party/ryzen_smu/README.md) — upstream driver requirements and verification.
 - [`driver/`](../driver/) — optional `legion_hwmon` DKMS source.
 
-The source installer has no built-in uninstall mode, and package removal does not clean every user or optional-backend artifact. Those are the main lifecycle limitations documented by the repository.
+The AppImage stages its daemon until you remove it, the source installer has no built-in uninstall mode, and package removal does not clean every user or optional-backend artifact. Those are the main lifecycle limitations documented by the repository.
