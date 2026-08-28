@@ -138,6 +138,21 @@ fn log_nvidia_smi_path_once() {
     );
 }
 
+/// (hwmon-name, path) for every chip whose name starts with one of the
+/// prefixes. Used by the WiFi fallback (driver naming varies by vendor).
+fn find_hwmon_prefix(prefixes: &[&str]) -> Vec<(String, PathBuf)> {
+    let base = Path::new("/sys/class/hwmon");
+    let mut out = Vec::new();
+    for entry in read_dir_entries(base) {
+        if let Some(name) = read_file(&entry.path().join("name")) {
+            if prefixes.iter().any(|p| name.starts_with(p)) {
+                out.push((name, entry.path()));
+            }
+        }
+    }
+    out
+}
+
 /// Discover hwmon devices by name, returning their sysfs paths (using cache with auto-refresh).
 pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
     let mut guard = match HWMON_CACHE.lock() {
@@ -418,15 +433,42 @@ pub fn read_all() -> SensorReadings {
     }
 
     // ─── WiFi ───
-    if let Some(hw) = hwmon_by_name("iwlwifi_1") {
-        if let Some(val) = read_int(&hw.join("temp1_input")) {
-            s.wifi_temp = val as f64 / 1000.0;
-            log::debug!("sensors::read_all: wifi_temp={:.1}°C", s.wifi_temp);
-        } else {
-            log::trace!("sensors::read_all: iwlwifi_1 temp1_input unavailable");
+    // Driver naming varies by card vendor: Intel=iwlwifi_*, MediaTek=mt7921_*,
+    // Realtek=rtw89_*/rtw88_*, Broadcom=brcmutil_*. Probe the known families.
+    const WIFI_DRIVERS: [&str; 6] = [
+        "iwlwifi_1",
+        "iwlwifi_0",
+        "mt7921_phy0",
+        "mt7925_phy0",
+        "rtw89_00:00",
+        "rtw88_00:00",
+    ];
+    for driver in WIFI_DRIVERS {
+        if let Some(hw) = hwmon_by_name(driver) {
+            if let Some(val) = read_int(&hw.join("temp1_input")) {
+                s.wifi_temp = val as f64 / 1000.0;
+                log::debug!(
+                    "sensors::read_all: wifi_temp={:.1}°C (via {driver})",
+                    s.wifi_temp
+                );
+                break;
+            }
+            log::trace!("sensors::read_all: {driver} temp1_input unavailable");
         }
-    } else {
-        log::trace!("sensors::read_all: iwlwifi_1 hwmon not found");
+    }
+    if s.wifi_temp == 0.0 {
+        // Last resort: walk hwmon names for anything wifi-ish not covered above.
+        for hw in find_hwmon_prefix(&["iwlwifi", "mt79", "rtw89", "rtw88", "ath11k", "ath12k", "wl"]) {
+            if let Some(val) = read_int(&hw.1.join("temp1_input")) {
+                s.wifi_temp = val as f64 / 1000.0;
+                log::debug!(
+                    "sensors::read_all: wifi_temp={:.1}°C (via scan {})",
+                    s.wifi_temp,
+                    hw.0
+                );
+                break;
+            }
+        }
     }
 
     // ─── Ethernet ───

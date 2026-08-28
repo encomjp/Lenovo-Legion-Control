@@ -1208,7 +1208,6 @@ fn build_ui(app: &adw::Application) {
     {
         let banner_u = banner.clone();
         let overlay_u = toast_overlay.clone();
-        let win_u = window.clone();
         glib::timeout_add_local_once(Duration::from_secs(8), move || {
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {

@@ -1527,11 +1527,67 @@ pub fn collect_and_send_deep(override_url: Option<&str>, reason: &str) -> Result
     Ok(resp)
 }
 
+/// Shared system-wide machine-id store. The GUI (user) and daemon (root)
+/// historically kept separate settings.json copies (different $HOME), so
+/// each minted its own id — one laptop appeared as multiple fleet hosts.
+/// A file in /var/lib is shared by both contexts; the DMI product UUID is
+/// the last-resort fallback (root-readable only, but the daemon is root and
+/// the GUI reads the shared file).
+const MACHINE_ID_FILE: &str = "/var/lib/legion-control/machine-id";
+
+fn read_machine_id_file() -> Option<String> {
+    std::fs::read_to_string(MACHINE_ID_FILE)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() == 36)
+}
+
+fn write_machine_id_file(id: &str) {
+    let path = std::path::Path::new(MACHINE_ID_FILE);
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            log::debug!("machine-id store: create_dir_all failed: {e}");
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(path, id) {
+        log::debug!("machine-id store: write failed: {e}");
+    }
+}
+
+/// DMI product UUID — stable per-machine firmware identity (root-readable).
+/// None on machines that don't expose it or when unreadable (non-root).
+fn dmi_product_uuid() -> Option<String> {
+    std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_uuid")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() >= 36)
+}
+
 /// Mint-or-load the pseudonymous machine id (shared by both send paths).
+/// Resolution order:
+///   1. settings.json (existing installs keep their id)
+///   2. shared store /var/lib/legion-control/machine-id (daemon + GUI agree)
+///   3. DMI product UUID (deterministic per machine, survives reinstalls)
+///   4. fresh random UUID v4 (persisted to both the store and settings)
 fn ensure_machine_id() -> String {
     let cfg = config::get().diagnostics;
     if !cfg.machine_id.is_empty() {
+        // Backfill the shared store so other contexts converge on this id.
+        if read_machine_id_file().is_none() {
+            write_machine_id_file(&cfg.machine_id);
+        }
         return cfg.machine_id.clone();
+    }
+    if let Some(id) = read_machine_id_file() {
+        config::update(|c| c.diagnostics.machine_id = id.clone());
+        return id;
+    }
+    if let Some(id) = dmi_product_uuid() {
+        write_machine_id_file(&id);
+        config::update(|c| c.diagnostics.machine_id = id.clone());
+        log::info!("machine-id: derived from DMI product UUID");
+        return id;
     }
     // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
     // (bounded read — never unbounded EOF on this char device).
@@ -1554,6 +1610,7 @@ fn ensure_machine_id() -> String {
         b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
         b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
     );
+    write_machine_id_file(&id);
     config::update(|c| c.diagnostics.machine_id = id.clone());
     id
 }

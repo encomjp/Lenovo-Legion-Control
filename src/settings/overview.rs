@@ -418,8 +418,15 @@ pub(crate) fn build_overview(
                 } else {
                     s.dgpu_temp.max(s.ec_gpu)
                 };
-                gpu_v.set_text(&format!("{g:.0} °C"));
-                tint_temp(&gpu_chip_c, g);
+                if g > 0.0 {
+                    gpu_v.set_text(&format!("{g:.0} °C"));
+                    tint_temp(&gpu_chip_c, g);
+                } else {
+                    // No dGPU present (Radeon-only LOQ) or powered down with
+                    // no EC reading: show N/A instead of a bogus "0 °C".
+                    gpu_v.set_text("N/A");
+                    tint_temp(&gpu_chip_c, 0.0);
+                }
                 if s.dgpu_power >= 0.0 {
                     gpu_d.set_text(&format!("{:.0}% · {:.0} W", poll.gpu_pct, s.dgpu_power));
                 } else {
