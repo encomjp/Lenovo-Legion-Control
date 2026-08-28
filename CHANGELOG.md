@@ -4,84 +4,224 @@ Generated from the git histories of the **two private source repositories** that
 
 > **Note:** Short SHAs are **per-repo** — a SHA only resolves inside its own repository (run `git log` from that repo's root), not across the two.
 
-# Legion Control (monorepo docs/research)
-
-Branch `main` — research notes, kernel-driver PoCs, icon set, agent docs.
-
-- 8ea3a3f 2026-08-25 feat(telemetry): IONOS collector + alpha docs
-- dc37e7f 2026-08-25 docs(research): last python snippet → dd/xxd shell equivalent
-- a1b2b6d 2026-08-25 docs(research): polish pass — fix discrepancies, drop python snippets, cross-link
-- 601c49b 2026-08-25 docs(research): retire Python probes — methods compressed into RESEARCH-TOOLING.md
-- f7ac172 2026-08-25 docs: plan for per-boot machine-id rotation on the CachyOS laptop
-- 433611b 2026-08-25 docs(research): battery limiter findings + decision log (4-source synthesis)
-- 2ef0854 2026-08-25 docs(plan): custom fan curves — Afterburner-style editor + daemon governor
-- 12ab3bc 2026-08-25 chore: AGENTS.md — always-commit/rollback rule for agents
-- 2a77e36 2026-08-22 chore: ignore local agent session dir
-- 82f429b 2026-08-21 chore: snapshot before issue-fix sweep
-- 52dd5ad 2026-08-20 chore: snapshot before Tuning UX A+B — chips grouping + Cooling overview (no removals)
-- d8dfc1c 2026-08-19 plan: daemon-native thermal throttle B2 (70–98°C, 7°C hysteresis)
-- 69c3fc0 2026-08-19 spec: daemon-native thermal throttle — B2 max-temp governor (70–98°C, hysteresis 7°C)
-- 70e44b2 2026-08-10 Initial commit: Legion control research, driver, icons, docs
-
 # legion-tool (app)
 
 Branch `master` — the Rust application (daemon, CLI, settings GUI, KDE widget), packaging, and user docs.
 
-- d57599b 2026-08-25 fix(selftest): disambiguate Into<String> for intel presence checks
-- e240a0d 2026-08-25 feat(intel): gated PState + Uncore (hybrid topology)
-- cbac1b7 2026-08-25 feat: borrow cpu_temp/gpu_temp, per-CPU controls, Intel MSR offsets
-- e76b2b6 2026-08-25 feat(diagnostics): anonymous opt-in telemetry + self-check
-- 934a580 2026-08-25 test: scale live self-test suite to 59 real-hardware checks (F01–F58)
-- 86d3aee 2026-08-25 refactor: rename unfriendly k10temp identifiers (tctl/tccd1/tccd2)
-- 733ff00 2026-08-25 test: expand live self-test suite to 32 real-hardware checks (F01–F32)
-- 5b9da15 2026-08-25 perf: cache device identity, cap kernel-log slurp; add live-hardware tests
-- f9bbf22 2026-08-25 feat(battery): detect and explain EC off-charging past the limiter
-- 7ddc614 2026-08-25 chore: remove dead code — 14 unused pub fns + 2 unused deps
-- cad276e 2026-08-25 chore: cargo fmt — repo-wide formatting drift (mechanical)
-- 3d6ef02 2026-08-25 fix(battery): robust verification + watchdog seeding (validation findings)
-- 31d71c7 2026-08-25 fix(battery): charge_types single-write + verification + EC-clear watchdog
-- 8d939d7 2026-08-25 refactor: collapse duplicated code paths
-- 91536ad 2026-08-25 docs: land pending socket-boundary rewrite (hidraw 0660+uaccess, no /tmp fallback)
-- d2c1c2a 2026-08-22 fix(widget): instant controls + 40% lighter polling + offline state
-- 32fde87 2026-08-22 fix(packaging): cross-distro install robustness (Ubuntu/Debian/Fedora/openSUSE)
-- 63181a6 2026-08-22 ui(thermal): on/off switch moves to the group header, row removed
-- eba1b4f 2026-08-22 feat(thermal): smooth governor — spike filter + proportional stepping
-- c88a105 2026-08-22 test(comms): IPC protocol round-trips + garbage-frame contract
-- ba68fe1 2026-08-22 test(settings): unit tests for CO status text and page-nav maps
-- 2c57301 2026-08-22 fix(css): use margin-left for sibling pill spacing (margin-start is not a GTK CSS property)
-- 7fdaa22 2026-08-22 ui: seven fixes from screenshot review
-- abd3c1f 2026-08-22 ui: de-clutter copy + thermal temp control now fits its card
-- 429af92 2026-08-22 redesign(ui): flat 8-row sidebar + horizontal hub tab bars
-- 5930d6a 2026-08-22 fix(ui): inspection-fix sweep — tooltips, thermal sync, async IPC, a11y
-- fd97ec2 2026-08-22 chore: snapshot before UI inspection-fix sweep
-- 13a54ea 2026-08-21 refactor(ui): halve the sidebar — merged pages, internal switchers
-- 98be891 2026-08-21 fix(daemon): exit non-zero on fatal startup so systemd Restart=on-failure retries
-- 64cae2c 2026-08-21 fix(ryzen_smu): install backend works on any kernel + sidebar one-click nav
-- a37b1c5 2026-08-21 fix(ui): robust header sync + profiles row layout (NN/g heuristics pass)
-- 09c6168 2026-08-21 fix(ui): default-open Cooling/Battery sidebar + hide fan speed while auto
-- f325c49 2026-08-21 test: expand coverage across the issue-fix sweep
-- 458e911 2026-08-21 test: regression tests for fixed issues
-- 773e8ee 2026-08-21 fix(ui): header sync, sidebar selection, battery prime, fan label, chip polish
-- 61c7fb8 2026-08-21 fix: security & robustness sweep
-- 44d8e28 2026-08-21 chore: snapshot before issue-fix sweep
-- 35221ff 2026-08-20 fix(settings): autostart starts hidden to tray (--hidden)
-- 0056de8 2026-08-20 refactor(settings): Garage Lab pass — Battery chips on top, Cooling/CPU Power tooltips-only
-- b06b5e1 2026-08-20 fix(settings): Tuning — restore Current session subtitle + hover, Cooling overview (additive)
-- e1882cf 2026-08-20 refactor(settings): Tuning — tooltips-only, chips on top, autostart option
-- aee7c33 2026-08-20 refactor(settings): Tuning UX batch 1-5
-- b7247b0 2026-08-20 refactor(settings): CPU Tuning = Thermal + Undervolt + Stability
-- a414dad 2026-08-20 refactor(settings): CPU Tuning tab — thermal + undervolt together
-- 6fddf26 2026-08-20 refactor(settings): move Thermal to CPU, match Garage Lab card + confirm_risk
-- 6e63cc2 2026-08-19 docs: thermal throttle usage and architecture
-- 2f59f5e 2026-08-19 feat(settings): Thermal Throttle card in Cooling
-- 37ea1da 2026-08-19 feat(cli): legion-cli thermal status/set
-- 0331062 2026-08-19 feat(daemon): thermal governor thread + Set/GetThermal handling
-- 58560d3 2026-08-19 feat(comms): GetThermal/SetThermal/GetThermalStatus IPC
-- b345d3f 2026-08-19 feat(config): AppConfig.thermal + VERSION 4 migration
-- ea1ccb5 2026-08-19 feat(thermal): pure core — ThermalConfig, compute_target, validation
-- dc07de1 2026-08-09 chore: save current state
-- a91d3aa 2026-08-08 docs: add project guides, slim README, fix artifact ignores
-- 0ed89a4 2026-07-31 chore: ignore generated build artifacts
-- dacd067 2026-07-31 feat: improve Legion control widget and installer
-- 0479ec8 2026-07-27 ux: UI copy cleanup and navigation improvements
-- cdf9f71 2026-07-27 backup before UI copy/UX cleanup
+- 888d14f 2026-08-28 docs: INSTALLATION.md — AppImage is the recommended install path
+- 9d3f988 2026-08-28 docs: regenerate screenshots for Settings hub + rename gallery files
+- b9448cd 2026-08-28 chore: bump version to 0.1.1
+- 412d9fd 2026-08-28 feat(welcome): startup & tuning step — autostart, daemon boot-enable, undervolt backend
+- 99637fb 2026-08-28 chore: gitignore agent scratch dirs (.hermes, meta, AGENTS.md, docs/superpowers)
+- 89fe533 2026-08-28 fix(settings): replace missing tab icons with valid symbolic icons
+- 68750a3 2026-08-28 feat(settings): Settings hub, Fix inside Settings, autoinstall daemon, guided setup 4-step
+- 34b7da4 2026-08-28 feat(welcome): telemetry ON by default with privacy policy link, red Keep on top
+- 08b4b29 2026-08-28 refactor(welcome): remove Report/Donate links
+- 097ae11 2026-08-28 chore: remove flatpak — AppImage is sole distribution
+- 6d62170 2026-08-28 chore: drop snap packaging
+- cd362c8 2026-08-28 fix(flatpak): expose both xdg-run link and /run target
+- d271f1f 2026-08-28 fix(daemon,flatpak): publish user socket link for sandboxed UI
+- cb52be4 2026-08-28 feat(flatpak): sandboxed UI + host daemon, chore(snap): devmode reference
+- e702997 2026-08-28 refactor(settings): split 7.2k-line main.rs into page modules
+- a636772 2026-08-28 feat(settings): redesign welcome as a proper window
+- 30e5140 2026-08-27 feat(settings): sparkline legend + finish sublabel sweep
+- 4a5eb82 2026-08-27 refactor(settings): state rows show bare status, tooltips keep detail
+- d5637a2 2026-08-27 refactor(settings): drop static sublabels — tooltips carry the detail
+- 96a33cc 2026-08-27 fix(settings): declutter diagnostics section
+- a3f2a14 2026-08-27 fix(appimage): owner-only bootstrap staging dir
+- b30537e 2026-08-27 fix(settings): stop long readouts from widening the window
+- c7ac3ad 2026-08-27 fix(appimage): bootstrap stable helper in one PolicyKit transaction
+- 03ed0e3 2026-08-27 fix(appimage): expose root icon for appimagetool
+- 17273b0 2026-08-27 build: add reproducible AppImage packaging
+- 9d190c9 2026-08-27 fix: harden first-run setup and responsive battery UI
+- d64f2dd 2026-08-27 fix(appimage): make daemon Enable flow self-contained
+- 3dbf302 2026-08-27 fix(config): unique tmp-file suffix + de-flake atomic-write test
+- 1559f38 2026-08-27 docs: refresh screenshots — 8-point UX pass
+- 9a85473 2026-08-27 feat(ui): Ctrl+1…8 jump to rail pages
+- cb202a0 2026-08-27 feat(ui): 5-minute CPU/GPU temperature sparkline on Home
+- 3258661 2026-08-27 fix(ui): preset picker previews what Load will change
+- 9529701 2026-08-27 fix(ui): 'Edit on Home' switches to Custom mode in one click
+- 5d6dd8a 2026-08-27 fix(ui): logo LED power lives on the Logo tab
+- 5b44255 2026-08-27 fix(ui): deliver on three small UX promises
+- bab0aa0 2026-08-27 docs: refresh screenshots — unified sliders, pills, headers, tab icons
+- 65d6686 2026-08-27 fix(ui): EC off-charge advisory only pops on the Battery page
+- 1cfcf57 2026-08-27 fix(ui): sidebar no longer clips nav rail on short windows
+- 226bdfb 2026-08-27 fix(ui): positive states are pills, not red buttons — About · Setup
+- bd095e3 2026-08-27 fix(ui): one slider language — accent fill, value right, no floating numbers
+- 2eda15c 2026-08-27 fix(ui): one section-header style app-wide
+- 3a87240 2026-08-27 fix(ui): Lighting tab icons — replace disclosure chevrons
+- b741f5c 2026-08-27 fix(ui): unify fan unit casing — RPM everywhere
+- 26fc40d 2026-08-27 fix(kde-widget): replace removed Plasma 5 tooltip API
+- 1876462 2026-08-27 docs: refresh all 18 settings screenshots (v0.1.0 UI)
+- 4a4c262 2026-08-27 fix(packaging): exclude .git from source tarball
+- 35068d3 2026-08-27 refactor(rgb_panic): one hardware_kick helper for both recovery paths
+- 27b4223 2026-08-27 refactor(config): shared ensure_parent_dir / settings_file_name / cleanup_tmp
+- 0474cbb 2026-08-27 refactor(intel): one write_sysfs helper for pstate + uncore setters
+- 30a0c18 2026-08-27 refactor(undervolt): one uniform() helper for all-core equality checks
+- 1a0fc52 2026-08-27 perf(config): O(1) per-key paint updates + batched fill-all
+- 011ad0a 2026-08-27 perf(fans): cache fan sysfs backend once instead of per-call re-scan
+- 073b6f4 2026-08-27 refactor(logging): shared format_json/format_text for stderr + file
+- 0983b02 2026-08-27 refactor(profile): one find_class_attr scanner for handler + fw-attr discovery
+- ef09d22 2026-08-27 refactor(daemon): one sleep_interruptible helper for all worker loops
+- 93c436b 2026-08-27 refactor(thermal): one generic sysfs reader for temps and policy
+- 6292848 2026-08-27 fix(rgb_panic): false-success USB reset, dmesg fallback, dead arms, clones
+- 6346d33 2026-08-27 fix(cli): exit-code bugs on error paths + dedupe response tails
+- 7013f21 2026-08-27 refactor(battery): collapse 12 micro-readers into one read_attr helper
+- e8dbb10 2026-08-27 chore: remove dead cpu_percore module (550 lines)
+- 2098719 2026-08-27 fix(settings): daemon gate, wide layout, spacing and color tokens
+- 5655c67 2026-08-27 docs: headless screenshots on Xvfb + WOW README
+- 0dd45d7 2026-08-27 fix(settings): unify titles, deep-links and cooling copy
+- 1c3e49a 2026-08-27 feat(settings): simplify About hub and add permanent RGB udev fix
+- 6d47db3 2026-08-27 fix(settings): remove diagnostics empty row and equalize update buttons
+- 3e78524 2026-08-27 feat(update): GitHub release checker, update prompt dialog & CLI command
+- 7b48cc0 2026-08-27 fix(rgb_panic): support USB authorized attribute fallback for port reset
+- 13a77ff 2026-08-27 perf(core): batch nvidia-smi query, flock timeout & robust input validation
+- c234d6e 2026-08-27 fix(widget,cli,selftest): comprehensive review hardening & reliability fixes
+- 819c108 2026-08-26 feat(kde-widget): auto-install widget in install.sh when KDE session detected
+- 81efe3e 2026-08-26 fix(frontend): UI styling contrast, window geometry, RAPL synchronization & KDE poller
+- c07e262 2026-08-26 perf(core): hwmon caching, single-pass discovery & fast thermal governor polling
+- b6674f9 2026-08-26 feat(diagnostics): prefer PRETTY_NAME for rich distro and version string
+- aae3886 2026-08-26 fix(core): comprehensive reliability, safety & error handling hardening
+- 676666e 2026-08-26 docs: use authentic European Union 12-star flag design in banner
+- 42643d6 2026-08-26 docs: add 'Made in Europe · for everyone' banner to README
+- c3848c7 2026-08-26 chore: remove telemetry portal into private repo legion-telemetry
+- 3ade850 2026-08-26 fix(server): pin clickhouse-go driver to v2.26.0 in Dockerfile
+- dbb3585 2026-08-26 feat(server): migrate telemetry storage from SQLite to ClickHouse
+- 70123ce 2026-08-26 feat(portal): expandable self-checks in machine drawer
+- daa5ed6 2026-08-26 feat(portal): remove a machine from the Fleet panel
+- 25def51 2026-08-26 feat(portal): polish Fleet machine drawer sensors tab
+- 16386d6 2026-08-26 fix(telemetry): prefer internal panel for display resolution + EDID refresh
+- 162a465 2026-08-26 feat(portal): clean, sectioned Fleet machine drawer
+- 7f9d2cb 2026-08-26 feat(settings): nudge before allowing telemetry opt-out
+- f64878a 2026-08-26 docs(server): privacy statement reflects opt-out default
+- 4f11dbf 2026-08-26 feat(telemetry): opt-out by default with opt-out warning
+- 1869ae0 2026-08-26 test(server): more Go regression coverage
+- 3ea8590 2026-08-26 fix(telemetry): bugbot review findings
+- f66b5bf 2026-08-26 test(telemetry): regression tests for triage findings
+- 278b251 2026-08-26 fix(triage): top-10 bughunt hardening
+- bc2f141 2026-08-26 fix(server): emit [] not null for empty collections in /api/data
+- fa9a12b 2026-08-26 fix(review): harden ingest + hardware inventory + ID persistence
+- 4634ba2 2026-08-26 fix(diagnostics): auto-mint canonical UUID v4 machine_id on collection
+- ceae4b8 2026-08-26 feat(telemetry): add hardware inventory block to diagnostics payload
+- 2010510 2026-08-26 feat(telemetry): 1-min gzipped push scheduler + gzip ingest
+- 61dea86 2026-08-26 fix(portal): header stacking — flex column for LegionTelemetry badge
+- d864692 2026-08-26 feat(portal): ripe console — no emojis, no jumpy reloads, privacy removed
+- 816c909 2026-08-26 feat(portal): polish Power-BI console — 6 KPIs, 8 charts, sparklines & fleet drawer
+- eda77d7 2026-08-26 feat(portal): redesign dashboard with Power-BI analytics, fleet explorer, and Bugzilla triage
+- 5d01bad 2026-08-26 feat(server): standalone lightweight Go telemetry server with Cloudflare Access support
+- 5d9f241 2026-08-26 fix(portal): avoid inline backslashes in f-strings for Python <3.12 compatibility
+- dd6624d 2026-08-26 fix(portal): type annotations and robust import fallback for standalone and container run
+- a413935 2026-08-26 feat(portal): rich multi-page ops dashboard with SVG charts, machine grouping, fault tracker, error attribution, privacy pages
+- 5282167 2026-08-26 feat(portal): full rewrite — multi-page ops dashboard with SVG charts, fault donut, sensor bars
+- e469948 2026-08-26 feat(portal): full rewrite — multi-page ops dashboard with SVG charts
+- 78f758a 2026-08-26 feat(portal): full operations dashboard rewrite
+- bd57d67 2026-08-26 fix(gui): guided setup walkthrough + lifetime fixes
+- f028d53 2026-08-26 feat: comprehensive event logging across all 20 modules
+- 41b6ce4 2026-08-26 fix(diag): machine_id scoping + clippy clean
+- 1cdf514 2026-08-26 feat(telemetry): pseudonymous machine_id for cross-report correlation
+- 27d55f4 2026-08-26 feat(diag): per-module error attribution + system context + expanded fault scan
+- ada7116 2026-08-25 feat(selftest): deployment checks, fault scanner, honest self-checks
+- aaac6a8 2026-08-25 feat(selftest+diag): machine fault scan, honest self-checks, richer telemetry
+- af4e3a2 2026-08-25 fix(server): WAN stack review hardening
+- 5d35f5f 2026-08-25 fix(lighting): parse_hex rejects non-ASCII without panicking
+- 91db77c 2026-08-25 fix(gui): welcome nav works, consent gates Send-now, debounced toggle
+- b0f6861 2026-08-25 fix(diag): home-path redaction breadth, safe transport, opt-in helper
+- 754e295 2026-08-25 feat(telemetry): prominent first-run choice + slimmed log digest
+- 292576d 2026-08-25 docs(readme): WAN telemetry flow + env overrides
+- 842bda9 2026-08-25 feat(telemetry): WAN collector stack — ingest, portal, deploy assets
+- baeb456 2026-08-25 feat(server): hardened collector at live location + regenerated changelog
+- cd0a561 2026-08-25 feat(cli): exit-code matrix via fail()/usage_fail()
+- eb549a4 2026-08-25 fix(audio): troubleshoot respects external-sink gate
+- 72f3795 2026-08-25 fix(rgb_panic): udev-first perms, honest rebind result, filtered journal
+- acbe514 2026-08-25 feat(fans): clamp_target — IPC RPM can no longer exceed channel limits
+- 607b2e4 2026-08-25 fix(lighting): parse_hex rejects non-ASCII without panicking
+- f93c2a3 2026-08-25 fix(gui): welcome nav works, consent gates Send-now, debounced toggle
+- c67b291 2026-08-25 fix(diag): privacy redaction + honest transport errors
+- d43305d 2026-08-25 fix(ppt): unit-aware limits end-to-end + unified fw-attr gate
+- efb999b 2026-08-25 Add 'meta/' from commit '07ed72840caecd91345e3009c2105e0b45c3842e'
+- e61fa45 2026-08-25 docs: add CHANGELOG from both repos, link from telemetry section
+- a86ec95 2026-08-25 chore(clippy): factor complex topology setter type
+- d507329 2026-08-25 fix(selftest): disambiguate Into<String> for intel presence checks
+- b13699e 2026-08-25 feat(intel): gated PState + Uncore (hybrid topology)
+- e0f651b 2026-08-25 feat: borrow cpu_temp/gpu_temp, per-CPU controls, Intel MSR offsets
+- 69b404a 2026-08-25 feat(telemetry): IONOS collector + alpha docs
+- be9cc63 2026-08-25 feat(diagnostics): anonymous opt-in telemetry + self-check
+- b40ff84 2026-08-25 docs(research): last python snippet → dd/xxd shell equivalent
+- 7fa654e 2026-08-25 docs(research): polish pass — fix discrepancies, drop python snippets, cross-link
+- 8632579 2026-08-25 docs(research): retire Python probes — methods compressed into RESEARCH-TOOLING.md
+- e997e91 2026-08-25 test: scale live self-test suite to 59 real-hardware checks (F01–F58)
+- 3d8a868 2026-08-25 refactor: rename unfriendly k10temp identifiers (tctl/tccd1/tccd2)
+- a0a5bce 2026-08-25 test: expand live self-test suite to 32 real-hardware checks (F01–F32)
+- c724944 2026-08-25 perf: cache device identity, cap kernel-log slurp; add live-hardware tests
+- 0be57c1 2026-08-25 feat(battery): detect and explain EC off-charging past the limiter
+- e359b3b 2026-08-25 chore: remove dead code — 14 unused pub fns + 2 unused deps
+- 73cd9fd 2026-08-25 chore: cargo fmt — repo-wide formatting drift (mechanical)
+- bfc2133 2026-08-25 fix(battery): robust verification + watchdog seeding (validation findings)
+- 3ae6f02 2026-08-25 docs(research): battery limiter findings + decision log (4-source synthesis)
+- 3b84eff 2026-08-25 fix(battery): charge_types single-write + verification + EC-clear watchdog
+- db6335a 2026-08-25 refactor: collapse duplicated code paths
+- 9d89823 2026-08-25 docs: land pending socket-boundary rewrite (hidraw 0660+uaccess, no /tmp fallback)
+- f23c820 2026-08-22 chore: ignore local agent session dir
+- d643f13 2026-08-22 fix(widget): instant controls + 40% lighter polling + offline state
+- e65072f 2026-08-22 fix(packaging): cross-distro install robustness (Ubuntu/Debian/Fedora/openSUSE)
+- 7215bad 2026-08-22 ui(thermal): on/off switch moves to the group header, row removed
+- f24e4ec 2026-08-22 feat(thermal): smooth governor — spike filter + proportional stepping
+- 9042634 2026-08-22 test(comms): IPC protocol round-trips + garbage-frame contract
+- 8554182 2026-08-22 test(settings): unit tests for CO status text and page-nav maps
+- 27f6962 2026-08-22 fix(css): use margin-left for sibling pill spacing (margin-start is not a GTK CSS property)
+- 37ac39a 2026-08-22 ui: seven fixes from screenshot review
+- c2df166 2026-08-22 ui: de-clutter copy + thermal temp control now fits its card
+- f081846 2026-08-22 redesign(ui): flat 8-row sidebar + horizontal hub tab bars
+- a305b56 2026-08-22 fix(ui): inspection-fix sweep — tooltips, thermal sync, async IPC, a11y
+- c19bbab 2026-08-22 chore: snapshot before UI inspection-fix sweep
+- 1243f26 2026-08-21 refactor(ui): halve the sidebar — merged pages, internal switchers
+- b928acd 2026-08-21 fix(daemon): exit non-zero on fatal startup so systemd Restart=on-failure retries
+- 36cfaf3 2026-08-21 fix(ryzen_smu): install backend works on any kernel + sidebar one-click nav
+- 9614b90 2026-08-21 fix(ui): robust header sync + profiles row layout (NN/g heuristics pass)
+- 50bcec0 2026-08-21 fix(ui): default-open Cooling/Battery sidebar + hide fan speed while auto
+- 0b0cdde 2026-08-21 test: expand coverage across the issue-fix sweep
+- 082a0b3 2026-08-21 test: regression tests for fixed issues
+- 67be2ee 2026-08-21 fix(ui): header sync, sidebar selection, battery prime, fan label, chip polish
+- 2c7f541 2026-08-21 fix: security & robustness sweep
+- 2f6523f 2026-08-21 chore: snapshot before issue-fix sweep
+- 801c04a 2026-08-21 chore: snapshot before issue-fix sweep
+- fd9a419 2026-08-20 fix(settings): autostart starts hidden to tray (--hidden)
+- 029bf54 2026-08-20 refactor(settings): Garage Lab pass — Battery chips on top, Cooling/CPU Power tooltips-only
+- 1918ed1 2026-08-20 fix(settings): Tuning — restore Current session subtitle + hover, Cooling overview (additive)
+- cf99256 2026-08-20 chore: snapshot before Tuning UX A+B — chips grouping + Cooling overview (no removals)
+- 6421793 2026-08-20 refactor(settings): Tuning — tooltips-only, chips on top, autostart option
+- 98b52bd 2026-08-20 refactor(settings): Tuning UX batch 1-5
+- df92581 2026-08-20 refactor(settings): CPU Tuning = Thermal + Undervolt + Stability
+- a584ec5 2026-08-20 refactor(settings): CPU Tuning tab — thermal + undervolt together
+- 8349017 2026-08-20 refactor(settings): move Thermal to CPU, match Garage Lab card + confirm_risk
+- 0d6e0f4 2026-08-19 docs: thermal throttle usage and architecture
+- b8784a6 2026-08-19 feat(settings): Thermal Throttle card in Cooling
+- e305a53 2026-08-19 feat(cli): legion-cli thermal status/set
+- bcf1355 2026-08-19 feat(daemon): thermal governor thread + Set/GetThermal handling
+- 54d255b 2026-08-19 feat(comms): GetThermal/SetThermal/GetThermalStatus IPC
+- 52d917f 2026-08-19 feat(config): AppConfig.thermal + VERSION 4 migration
+- cfe9049 2026-08-19 feat(thermal): pure core — ThermalConfig, compute_target, validation
+- 903f2a0 2026-08-10 Initial commit: Legion control research, driver, icons, docs
+- 11260bb 2026-08-09 chore: save current state
+- 0679c51 2026-08-08 docs: add project guides, slim README, fix artifact ignores
+- 5f8633f 2026-07-31 chore: ignore generated build artifacts
+- eda4472 2026-07-31 feat: improve Legion control widget and installer
+- 3cc9bc3 2026-07-27 ux: UI copy cleanup and navigation improvements
+- d44e2cb 2026-07-27 backup before UI copy/UX cleanup
+
+# Legion Control (monorepo docs/research)
+
+Branch `main` — research notes, kernel-driver PoCs, icon set, agent docs.
+
+- c5c9630 2026-08-28 chore: gitignore agent scratch (AGENTS.md, docs/superpowers)
+- bfe734e 2026-08-27 chore: ignore local packaged artifacts
+- e61fa45 2026-08-25 docs: add CHANGELOG from both repos, link from telemetry section
+- 69b404a 2026-08-25 feat(telemetry): IONOS collector + alpha docs
+- b40ff84 2026-08-25 docs(research): last python snippet → dd/xxd shell equivalent
+- 7fa654e 2026-08-25 docs(research): polish pass — fix discrepancies, drop python snippets, cross-link
+- 8632579 2026-08-25 docs(research): retire Python probes — methods compressed into RESEARCH-TOOLING.md
+- 3ae6f02 2026-08-25 docs(research): battery limiter findings + decision log (4-source synthesis)
+- f23c820 2026-08-22 chore: ignore local agent session dir
+- 2f6523f 2026-08-21 chore: snapshot before issue-fix sweep
+- cf99256 2026-08-20 chore: snapshot before Tuning UX A+B — chips grouping + Cooling overview (no removals)
+- 903f2a0 2026-08-10 Initial commit: Legion control research, driver, icons, docs
