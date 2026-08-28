@@ -334,7 +334,7 @@ fn pci_gpu_name() -> Option<String> {
     // Fall back to a small built-in known-GPU table (stale pci.ids on the
     // host is common — fleet showed 10de:2dd8 resolving on Fedora but not
     // CachyOS), then the raw PCI id.
-    let known = known_gpu_name(lspci_vendor, &device_id);
+    let known = known_gpu_name(lspci_vendor, device_id.as_str());
     if let Some(name) = known {
         return Some(name.to_string());
     }
@@ -351,7 +351,7 @@ fn pci_gpu_name() -> Option<String> {
 /// else on any reasonably updated host.
 fn known_gpu_name(vendor: &str, device_id: &str) -> Option<&'static str> {
     if vendor.eq_ignore_ascii_case("10de") {
-        match device_id.as_str() {
+        match device_id {
             "2DD8" => Some("GeForce RTX 5050 Max-Q / Mobile"), // LOQ 15AHP10 fleet report
             "2C59" => Some("GeForce RTX 5080 Max-Q / Mobile"),
             "2CC9" => Some("GeForce RTX 5060 Max-Q / Mobile"),
