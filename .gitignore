@@ -29,3 +29,9 @@ modules.order
 .env.*
 !.env.example
 __pycache__/
+
+# Agent scratch / internal notes — never publish
+.hermes/
+meta/
+AGENTS.md
+docs/superpowers/
