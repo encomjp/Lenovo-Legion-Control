@@ -78,7 +78,7 @@ pub(crate) fn show_welcome_if_needed(
     intro.set_wrap(true);
     intro.set_xalign(0.0);
 
-// ── telemetry — one compact switch instead of a wall of buttons ──
+    // ── telemetry — one compact switch instead of a wall of buttons ──
     let telemetry_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
         .subtitle("Anonymized hardware stats · opt out any time")
@@ -158,39 +158,37 @@ pub(crate) fn show_welcome_if_needed(
         std::thread::spawn(move || {
             let _ = tx.send(legion_core::update::check_latest_release());
         });
-        glib::timeout_add_local(Duration::from_millis(300), move || {
-            match rx.try_recv() {
-                Ok(Ok(info)) => {
-                    let highlights: String = info
-                        .body
-                        .lines()
-                        .filter(|l| {
-                            let t = l.trim_start();
-                            t.starts_with("- ") && !t.starts_with("|")
-                        })
-                        .take(4)
-                        .map(|l| format!("• {}", l.trim_start_matches('-').trim()))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    if !highlights.is_empty() {
-                        let label = gtk::Label::new(Some(&format!(
-                            "What's new in v{}\n{highlights}",
-                            info.version
-                        )));
-                        label.set_halign(Align::Start);
-                        label.set_wrap(true);
-                        label.set_xalign(0.0);
-                        label.set_margin_start(4);
-                        label.add_css_class("page-sub");
-                        page_whats_new.append(&label);
-                    }
-                    glib::ControlFlow::Break
+        glib::timeout_add_local(Duration::from_millis(300), move || match rx.try_recv() {
+            Ok(Ok(info)) => {
+                let highlights: String = info
+                    .body
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim_start();
+                        t.starts_with("- ") && !t.starts_with("|")
+                    })
+                    .take(4)
+                    .map(|l| format!("• {}", l.trim_start_matches('-').trim()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !highlights.is_empty() {
+                    let label = gtk::Label::new(Some(&format!(
+                        "What's new in v{}\n{highlights}",
+                        info.version
+                    )));
+                    label.set_halign(Align::Start);
+                    label.set_wrap(true);
+                    label.set_xalign(0.0);
+                    label.set_margin_start(4);
+                    label.add_css_class("page-sub");
+                    page_whats_new.append(&label);
                 }
-                Ok(Err(_)) | Err(_) => glib::ControlFlow::Break,
+                glib::ControlFlow::Break
             }
+            Ok(Err(_)) | Err(_) => glib::ControlFlow::Break,
         });
     }
-        page.append(&telemetry_group);
+    page.append(&telemetry_group);
     page.append(&privacy_link);
     page.append(&actions);
 

@@ -102,7 +102,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
     let row = adw::ActionRow::builder()
         .title("Version &amp; Updates")
         .subtitle(format!(
-            "Installed: v{} · Checking GitHub…",
+            "Installed: v{} · Checking…",
             legion_core::update::CURRENT_VERSION
         ))
         .activatable(false)
@@ -112,57 +112,56 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
     let actions = gtk::Box::new(Orientation::Horizontal, 8);
     actions.set_valign(Align::Center);
     actions.set_homogeneous(true);
-    let check_btn = primary_button_tip(
-        "Check for updates",
-        Some("Query GitHub for the latest Legion Control release"),
-    );
+    let check_btn = gtk::Button::builder()
+        .label("Check for updates")
+        .tooltip_text("Look for a newer Legion Control release")
+        .valign(Align::Center)
+        .build();
+    check_btn.add_css_class("pill-btn");
     check_btn.set_size_request(156, -1);
     check_btn.set_halign(Align::Fill);
     check_btn.set_hexpand(true);
-    let view_btn = gtk::Button::builder()
-        .label("View on GitHub")
-        .tooltip_text("Open GitHub releases in your browser")
-        .valign(Align::Center)
-        .build();
-    view_btn.add_css_class("pill-btn");
-    view_btn.set_size_request(156, -1);
-    view_btn.set_halign(Align::Fill);
-    view_btn.set_hexpand(true);
+    let update_btn = primary_button_tip(
+        "Update now",
+        Some("Download and install the matching release without opening a browser"),
+    );
+    update_btn.set_size_request(156, -1);
+    update_btn.set_halign(Align::Fill);
+    update_btn.set_hexpand(true);
+    update_btn.set_sensitive(false);
 
-    actions.append(&view_btn);
     actions.append(&check_btn);
+    actions.append(&update_btn);
     row.add_suffix(&actions);
     group.add(&row);
 
     let overlay = toast_overlay.clone();
     let row_c = row.clone();
     let check_btn_c = check_btn.clone();
-    let release_url: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    let release_url_view = release_url.clone();
+    let update_btn_c = update_btn.clone();
+    let latest: Rc<RefCell<Option<legion_core::update::ReleaseInfo>>> = Rc::new(RefCell::new(None));
+    let latest_apply = latest.clone();
 
-    view_btn.connect_clicked(move |_| {
-        let url = release_url_view.borrow().clone().unwrap_or_else(|| {
-            format!(
-                "https://github.com/{}/releases",
-                legion_core::update::GITHUB_REPO
-            )
-        });
-        let _ =
-            gtk4::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk4::gio::AppLaunchContext>);
+    update_btn.connect_clicked(move |_| {
+        if let Some(info) = latest_apply.borrow().clone() {
+            prompt_update_dialog(&info);
+        }
     });
 
     let run_check = {
         let row = row_c.clone();
         let check_btn = check_btn_c.clone();
+        let update_btn = update_btn_c.clone();
         let overlay = overlay.clone();
-        let release_url = release_url.clone();
+        let latest = latest.clone();
         Rc::new(move |interactive: bool| {
             check_btn.set_sensitive(false);
             check_btn.set_label("Checking…");
             let row = row.clone();
             let check_btn = check_btn.clone();
+            let update_btn = update_btn.clone();
             let overlay = overlay.clone();
-            let release_url = release_url.clone();
+            let latest = latest.clone();
             dispatch_async(
                 legion_core::update::check_latest_release,
                 "Update check thread stopped",
@@ -171,19 +170,26 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                     check_btn.set_label("Check for updates");
                     match result {
                         Ok(info) => {
-                            *release_url.borrow_mut() = Some(info.html_url.clone());
+                            *latest.borrow_mut() = Some(info.clone());
                             if info.is_newer {
+                                let can_apply = legion_core::update::can_apply(&info);
+                                update_btn.set_sensitive(can_apply);
                                 row.set_subtitle(&format!(
-                                    "✨ New version available: v{} (installed: v{})",
+                                    "New version available: v{} (installed: v{})",
                                     info.version,
                                     legion_core::update::CURRENT_VERSION
                                 ));
+                                if !can_apply {
+                                    let hint = legion_core::update::manual_update_hint();
+                                    update_btn.set_tooltip_text(Some(&hint));
+                                }
                                 if interactive {
                                     prompt_update_dialog(&info);
                                 }
                             } else {
+                                update_btn.set_sensitive(false);
                                 row.set_subtitle(&format!(
-                                    "✓ Up to date (v{} is the latest release)",
+                                    "Up to date (v{} is the latest release)",
                                     legion_core::update::CURRENT_VERSION
                                 ));
                                 if interactive {
@@ -192,6 +198,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                             }
                         }
                         Err(e) => {
+                            update_btn.set_sensitive(false);
                             row.set_subtitle(&format!(
                                 "Installed: v{} · Update check failed: {e}",
                                 legion_core::update::CURRENT_VERSION
@@ -220,53 +227,208 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
     group
 }
 
-pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
-    // Changelog preview: first ~600 chars of the release body, markdown
-    // headers/headings stripped to plain lines for the label.
+fn changelog_preview(info: &legion_core::update::ReleaseInfo) -> String {
     let changelog: String = info
         .body
         .lines()
-        .filter(|l| !l.trim_start().starts_with('|')) // skip tables
+        .filter(|l| !l.trim_start().starts_with('|'))
         .map(|l| l.trim_start_matches('#').trim())
         .filter(|l| !l.is_empty())
         .take(14)
         .collect::<Vec<_>>()
         .join("\n");
-    let changelog_short: String = changelog.chars().take(600).collect();
+    changelog.chars().take(600).collect()
+}
 
-    let dialog = adw::AlertDialog::new(
-        Some("Update Available"),
-        Some(&format!(
-            "A new version of Legion Control is available!\n\n\
+pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
+    let changelog_short = changelog_preview(info);
+    let can_apply = legion_core::update::can_apply(info);
+    let notes = if changelog_short.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nWhat's new:\n{changelog_short}")
+    };
+    let kind = legion_core::update::detect_install_kind();
+    let body = if can_apply {
+        format!(
+            "A new version of Legion Control is available.\n\n\
              Installed: v{}\n\
-             Latest:    v{} ({})\n\n\
-             What's new:\n{}",
+             Latest:    v{} ({})\n\
+             This copy: {}\n\n\
+             {}{notes}",
             legion_core::update::CURRENT_VERSION,
             info.version,
             info.name,
-            if changelog_short.is_empty() {
-                "(see release page)".to_string()
-            } else {
-                changelog_short
-            }
-        )),
-    );
-    dialog.add_response("open", "View Release & Changelog");
-    dialog.add_response("later", "Remind me later");
-    dialog.set_default_response(Some("open"));
-    dialog.set_close_response("later");
+            kind.label(),
+            kind.apply_blurb(),
+        )
+    } else {
+        format!(
+            "A new version of Legion Control is available.\n\n\
+             Installed: v{}\n\
+             Latest:    v{} ({})\n\n\
+             {}{notes}",
+            legion_core::update::CURRENT_VERSION,
+            info.version,
+            info.name,
+            legion_core::update::manual_update_hint(),
+        )
+    };
 
-    let url = info.html_url.clone();
+    let dialog = adw::AlertDialog::new(Some("Update available"), Some(&body));
+    dialog.add_response("later", "Later");
+    dialog.set_close_response("later");
+    if can_apply {
+        dialog.add_response("update", "Update now");
+        dialog.set_response_appearance("update", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("update"));
+    } else {
+        dialog.set_default_response(Some("later"));
+    }
+
+    let info = info.clone();
     dialog.connect_response(None, move |_, response| {
-        if response == "open" {
-            let _ = gtk4::gio::AppInfo::launch_default_for_uri(
-                &url,
-                None::<&gtk4::gio::AppLaunchContext>,
-            );
+        if response == "update" {
+            begin_in_app_update(&info);
         }
     });
 
-    dialog.present(None::<&gtk4::Window>);
+    dialog.present(None::<&gtk::Window>);
+}
+
+fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
+    let info = info.clone();
+    let kind = legion_core::update::detect_install_kind();
+    let dialog = adw::AlertDialog::new(
+        Some("Updating Legion Control"),
+        Some(&format!("Downloading v{}…", info.version)),
+    );
+    let bar = gtk::ProgressBar::new();
+    bar.set_show_text(true);
+    bar.set_pulse_step(0.08);
+    dialog.set_extra_child(Some(&bar));
+    dialog.set_can_close(false);
+    dialog.present(None::<&gtk::Window>);
+
+    let (ptx, prx) = mpsc::channel();
+    let info_w = info.clone();
+    let finished = Rc::new(Cell::new(false));
+    let finished_done = finished.clone();
+    dispatch_async(
+        move || {
+            legion_core::update::apply_update(&info_w, |phase, bytes, total| {
+                let _ = ptx.send((phase, bytes, total));
+            })
+        },
+        "Update download stopped",
+        {
+            let dialog = dialog.clone();
+            move |result| {
+                finished_done.set(true);
+                match result {
+                    Ok(outcome) => {
+                        dialog.set_can_close(true);
+                        dialog.force_close();
+                        prompt_restart_dialog(outcome, &info);
+                    }
+                    Err(e) => {
+                        dialog.set_can_close(true);
+                        dialog.force_close();
+                        let err = adw::AlertDialog::new(Some("Update failed"), Some(&e));
+                        err.add_response("ok", "OK");
+                        err.set_default_response(Some("ok"));
+                        err.present(None::<&gtk::Window>);
+                    }
+                }
+            }
+        },
+    );
+
+    glib::timeout_add_local(Duration::from_millis(150), move || {
+        if finished.get() {
+            return glib::ControlFlow::Break;
+        }
+        let mut last = None;
+        while let Ok(msg) = prx.try_recv() {
+            last = Some(msg);
+        }
+        if let Some((phase, bytes, total)) = last {
+            match phase {
+                legion_core::update::UpdatePhase::Downloading => {
+                    dialog.set_heading(Some("Downloading…"));
+                    if let Some(t) = total.filter(|t| *t > 0) {
+                        bar.set_fraction((bytes as f64 / t as f64).clamp(0.0, 1.0));
+                        bar.set_text(Some(&format!(
+                            "{:.1} / {:.1} MB",
+                            bytes as f64 / 1_000_000.0,
+                            t as f64 / 1_000_000.0
+                        )));
+                    } else {
+                        bar.pulse();
+                    }
+                }
+                legion_core::update::UpdatePhase::Verifying => {
+                    dialog.set_heading(Some("Verifying checksum…"));
+                    bar.set_fraction(1.0);
+                    bar.set_text(Some("sha256"));
+                }
+                legion_core::update::UpdatePhase::Installing => {
+                    dialog.set_heading(Some("Installing…"));
+                    bar.set_fraction(1.0);
+                    bar.set_text(Some(kind.label()));
+                }
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+fn prompt_restart_dialog(
+    outcome: legion_core::update::ApplyOutcome,
+    info: &legion_core::update::ReleaseInfo,
+) {
+    let extra = if outcome.needs_daemon_restage {
+        "\n\nAfter restart you will get one password prompt to refresh the background service."
+    } else {
+        ""
+    };
+    let dialog = adw::AlertDialog::new(
+        Some("Update ready"),
+        Some(&format!(
+            "v{} is installed. Restart Legion Control to switch to it.{extra}",
+            info.version
+        )),
+    );
+    dialog.add_response("later", "Later");
+    dialog.add_response("restart", "Restart now");
+    dialog.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("restart"));
+    dialog.set_close_response("later");
+    dialog.connect_response(None, move |_, response| {
+        if response != "restart" {
+            return;
+        }
+        match legion_core::update::spawn_relaunch(&outcome.relaunch, &[]) {
+            Ok(()) => {
+                if let Some(app) = gtk::gio::Application::default() {
+                    app.quit();
+                } else {
+                    std::process::exit(0);
+                }
+            }
+            Err(e) => {
+                let err = adw::AlertDialog::new(
+                    Some("Could not restart"),
+                    Some(&format!(
+                        "{e}\n\nQuit Legion Control from the tray or window and start it again."
+                    )),
+                );
+                err.add_response("ok", "OK");
+                err.present(None::<&gtk::Window>);
+            }
+        }
+    });
+    dialog.present(None::<&gtk::Window>);
 }
 
 pub(crate) fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {

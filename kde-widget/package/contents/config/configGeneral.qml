@@ -44,7 +44,7 @@ Kirigami.ScrollablePage {
 
         QQC2.CheckBox {
             id: sparklinesCheck
-            text: i18n("Show CPU temperature sparkline")
+            text: i18n("Show temperature sparklines")
         }
 
         QQC2.Label {

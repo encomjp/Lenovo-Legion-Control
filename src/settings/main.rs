@@ -44,6 +44,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 type PptScales = Rc<RefCell<Vec<(String, gtk::Scale, gtk::Label)>>>;
+type PendingUpdate = Rc<RefCell<Option<legion_core::update::ReleaseInfo>>>;
 
 fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
     let bytes = glib::Bytes::from_static(svg);
@@ -347,11 +348,32 @@ fn sync_daemon_ui(
     foot: &gtk::Box,
     banner: &adw::Banner,
     gate: &DaemonGate,
+    pending: &PendingUpdate,
 ) {
     log::debug!("daemon ui sync: online={online}");
     apply_conn_status(dot, conn_l, conn_s, foot, online);
-    banner.set_revealed(!online);
     gate.set_online(online);
+    apply_banner_state(banner, online, pending);
+}
+
+fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdate) {
+    if !online {
+        banner.set_title("Service offline — fans, profile, and charge need it");
+        banner.set_button_label(Some("Start daemon"));
+        banner.set_revealed(true);
+        return;
+    }
+    if let Some(info) = pending.borrow().as_ref() {
+        banner.set_title(&format!(
+            "New version available: v{} (installed v{})",
+            info.version,
+            legion_core::update::CURRENT_VERSION
+        ));
+        banner.set_button_label(Some("Update"));
+        banner.set_revealed(true);
+        return;
+    }
+    banner.set_revealed(false);
 }
 
 /// True when an IPC transport error means daemon/GUI ABI skew (bincode
@@ -704,6 +726,7 @@ fn build_ui(app: &adw::Application) {
     content_toolbar.add_top_bar(&banner);
     content_toolbar.set_content(Some(&stack));
     content_toolbar.set_vexpand(true);
+    let pending_update: PendingUpdate = Rc::new(RefCell::new(None));
 
     // One startup probe off the main loop: fixes the banner/gate/conn strip
     // and runs the session restore only when the daemon answered.
@@ -719,6 +742,7 @@ fn build_ui(app: &adw::Application) {
         let banner_p = banner.clone();
         let gate_p = daemon_gate.clone();
         let overlay_p = toast_overlay.clone();
+        let pending_p = pending_update.clone();
         glib::timeout_add_local(Duration::from_millis(120), move || {
             let online = match rx.try_recv() {
                 Ok(ok) => ok,
@@ -726,7 +750,7 @@ fn build_ui(app: &adw::Application) {
                 Err(mpsc::TryRecvError::Disconnected) => false,
             };
             sync_daemon_ui(
-                online, &dot_p, &conn_l_p, &conn_s_p, &foot_p, &banner_p, &gate_p,
+                online, &dot_p, &conn_l_p, &conn_s_p, &foot_p, &banner_p, &gate_p, &pending_p,
             );
             if online {
                 // Sensor warm-up for the first overview poll.
@@ -752,6 +776,7 @@ fn build_ui(app: &adw::Application) {
         let banner_c = banner.clone();
         let gate_c = daemon_gate.clone();
         let overlay_c = toast_overlay.clone();
+        let pending_c = pending_update.clone();
         click.connect_released(move |_, _, _, _| {
             conn_s_c.set_text("Checking…");
             let (tx, rx) = mpsc::channel();
@@ -765,10 +790,12 @@ fn build_ui(app: &adw::Application) {
             let banner_c = banner_c.clone();
             let gate_c = gate_c.clone();
             let overlay_c = overlay_c.clone();
+            let pending_c = pending_c.clone();
             glib::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
                 Ok(online) => {
                     sync_daemon_ui(
                         online, &dot_c, &conn_l_c, &conn_s_c, &foot_c, &banner_c, &gate_c,
+                        &pending_c,
                     );
                     if online {
                         toast_ok(&overlay_c, "Daemon online — service ready");
@@ -792,10 +819,17 @@ fn build_ui(app: &adw::Application) {
     let foot_b = foot.clone();
     let banner_b = banner.clone();
     let gate_b = daemon_gate.clone();
+    let pending_b = pending_update.clone();
     let starting = Rc::new(Cell::new(false));
     let starting_b = starting.clone();
     banner.connect_button_clicked(move |_| {
         if starting_b.get() {
+            return;
+        }
+        if banner_b.button_label().as_deref() == Some("Update") {
+            if let Some(info) = pending_b.borrow().clone() {
+                about::prompt_update_dialog(&info);
+            }
             return;
         }
         let overlay_ready = overlay_banner.clone();
@@ -805,11 +839,12 @@ fn build_ui(app: &adw::Application) {
         let foot_r = foot_b.clone();
         let banner_r = banner_b.clone();
         let gate_r = gate_b.clone();
+        let pending_r = pending_b.clone();
         let starting_r = starting_b.clone();
         run_daemon_command_async(DaemonCommand::GetProfile, move |result| {
             if matches!(result, Ok(DaemonResponse::Profile(_))) {
                 sync_daemon_ui(
-                    true, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r,
+                    true, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r, &pending_r,
                 );
                 toast_ok(&overlay_ready, "Control service is ready");
                 return;
@@ -830,19 +865,24 @@ fn build_ui(app: &adw::Application) {
             let foot = foot_r.clone();
             let banner = banner_r.clone();
             let gate = gate_r.clone();
+            let pending = pending_r.clone();
             let starting = starting_r.clone();
             glib::timeout_add_local(Duration::from_millis(200), move || match rx.try_recv() {
                 Ok(Ok(())) => {
                     starting.set(false);
                     banner.set_button_label(Some("Start daemon"));
-                    sync_daemon_ui(true, &dot, &conn_l, &conn_s, &foot, &banner, &gate);
+                    sync_daemon_ui(
+                        true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
+                    );
                     toast_ok(&overlay, "Control service started");
                     glib::ControlFlow::Break
                 }
                 Ok(Err(e)) => {
                     starting.set(false);
                     banner.set_button_label(Some("Start daemon"));
-                    sync_daemon_ui(false, &dot, &conn_l, &conn_s, &foot, &banner, &gate);
+                    sync_daemon_ui(
+                        false, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
+                    );
                     let overlay_c = overlay.clone();
                     toast_with_button(
                         &overlay,
@@ -1124,6 +1164,7 @@ fn build_ui(app: &adw::Application) {
     let banner_f = banner.clone();
     let overlay_f = toast_overlay.clone();
     let gate_f = daemon_gate.clone();
+    let pending_f = pending_update.clone();
     foot_click.connect_released(move |_, _, _, _| {
         let overlay_r = overlay_f.clone();
         let dot_r = dot_f.clone();
@@ -1132,10 +1173,11 @@ fn build_ui(app: &adw::Application) {
         let foot_r = foot_f.clone();
         let banner_r = banner_f.clone();
         let gate_r = gate_f.clone();
+        let pending_r = pending_f.clone();
         run_daemon_command_async(DaemonCommand::GetProfile, move |result| {
             let ok = matches!(result, Ok(DaemonResponse::Profile(_)));
             sync_daemon_ui(
-                ok, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r,
+                ok, &dot_r, &conn_l_r, &conn_s_r, &foot_r, &banner_r, &gate_r, &pending_r,
             );
             if ok {
                 toast_ok(&overlay_r, "Control service is ready");
@@ -1168,6 +1210,7 @@ fn build_ui(app: &adw::Application) {
     let foot_p = foot.clone();
     let banner_p = banner.clone();
     let gate_p = daemon_gate.clone();
+    let pending_p = pending_update.clone();
     glib::timeout_add_local(Duration::from_secs(5), move || {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
@@ -1179,10 +1222,11 @@ fn build_ui(app: &adw::Application) {
         let foot_q = foot_p.clone();
         let banner_q = banner_p.clone();
         let gate_q = gate_p.clone();
+        let pending_q = pending_p.clone();
         glib::timeout_add_local(Duration::from_millis(250), move || match rx.try_recv() {
             Ok(ok) => {
                 sync_daemon_ui(
-                    ok, &dot_q, &conn_l_q, &conn_s_q, &foot_q, &banner_q, &gate_q,
+                    ok, &dot_q, &conn_l_q, &conn_s_q, &foot_q, &banner_q, &gate_q, &pending_q,
                 );
                 glib::ControlFlow::Break
             }
@@ -1198,16 +1242,16 @@ fn build_ui(app: &adw::Application) {
         window.set_visible(false);
     } else {
         window.present();
+        maybe_finish_pending_restage(&toast_overlay);
     }
 
     // ─── Startup update notification ───
     // One background GitHub check ~8 s after launch (let the daemon probe
-    // finish first). Newer release → visible banner on Home + toast, and a
-    // prompt dialog when the window is visible. Silent when up to date or
-    // when the check fails (offline machines must not see error noise).
+    // finish first). Newer release → Home banner + dialog. Silent when up
+    // to date or when the check fails (offline machines must not see noise).
     {
         let banner_u = banner.clone();
-        let overlay_u = toast_overlay.clone();
+        let pending_u = pending_update.clone();
         glib::timeout_add_local_once(Duration::from_secs(8), move || {
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
@@ -1217,25 +1261,8 @@ fn build_ui(app: &adw::Application) {
                 match rx.try_recv() {
                     Ok(result) => match result {
                         Ok(info) if info.is_newer => {
-                            let msg = format!(
-                                "New version available: v{} (installed v{})",
-                                info.version,
-                                legion_core::update::CURRENT_VERSION
-                            );
-                            banner_u.set_title(&msg);
-                            banner_u.set_button_label(Some("Open release"));
-                            banner_u.set_revealed(true);
-                            {
-                                let url = info.html_url.clone();
-                                let overlay_n = overlay_u.clone();
-                                banner_u.connect_button_clicked(move |_| {
-                                    let _ = gtk4::gio::AppInfo::launch_default_for_uri(
-                                        &url,
-                                        None::<&gtk4::gio::AppLaunchContext>,
-                                    );
-                                    let _ = &overlay_n;
-                                });
-                            }
+                            *pending_u.borrow_mut() = Some(info.clone());
+                            apply_banner_state(&banner_u, true, &pending_u);
                             if !hidden {
                                 let info_c = info.clone();
                                 glib::timeout_add_local_once(
@@ -1450,7 +1477,8 @@ fn bootstrap_appimage_setup(operation: &str) -> Result<String, String> {
                 "/bin/sh",
                 "-c",
                 "tar -C / -xpf - && systemctl daemon-reload \
-                 && exec /usr/local/libexec/legion-control-setup \"$1\"",
+                 && /usr/local/libexec/legion-control-setup \"$1\" \
+                 && systemctl try-restart legion-control.service",
                 "sh",
                 operation,
             ])
@@ -1475,6 +1503,48 @@ fn bootstrap_appimage_setup(operation: &str) -> Result<String, String> {
     Ok(format!(
         "bootstrap staged stable helper + policy ({operation})"
     ))
+}
+
+/// Restage daemon/helper from the *running* AppImage squashfs, not the
+/// previously copied host helper (which would be one version behind).
+pub(crate) fn restage_from_running_appimage() -> Result<String, String> {
+    if appimage_root().is_none() {
+        return Err("Not running from an AppImage bundle".into());
+    }
+    bootstrap_appimage_setup("enable-daemon")
+}
+
+fn maybe_finish_pending_restage(overlay: &adw::ToastOverlay) {
+    if !legion_core::update::has_pending_restage() {
+        return;
+    }
+    if legion_core::update::running_appimage_path().is_none() {
+        legion_core::update::clear_pending_restage();
+        return;
+    }
+    if !legion_core::update::daemon_was_staged() {
+        legion_core::update::clear_pending_restage();
+        return;
+    }
+    let overlay = overlay.clone();
+    glib::timeout_add_local_once(Duration::from_millis(600), move || {
+        dispatch_async(
+            restage_from_running_appimage,
+            "Service refresh stopped without a result",
+            move |result| match result {
+                Ok(_) => {
+                    legion_core::update::clear_pending_restage();
+                    toast_ok(&overlay, "Background service updated to this version");
+                }
+                Err(e) => {
+                    toast_error(
+                        &overlay,
+                        &format!("Could not refresh the background service — {e}"),
+                    );
+                }
+            },
+        );
+    });
 }
 
 /// Run one daemon IPC request without blocking GTK's main loop.

@@ -289,6 +289,15 @@ legion-cli set-log-level trace
 
 The daemon accepts `off` as well. Unknown levels are rejected. The in-memory ring defaults to 500 entries and is capped at 2,000. The GUI's Fix → Service logs page fetches 100 entries, lets you copy them, and toggles between `info` and `debug`.
 
+Check for a newer release, and (AppImage only) apply it without opening a browser:
+
+```bash
+legion-cli check-update
+legion-cli check-update --apply
+```
+
+`--apply` downloads the matching asset for this install (AppImage, `.deb`, `.rpm`, Arch package, or `x86_64` tarball), verifies sha256, and installs it. Restart the GUI afterwards. AppImage copies restage the daemon on next launch with one PolicyKit prompt; native packages restart the service during install.
+
 Logging behavior is implemented in [`src/logging.rs`](../src/logging.rs). By default entries are written to stderr and the ring buffer. For the root system service, stderr is normally collected by journald; use `journalctl -u legion-control`. Set `LEGION_LOG_FILE=1` for a rotated JSON log under the process user's platform data directory, normally `~/.local/share/legion-control/`; for the root daemon this is often `/root/.local/share/legion-control/`, not the desktop user's log directory. Files older than seven days are cleaned up. `LEGION_LOG_RING` changes the ring size within the supported 100–2,000 range. The GUI's own logs are separate user-process logs.
 
 `SIGHUP` reloads the daemon's inherited environment log filter; it does not change the service unit's environment. Prefer the IPC command for a running service:

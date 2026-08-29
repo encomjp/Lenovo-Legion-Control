@@ -65,7 +65,15 @@ Either accept **Launch at login** in the guided setup, or later toggle **CPU →
 
 ### 5. Updating
 
-Replace the AppImage file with the newer one. The staged daemon is **not** overwritten automatically (systemd needs stable paths), so refresh it once:
+In the app: **Settings → Setup → Check for updates → Update now**. The AppImage downloads, verifies (sha256), replaces itself, and asks you to restart. After restart, one password prompt refreshes the staged daemon.
+
+Or from a terminal, with the same AppImage running:
+
+```bash
+legion-cli check-update --apply
+```
+
+Manual fallback: replace the AppImage file with the newer one, then refresh the staged daemon:
 
 ```bash
 sudo systemctl disable --now legion-control
@@ -354,7 +362,20 @@ The setup helper removes the bundled module with `remove-ryzen-smu`; its underly
 
 ### Native package upgrades
 
-Use the normal package-manager upgrade operation for the installed package. The package lifecycle scripts reload systemd and udev and preserve the running service behavior:
+**Settings → Setup → Update now** (or `legion-cli check-update --apply`) downloads the matching `.deb` / `.rpm` / Arch package and installs it with one PolicyKit prompt. Package scripts restart the daemon; then restart the app.
+
+You can still upgrade by hand:
+
+```bash
+# Debian/Ubuntu
+sudo apt install ./legion-control_*_amd64.deb
+
+# Fedora / RPM
+sudo dnf upgrade ./legion-control-*.rpm
+
+# Arch / CachyOS
+sudo pacman -U ./legion-control-*-x86_64.pkg.tar.zst
+```
 
 - Debian's [`packaging/debian/postinst`](../packaging/debian/postinst) daemon-reloads, enables, and restarts or starts the service, then reloads/triggers udev.
 - RPM `%post` enables/starts the service and reloads/triggers udev; `%postun` uses systemd's restart-aware post-uninstall handling.
@@ -368,7 +389,7 @@ To rebuild native packages from the current checkout:
 
 ### AppImage updates
 
-See [Updating](#5-updating) in the AppImage section: replace the file, refresh the staged daemon, click Enable again.
+The Settings app can download and replace the running AppImage (**Settings → Setup → Update now**), then restage the daemon after restart. See [Updating](#5-updating) in the AppImage section. The CLI equivalent is `legion-cli check-update --apply`.
 
 ### Source rebuilds
 

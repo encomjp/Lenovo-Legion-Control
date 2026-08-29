@@ -175,7 +175,11 @@ enum Commands {
         action: DiagAction,
     },
     /// Check GitHub for new releases of Legion Control
-    CheckUpdate,
+    CheckUpdate {
+        /// Download and install the matching release (AppImage, deb, rpm, Arch, tarball)
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -893,19 +897,59 @@ fn main() {
                 }
             }
         },
-        Commands::CheckUpdate => match legion_core::update::check_latest_release() {
+        Commands::CheckUpdate { apply } => match legion_core::update::check_latest_release() {
             Ok(info) => {
                 println!("current version: {}", legion_core::update::CURRENT_VERSION);
                 println!("latest release:  {} ({})", info.version, info.name);
+                if let Some(asset) = legion_core::update::selected_asset(&info) {
+                    println!("matching asset:   {} ({} bytes)", asset.name, asset.size);
+                } else if let Some(asset) = &info.appimage {
+                    println!("appimage:        {} ({} bytes)", asset.name, asset.size);
+                }
                 if info.is_newer {
                     println!(
-                        "\n✨ A new version of Legion Control is available: v{}",
+                        "\nA new version of Legion Control is available: v{}",
                         info.version
                     );
-                    println!("Release page: {}", info.html_url);
-                    println!("To update via installer:\n  git pull && ./install.sh");
+                    if apply {
+                        match legion_core::update::apply_update(&info, |phase, bytes, total| {
+                            let label = match phase {
+                                legion_core::update::UpdatePhase::Downloading => "downloading",
+                                legion_core::update::UpdatePhase::Verifying => "verifying",
+                                legion_core::update::UpdatePhase::Installing => "installing",
+                            };
+                            if let Some(t) = total.filter(|t| *t > 0) {
+                                eprint!("\r{label}: {bytes}/{t} bytes");
+                            } else {
+                                eprint!("\r{label}…");
+                            }
+                            let _ = std::io::Write::flush(&mut std::io::stderr());
+                        }) {
+                            Ok(outcome) => {
+                                eprintln!();
+                                println!("installed: {}", outcome.relaunch.display());
+                                println!("Restart Legion Control to switch to the new version.");
+                                if outcome.needs_daemon_restage {
+                                    println!(
+                                        "If the daemon is enabled, the next launch will refresh \
+                                         it with one password prompt."
+                                    );
+                                }
+                            }
+                            Err(e) => fail(e),
+                        }
+                    } else if legion_core::update::can_apply(&info) {
+                        println!(
+                            "To install without a browser:\n  legion-cli check-update --apply"
+                        );
+                        println!("Or use Update now in Settings → Setup.");
+                    } else {
+                        println!("{}", legion_core::update::manual_update_hint());
+                    }
+                } else if apply {
+                    println!("\nAlready up to date — nothing to apply.");
                 } else {
-                    println!("\n✓ Legion Control is up to date.");
+                    println!("\nLegion Control is up to date.");
                 }
             }
             Err(e) => fail(format!("failed to check for updates: {e}")),
@@ -1220,7 +1264,7 @@ fn cmd_label(cmd: &Commands) -> String {
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
-        Commands::CheckUpdate => "check-update".into(),
+        Commands::CheckUpdate { apply } => format!("check-update apply={apply}"),
     }
 }
 

@@ -5,6 +5,11 @@ Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-30
+
+- In-app updates for AppImage, `.deb`, `.rpm`, Arch packages, and portable tarball — no browser.
+- Plasma widget GPU card now has a temperature sparkline matching the CPU card.
+
 ## 0.1.9 - 2026-08-30
 
 - Fix dGPU detection by scanning PCI display controllers instead of inferring hardware from installed driver tools or the first DRM card.

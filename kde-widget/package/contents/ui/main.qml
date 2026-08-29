@@ -25,6 +25,7 @@ PlasmoidItem {
     property string batWatts: "--"
     property string cliCommand: "bash " + Qt.resolvedUrl("legion-command.sh").toString().replace("file://", "")
     property var tempHistory: []
+    property var gpuTempHistory: []
     property real _lastWriteTime: 0
     property int refreshInterval: Plasmoid.configuration.RefreshInterval || 2
     property bool showGauges: Plasmoid.configuration.ShowGauges !== false
@@ -206,7 +207,7 @@ PlasmoidItem {
                 visible: root.showGauges
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (sparkline.visible ? 26 : 0)
+                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (root.showSparklines ? 26 : 0)
                     radius: 10
                     clip: true
                     color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
@@ -243,7 +244,7 @@ PlasmoidItem {
                 }
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: fullRoot.gaugeSize + 22
+                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (root.showSparklines ? 26 : 0)
                     radius: 10
                     clip: true
                     color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
@@ -256,7 +257,27 @@ PlasmoidItem {
                         anchors.bottom: parent.bottom
                         color: root.benchSteel
                     }
-                    Gauge { anchors.centerIn: parent; size: fullRoot.gaugeSize; value: parseFloat(root.gpuTemp); label: "GPU"; unit: "°C"; minValue: 20; maxValue: 100 }
+                    Gauge {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.topMargin: 8
+                        size: fullRoot.gaugeSize
+                        value: parseFloat(root.gpuTemp)
+                        label: "GPU"; unit: "°C"; minValue: 20; maxValue: 100
+                    }
+                    Sparkline {
+                        id: gpuSparkline
+                        visible: root.showSparklines && root.gpuTempHistory.length > 3
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.bottomMargin: 6
+                        height: 18
+                        points: root.gpuTempHistory
+                        lineColor: Qt.rgba(root.benchSteel.r, root.benchSteel.g, root.benchSteel.b, 0.85)
+                    }
                 }
             }
 
@@ -484,6 +505,12 @@ PlasmoidItem {
                 var valTemp=parseFloat(cpuTemp);
                 if(!isNaN(valTemp)){
                     var h=root.tempHistory.slice(); h.push(valTemp); if(h.length>30)h.shift(); root.tempHistory=h
+                }
+            }
+            if(gpuTemp!=="--"){
+                var gpuVal=parseFloat(gpuTemp);
+                if(!isNaN(gpuVal) && gpuVal>=0){
+                    var gh=root.gpuTempHistory.slice(); gh.push(gpuVal); if(gh.length>30)gh.shift(); root.gpuTempHistory=gh
                 }
             }
         }
