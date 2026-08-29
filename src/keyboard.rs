@@ -707,8 +707,15 @@ impl SpectrumDevice {
             log::warn!("spectrum: {msg}");
             return Err(msg);
         }
-        if (ret as usize) < REPORT_SIZE {
-            let msg = format!("HIDIOCGFEATURE returned short read: {ret} < {REPORT_SIZE}");
+        // Short replies are normal for this firmware: profile/brightness/logo
+        // queries answer with a 5-byte ACK frame (07 <op> 01 00 <value>).
+        // Only the report ID (buf[0] == 0x07) is guaranteed — demanding the
+        // full 960 bytes broke every effect apply (regression in 13a77ff).
+        if (ret as usize) < 5 || buf[0] != 0x07 {
+            let msg = format!(
+                "HIDIOCGFEATURE returned unusable reply: {ret} bytes, report_id=0x{:02X}",
+                buf[0]
+            );
             log::warn!("spectrum: {msg}");
             return Err(msg);
         }
