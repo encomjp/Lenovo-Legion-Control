@@ -9,6 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::battery;
+
 /// Cached mapping of hwmon subsystem names to their base paths.
 static HWMON_CACHE: Mutex<Option<HashMap<String, Vec<PathBuf>>>> = Mutex::new(None);
 
@@ -552,25 +554,21 @@ pub fn read_all() -> SensorReadings {
     }
 
     // ─── Battery ───
-    let bat = Path::new("/sys/class/power_supply/BAT0");
-    if let Some(val) = read_int(&bat.join("capacity")) {
-        s.battery_pct = val as u32;
-        log::trace!("sensors::read_all: BAT0 capacity={}%", s.battery_pct);
-    } else {
-        log::trace!("sensors::read_all: BAT0 capacity unavailable");
-    }
-    s.battery_status = read_file(&bat.join("status")).unwrap_or_default();
-    log::trace!("sensors::read_all: BAT0 status='{}'", s.battery_status);
-    if let Some(val) = read_int(&bat.join("voltage_now")) {
-        s.battery_voltage = val as f64 / 1_000_000.0;
-        log::trace!("sensors::read_all: BAT0 voltage={:.3} V", s.battery_voltage);
-    }
-    if let Some(val) = read_int(&bat.join("cycle_count")) {
-        s.battery_cycles = val as u32;
-        log::trace!("sensors::read_all: BAT0 cycle_count={}", s.battery_cycles);
-    }
-    s.charge_type = read_file(&bat.join("charge_types")).unwrap_or_default();
-    log::trace!("sensors::read_all: BAT0 charge_types='{}'", s.charge_type);
+    // Reuse the battery module's BAT0/BAT1/BAT2/BATT probe so this legacy
+    // flattened sensor block agrees with the canonical battery summary.
+    s.battery_pct = battery::capacity().unwrap_or_default();
+    s.battery_status = battery::status().unwrap_or_default();
+    s.battery_voltage = battery::voltage().unwrap_or_default();
+    s.battery_cycles = battery::cycles().unwrap_or_default();
+    s.charge_type = battery::charge_types().unwrap_or_default();
+    log::trace!(
+        "sensors::read_all: battery capacity={}% status='{}' voltage={:.3} V cycles={} charge_types='{}'",
+        s.battery_pct,
+        s.battery_status,
+        s.battery_voltage,
+        s.battery_cycles,
+        s.charge_type
+    );
 
     s
 }

@@ -82,7 +82,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             false,
             format!("{pct}% out of range"),
         )),
-        (None, _) => out.push(check("battery_capacity", false, "BAT0 capacity unreadable")),
+        (None, _) => out.push(check("battery_capacity", false, "battery capacity unreadable")),
     }
     let status = battery::status().unwrap_or_default();
     out.push(check(
@@ -113,19 +113,29 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     out.push(check(
         "fans_enumerated",
         !channels.is_empty(),
-        format!("{} channel(s)", channels.len()),
+        format!(
+            "{} channel(s) via {}",
+            channels.len(),
+            fans::backend_name()
+        ),
     ));
+    // Missing RPM support is a capability state, not a failed read. Only an
+    // attribute that exists but cannot be read indicates a broken backend.
     let mut rpm_ok = true;
-    for id in fans::ids() {
-        if fans::read_rpm(id).is_none() {
+    let mut detail_parts: Vec<String> = Vec::new();
+    for f in &channels {
+        let (rpm, state) = fans::rpm_status(f.id);
+        if state == fans::FanRpmState::Unreadable {
             rpm_ok = false;
         }
+        match rpm {
+            Some(rpm) => detail_parts.push(format!("fan{} {rpm} rpm", f.id)),
+            None => {
+                detail_parts.push(format!("fan{} {}", f.id, state.as_str()));
+            }
+        }
     }
-    out.push(check(
-        "fan_rpms_readable",
-        rpm_ok,
-        format!("{} fan(s)", channels.len()),
-    ));
+    out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(" · ")));
 
     // Temperatures.
     let s = sensors::read_all();

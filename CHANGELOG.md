@@ -5,6 +5,15 @@ Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
 ## Unreleased
 
+## 0.1.9 - 2026-08-30
+
+- Fix dGPU detection by scanning PCI display controllers instead of inferring hardware from installed driver tools or the first DRM card.
+- Keep AMD/Intel integrated GPUs out of the discrete-GPU field and clean multi-bracket `lspci` names correctly.
+- Associate NVIDIA driver versions only with a detected NVIDIA dGPU; report dGPU vendor and PCI ID for fleet triage.
+- Treat an unavailable fan RPM capability as informational while still failing genuinely unreadable exposed attributes.
+- Add separate RPM/control fan backends plus per-fan readability/state to telemetry schema v3.
+- Reuse the battery module's BAT0/BAT1/BAT2/BATT probe in flattened sensor telemetry.
+
 - a22ce4c 2026-08-25 fix(ppt): unit-aware limits end-to-end + unified fw-attr gate
 - 7933630 2026-08-25 docs: single-repo AGENTS.md — always-commit rule + meta/ layout
 - df3643f 2026-08-25 Add 'meta/' from commit '07ed72840caecd91345e3009c2105e0b45c3842e'

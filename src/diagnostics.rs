@@ -63,7 +63,7 @@ pub const DEFAULT_TELEMETRY_KEY: &str =
 /// via override or configured endpoint.
 pub const DEFAULT_TAILSCALE_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
 
-pub const REPORT_SCHEMA_VERSION: u32 = 2;
+pub const REPORT_SCHEMA_VERSION: u32 = 3;
 
 /// Deep-report cadence: full sensor dump sent on daemon launch, every hour,
 /// and whenever the capability digest changes (new fan channels, amp bound,
@@ -91,6 +91,11 @@ pub struct DiagnosticsReport {
     pub os: OsInfo,
     pub sensors: sensors::SensorReadings,
     pub battery: BatterySummary,
+    /// Actual RPM reader selected for this report, exposed at top level for
+    /// fleet queries. Device capability discovery remains nested in `device`.
+    pub fan_backend: String,
+    /// Separate writable target backend; null for read-only fan hardware.
+    pub fan_control_backend: Option<String>,
     pub fans: Vec<FanLive>,
     pub thermal: ThermalDigest,
     pub profiles: ProfilesDigest,
@@ -176,12 +181,14 @@ pub struct CpuDetail {
 pub struct GpuDetail {
     pub discrete_name: Option<String>,
     pub integrated_name: Option<String>,
+    #[serde(default)]
+    pub discrete_vendor: Option<String>,
     pub driver_version: Option<String>,
     pub vram_total_mb: Option<u64>,
     pub pci_id: Option<String>,
-    /// dGPU lifecycle: "active" (reading metrics), "inactive" (present but
-    /// runtime-suspended after a live reading), "off" (present, never live
-    /// this boot), "absent" (no discrete GPU).
+    /// dGPU lifecycle: "active" (reading NVIDIA metrics), "inactive"
+    /// (runtime-suspended after a live reading), "off" (present, never live
+    /// this boot), "present" (non-NVIDIA), or "absent" (no discrete GPU).
     #[serde(default)]
     pub state: Option<String>,
 }
@@ -292,6 +299,10 @@ pub struct FanLive {
     pub max_rpm: u32,
     pub rpm: Option<u32>,
     pub target: Option<u32>,
+    pub readable: bool,
+    /// `readable`, `not-exposed`, `backend-unavailable`, or `unreadable`.
+    #[serde(default)]
+    pub state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -423,7 +434,7 @@ fn rewrite_prefix_to_tilde(text: &str, prefix: &str) -> String {
 pub fn collect() -> DiagnosticsReport {
     log::debug!("diagnostics: collecting report");
     sweep_stale_temp();
-    let s = sensors::read_all();
+    let mut s = sensors::read_all();
     log::debug!(
         "diag sensors: cpu {:.1}°C · dgpu {:.1}°C · igpu {:.1}°C · {} ssd(s) · {} ram module(s)",
         s.cpu_temp,
@@ -455,6 +466,12 @@ pub fn collect() -> DiagnosticsReport {
         health_pct: battery::health_pct(),
         charge_limit_pct: battery::charge_limit_pct(),
     };
+    // Keep the legacy flattened fields and canonical battery block coherent
+    // within this report even if AC state changes during collection.
+    s.battery_pct = battery_summary.capacity_pct.unwrap_or_default();
+    s.battery_status = battery_summary.status.clone().unwrap_or_default();
+    s.battery_voltage = battery_summary.voltage_v.unwrap_or_default();
+    s.battery_cycles = battery_summary.cycles.unwrap_or_default();
     log::debug!(
         "diag battery: capacity {:?}% · status {:?} · limit {}%",
         battery_summary.capacity_pct,
@@ -464,13 +481,16 @@ pub fn collect() -> DiagnosticsReport {
 
     let mut fan_list = Vec::new();
     for f in fans::channels() {
+        let (rpm, state) = fans::rpm_status(f.id);
         fan_list.push(FanLive {
             id: f.id,
             title: f.title,
             min_rpm: f.min_rpm,
             max_rpm: f.max_rpm,
-            rpm: fans::read_rpm(f.id),
+            rpm,
             target: fans::read_target(f.id),
+            readable: state == fans::FanRpmState::Readable,
+            state: state.as_str().into(),
         });
     }
     log::debug!("diag fans: {} channel(s)", fan_list.len());
@@ -534,6 +554,8 @@ pub fn collect() -> DiagnosticsReport {
         os: read_os_release(),
         sensors: s,
         battery: battery_summary,
+        fan_backend: fans::backend_name(),
+        fan_control_backend: fans::control_backend_name(),
         fans: fan_list,
         thermal: thermal_digest,
         profiles: ProfilesDigest {
@@ -890,28 +912,29 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
 
     // 2. GPU detection
     let dev = device::detect();
-    let discrete_name = if !dev.gpu_model.is_empty() && dev.gpu_model != "unknown" {
-        Some(dev.gpu_model.clone())
+    let inventory = device::gpu_inventory();
+    let discrete_name = (!dev.gpu_model.is_empty()
+        && !dev.gpu_model.eq_ignore_ascii_case("unknown"))
+    .then(|| dev.gpu_model.clone());
+    let driver_ver = if inventory.discrete_vendor.as_deref() == Some("NVIDIA") {
+        std::fs::read_to_string("/sys/module/nvidia/version")
+            .ok()
+            .map(|s| s.trim().to_string())
     } else {
         None
     };
-    let driver_ver = std::fs::read_to_string("/sys/module/nvidia/version")
-        .ok()
-        .map(|s| s.trim().to_string());
+    let state = crate::dgpu::discrete_state();
 
     let gpu = GpuDetail {
         discrete_name,
-        integrated_name: if dev.cpu_model.contains("AMD") {
-            Some("AMD Radeon Graphics".into())
-        } else {
-            Some("Intel Graphics".into())
-        },
+        integrated_name: inventory.integrated_name,
+        discrete_vendor: inventory.discrete_vendor,
         driver_version: driver_ver,
         vram_total_mb: None,
-        pci_id: None,
-        // active | inactive | off | absent — lets the portal render an
+        pci_id: inventory.discrete_pci_id,
+        // active | inactive | off | present | absent lets the portal render an
         // honest dGPU status instead of a bare -1 sentinel.
-        state: Some(crate::dgpu::discrete_state().to_string()),
+        state: Some(state.to_string()),
     };
 
     // 3. Memory totals from /proc/meminfo

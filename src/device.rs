@@ -93,22 +93,16 @@ fn detect_uncached() -> DeviceInfo {
         }
     );
 
-    let gpu = match crate::dgpu::smi_query("name") {
-        Some(name) => {
-            log::debug!("device detect: gpu detection via nvidia-smi → {name:?}");
-            name
-        }
-        None => {
-            // nvidia-smi returns nothing when the dGPU is runtime-suspended
-            // (LOQ fleet report: dgpu_probe "powered down"). Fall back to a
-            // PCI-ID lookup on /sys/class/drm so the report still names the
-            // chip instead of "Unknown".
-            log::debug!("device detect: nvidia-smi empty — falling back to PCI ID lookup");
-            pci_gpu_name().unwrap_or_else(|| {
-                log::debug!("device detect: pci lookup found nothing — using \"Unknown\"");
-                "Unknown".to_string()
-            })
-        }
+    let gpu_inventory = gpu_inventory();
+    let gpu = if gpu_inventory.discrete_vendor.as_deref() == Some("NVIDIA") {
+        crate::dgpu::smi_query("name")
+            .or_else(|| gpu_inventory.discrete_name.clone())
+            .unwrap_or_else(|| "Unknown".into())
+    } else {
+        gpu_inventory
+            .discrete_name
+            .clone()
+            .unwrap_or_else(|| "Unknown".into())
     };
     let cpu = match read_cpu_model() {
         Some(c) => {
@@ -253,143 +247,204 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
     }
 }
 
-/// Best-effort dGPU name from PCI vendor/device IDs when nvidia-smi has no
-/// data (runtime-suspended GPU). Scans drm cards for vendor 0x10de (NVIDIA),
-/// then resolves the name via /usr/share/hwdata/pci.ids or lspci.
-/// Discrete-GPU PCI vendors to name-resolve. NVIDIA dGPUs are the norm, but
-/// AMD dGPUs exist in the fleet (Radeon RX 7000M/8000M class LOQs) and deserve
-/// a resolved name too.
-const GPU_VENDORS: [(&str, &str); 2] = [("0x10de", "10de"), ("0x1002", "1002")];
+const GPU_VENDORS: [(&str, &str, &str); 3] = [
+    ("0x10de", "10de", "NVIDIA"),
+    ("0x1002", "1002", "AMD"),
+    ("0x8086", "8086", "Intel"),
+];
 
-/// Resolve a dGPU/iGPU marketing name via lspci for the first card whose
-/// vendor matches a known GPU vendor. Works for NVIDIA and AMD alike.
-/// Resolve a dGPU marketing name via lspci for the first card whose
-/// vendor matches a known GPU vendor. Works for NVIDIA and AMD alike.
-///
-/// iGPU awareness: `boot_vga=1` marks the card the firmware used for
-/// display at boot — on APU systems that is the CPU-integrated GPU. When a
-/// non-boot card exists we return that (the dGPU); when ONLY the boot card
-/// exists the machine has no dGPU and we return None so the report does
-/// not mislabel the iGPU as discrete (IdeaPad 5500H "Cezanne" case).
-fn pci_gpu_name() -> Option<String> {
-    // Collect (dev_path, vendor, device_id) for all GPU-vendor cards.
-    let mut cards: Vec<(std::path::PathBuf, String, String)> = Vec::new();
-    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
-    for entry in entries.flatten() {
-        let dev = entry.path().join("device");
-        let Some(vendor) = std::fs::read_to_string(dev.join("vendor"))
-            .ok()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|v| GPU_VENDORS.iter().any(|(known, _)| known.eq_ignore_ascii_case(v)))
-        else {
-            continue;
-        };
-        let Some((_label, lspci_vendor)) = GPU_VENDORS
-            .iter()
-            .find(|(known, _)| vendor.eq_ignore_ascii_case(known))
-        else {
-            continue;
-        };
-        let device_id = std::fs::read_to_string(dev.join("device"))
-            .map(|s| s.trim().trim_start_matches("0x").to_uppercase())
-            .ok()?;
-        cards.push((dev, lspci_vendor.to_string(), device_id));
-    }
-    if cards.is_empty() {
-        return None;
-    }
-    // Prefer a non-boot-VGA card (the dGPU); fall through to None when
-    // every card is a boot VGA (APU-only machine).
-    let is_dgpu = |dev: &std::path::Path| -> bool {
-        std::fs::read_to_string(dev.join("boot_vga"))
-            .map(|v| v.trim() != "1")
-            .unwrap_or(true) // missing attr (older kernels) — assume dGPU
-    };
-    let (dev, lspci_vendor, device_id) = cards
-        .iter()
-        .find(|(d, _, _)| is_dgpu(d))
-        .or_else(|| cards.iter().find(|(d, _, _)| !is_dgpu(d)))?;
-    let _ = dev; // selection done; only vendor/id feed lspci below
-    log::debug!("device detect: GPU PCI device id {lspci_vendor}:{device_id}");
-    // lspci -d with the device id already filters to the right chip;
-    // the "-s ::00" slot filter restricts to the VGA function — dGPUs
-    // (and NVIDIA in particular) often expose an audio controller at .1.
-    // Default (non-numeric) output carries the resolved name after the
-    // first ": " separator.
-    if let Ok(out) = std::process::Command::new("lspci")
-        .args(["-d", &format!("{lspci_vendor}:{device_id}"), "-s", "::00"])
-        .output()
-    {
-        let text = String::from_utf8_lossy(&out.stdout);
-        if let Some(rest) = text
-            .lines()
-            .next()
-            .and_then(|l| l.split_once(": "))
-            .map(|(_, n)| n.trim().to_string())
-            .filter(|n| !n.is_empty())
-        {
-            return Some(clean_gpu_name(rest));
-        }
-    }
-    // Fall back to a small built-in known-GPU table (stale pci.ids on the
-    // host is common — fleet showed 10de:2dd8 resolving on Fedora but not
-    // CachyOS), then the raw PCI id.
-    let known = known_gpu_name(lspci_vendor, device_id.as_str());
-    if let Some(name) = known {
-        return Some(name.to_string());
-    }
-    let short = if lspci_vendor.eq_ignore_ascii_case("10de") {
-        "NVIDIA"
-    } else {
-        "AMD"
-    };
-    return Some(format!("{short} GPU ({lspci_vendor}:{device_id})"));
+#[derive(Debug, Clone)]
+struct PciGpu {
+    slot: String,
+    vendor: String,
+    device: String,
+    name: String,
 }
 
-/// Built-in PCI-ID names for recent mobile GPUs seen in the fleet or in
-/// Lenovo's current lineup. Kept tiny — lspci/pci.ids resolves everything
-/// else on any reasonably updated host.
-fn known_gpu_name(vendor: &str, device_id: &str) -> Option<&'static str> {
-    if vendor.eq_ignore_ascii_case("10de") {
-        match device_id {
-            "2DD8" => Some("GeForce RTX 5050 Max-Q / Mobile"), // LOQ 15AHP10 fleet report
-            "2C59" => Some("GeForce RTX 5080 Max-Q / Mobile"),
-            "2CC9" => Some("GeForce RTX 5060 Max-Q / Mobile"),
-            "28E0" => Some("GeForce RTX 4060 Max-Q / Mobile"),
-            "28A0" => Some("GeForce RTX 4070 Max-Q / Mobile"),
-            "2760" => Some("GeForce RTX 4080 Max-Q / Mobile"),
-            "2710" => Some("GeForce RTX 4090 Max-Q / Mobile"),
-            _ => None,
+#[derive(Debug, Clone, Default)]
+pub struct GpuInventory {
+    pub discrete_name: Option<String>,
+    pub integrated_name: Option<String>,
+    pub discrete_vendor: Option<String>,
+    pub discrete_pci_id: Option<String>,
+}
+
+fn pci_gpus() -> Vec<PciGpu> {
+    let mut cards = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") else {
+        return cards;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let class = read_file(path.join("class")).unwrap_or_default();
+        if !class.trim_start_matches("0x").starts_with("03") {
+            continue;
         }
-    } else {
-        None
+        let vendor = read_file(path.join("vendor"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !GPU_VENDORS
+            .iter()
+            .any(|(sysfs, _, _)| sysfs.eq_ignore_ascii_case(&vendor))
+        {
+            continue;
+        }
+        let device = read_file(path.join("device"))
+            .unwrap_or_default()
+            .trim_start_matches("0x")
+            .to_ascii_uppercase();
+        if device.is_empty() {
+            continue;
+        }
+        let mut card = PciGpu {
+            slot: entry.file_name().to_string_lossy().into_owned(),
+            vendor,
+            device,
+            name: String::new(),
+        };
+        card.name = resolve_gpu_name(&card);
+        cards.push(card);
     }
+    cards
+}
+
+fn select_discrete_gpu(cards: &[PciGpu]) -> Option<&PciGpu> {
+    // boot_vga is only the firmware console and can point at the dGPU in MUX
+    // mode. Use positive vendor/marketing evidence; ambiguous controllers
+    // remain unclassified rather than being reported in the wrong role.
+    cards.iter().find(|card| looks_discrete_gpu(card))
+}
+
+fn looks_discrete_gpu(card: &PciGpu) -> bool {
+    if card.vendor == "0x10de" {
+        return true;
+    }
+    let name = card.name.to_ascii_lowercase();
+    match card.vendor.as_str() {
+        "0x1002" => ["radeon rx", "radeon pro", "firepro", "instinct"]
+            .iter()
+            .any(|marker| name.contains(marker)),
+        "0x8086" => ["arc a", "arc b", "data center gpu"]
+            .iter()
+            .any(|marker| name.contains(marker)),
+        _ => false,
+    }
+}
+
+fn looks_integrated_gpu(card: &PciGpu) -> bool {
+    let name = card.name.to_ascii_lowercase();
+    match card.vendor.as_str() {
+        "0x1002" => [
+            "radeon graphics",
+            "radeon vega",
+            "radeon 6",
+            "radeon 7",
+            "radeon 8",
+            "radeon 9",
+        ]
+        .iter()
+        .any(|marker| name.contains(marker)),
+        "0x8086" => ["uhd graphics", "iris", "arc graphics", "integrated graphics"]
+            .iter()
+            .any(|marker| name.contains(marker)),
+        _ => false,
+    }
+}
+
+fn resolve_gpu_name(card: &PciGpu) -> String {
+    let (_, pci_vendor, label) = GPU_VENDORS
+        .iter()
+        .find(|(sysfs, _, _)| sysfs.eq_ignore_ascii_case(&card.vendor))
+        .copied()
+        .unwrap_or((card.vendor.as_str(), "unknown", "GPU"));
+    if let Ok(output) = std::process::Command::new("lspci")
+        .args(["-s", card.slot.as_str()])
+        .output()
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(name) = text
+                .lines()
+                .next()
+                .and_then(|line| line.split_once(": "))
+                .map(|(_, raw)| clean_gpu_name(raw))
+                .filter(|name| {
+                    !name.is_empty()
+                        && name != "AMD/ATI"
+                        && !name.to_ascii_lowercase().starts_with("device ")
+                })
+            {
+                return name;
+            }
+        }
+    }
+    format!("{label} GPU ({pci_vendor}:{})", card.device)
+}
+
+fn gpu_inventory_uncached() -> GpuInventory {
+    let cards = pci_gpus();
+    let discrete = select_discrete_gpu(&cards);
+    let integrated = cards
+        .iter()
+        .find(|card| {
+            discrete.is_none_or(|dgpu| dgpu.slot != card.slot) && looks_integrated_gpu(card)
+        });
+    GpuInventory {
+        discrete_name: discrete.map(|card| card.name.clone()),
+        integrated_name: integrated.map(|card| card.name.clone()),
+        discrete_vendor: discrete.map(|card| {
+            GPU_VENDORS
+                .iter()
+                .find(|(sysfs, _, _)| sysfs.eq_ignore_ascii_case(&card.vendor))
+                .map(|(_, _, label)| (*label).to_string())
+                .unwrap_or_else(|| "Unknown".into())
+        }),
+        discrete_pci_id: discrete.map(|card| {
+            format!(
+                "{}:{}",
+                card.vendor.trim_start_matches("0x"),
+                card.device.to_ascii_lowercase()
+            )
+        }),
+    }
+}
+
+pub fn gpu_inventory() -> GpuInventory {
+    static INVENTORY: OnceLock<GpuInventory> = OnceLock::new();
+    INVENTORY.get_or_init(gpu_inventory_uncached).clone()
+}
+
+pub fn discrete_gpu_present() -> bool {
+    gpu_inventory().discrete_name.is_some()
 }
 
 /// Trim marketing noise from an lspci GPU name.
-fn clean_gpu_name(raw: String) -> String {
-    let t = raw.trim();
-    // "NVIDIA Corporation AD106M [RTX 4070 Max-Q / Mobile]" → keep the
-    // bracketed marketing name when present, else the plain tail.
-    if let (Some(open), Some(close)) = (t.find('['), t.rfind(']')) {
-        if open < close {
-            return t[open + 1..close].to_string();
+fn clean_gpu_name(raw: &str) -> String {
+    let without_rev = raw
+        .trim()
+        .split_once(" (rev ")
+        .map(|(name, _)| name)
+        .unwrap_or_else(|| raw.trim());
+    let stripped = without_rev
+        .strip_prefix("NVIDIA Corporation ")
+        .or_else(|| without_rev.strip_prefix("Advanced Micro Devices, Inc. [AMD/ATI] "))
+        .or_else(|| without_rev.strip_prefix("Intel Corporation "))
+        .unwrap_or(without_rev)
+        .trim_start_matches("AMD/ATI] ")
+        .trim();
+
+    // lspci often emits a chip codename followed by the useful marketing
+    // name, e.g. "Cezanne [Radeon Vega Series]". Taking the final bracket
+    // pair avoids spanning the vendor tag `[AMD/ATI]` and the model pair.
+    if let Some(open) = stripped.rfind('[') {
+        if let Some(close) = stripped[open + 1..].find(']') {
+            let candidate = stripped[open + 1..open + 1 + close].trim();
+            if !candidate.is_empty() && candidate != "AMD/ATI" {
+                return candidate.to_string();
+            }
         }
     }
-    let stripped = t
-        .strip_prefix("NVIDIA Corporation ")
-        .unwrap_or(t);
-    // AMD names: "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge
-    // [Radeon Graphics] (rev d4)" without brackets already handled above;
-    // strip the corporate prefix and "(rev …)" tail when unbracketed.
-    let stripped = stripped
-        .strip_prefix("Advanced Micro Devices, Inc. [AMD/ATI] ")
-        .unwrap_or(stripped);
-    if let Some(rev) = stripped.find(" (rev ") {
-        stripped[..rev].trim().to_string()
-    } else {
-        stripped.to_string()
-    }
+    stripped.to_string()
 }
 
 fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapability>) {
@@ -536,14 +591,14 @@ fn collect_fans_from_hwmon(
     log::trace!("fan probe: {disp} fan channels discovered: {ids:?}");
 
     ids.into_iter()
-        .filter_map(|id| {
-            let input = match read_u32(hw.join(format!("fan{id}_input"))) {
-                Some(v) => v,
-                None => {
-                    log::trace!("fan probe: {disp} fan{id}_input unreadable — channel skipped");
-                    return None;
-                }
-            };
+        .map(|id| {
+            // The filename proves the channel is exposed. Preserve it even
+            // when the first value read fails so diagnostics can report an
+            // `unreadable` channel instead of silently dropping it.
+            let input = read_u32(hw.join(format!("fan{id}_input"))).unwrap_or_else(|| {
+                log::trace!("fan probe: {disp} fan{id}_input unreadable — keeping channel");
+                0
+            });
             let min = read_u32(hw.join(format!("fan{id}_min"))).unwrap_or_else(|| {
                 log::trace!("fan probe: {disp} fan{id}: no _min attr — profile/default fallback");
                 profile
@@ -578,13 +633,13 @@ fn collect_fans_from_hwmon(
                 min,
                 max.max(min + 100)
             );
-            Some(FanCapability {
+            FanCapability {
                 id,
                 title,
                 min_rpm: min,
                 max_rpm: max.max(min + 100),
                 current_rpm: input,
-            })
+            }
         })
         .collect()
 }
@@ -945,5 +1000,83 @@ mod tests {
         assert_eq!(fan_title(1), "CPU fan");
         assert_eq!(fan_title(2), "GPU fan");
         assert_eq!(fan_title(4), "Aux fan");
+    }
+
+    fn test_gpu(slot: &str, vendor: &str, name: &str) -> PciGpu {
+        PciGpu {
+            slot: slot.into(),
+            vendor: vendor.into(),
+            device: "1234".into(),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn discrete_gpu_selection_uses_pci_topology() {
+        let apu_only = [test_gpu("0000:08:00.0", "0x1002", "Radeon Graphics")];
+        assert!(select_discrete_gpu(&apu_only).is_none());
+        let apu_without_boot_vga = [test_gpu("0000:08:00.0", "0x1002", "Radeon Vega Series")];
+        assert!(select_discrete_gpu(&apu_without_boot_vga).is_none());
+
+        let hybrid = [
+            test_gpu("0000:08:00.0", "0x1002", "Radeon Graphics"),
+            test_gpu("0000:01:00.0", "0x10de", "GeForce RTX GPU"),
+        ];
+        assert_eq!(
+            select_discrete_gpu(&hybrid).map(|gpu| gpu.slot.as_str()),
+            Some("0000:01:00.0")
+        );
+
+        let nvidia_only = [test_gpu("0000:01:00.0", "0x10de", "GeForce RTX GPU")];
+        assert!(select_discrete_gpu(&nvidia_only).is_some());
+
+        let amd_dgpu_only = [test_gpu(
+            "0000:03:00.0",
+            "0x1002",
+            "Radeon RX 7700S",
+        )];
+        assert!(select_discrete_gpu(&amd_dgpu_only).is_some());
+
+        let muxed_amd = [
+            test_gpu("0000:08:00.0", "0x1002", "Radeon 780M"),
+            test_gpu("0000:03:00.0", "0x1002", "Radeon RX 7700S"),
+        ];
+        assert_eq!(
+            select_discrete_gpu(&muxed_amd).map(|gpu| gpu.slot.as_str()),
+            Some("0000:03:00.0")
+        );
+    }
+
+    #[test]
+    fn gpu_name_cleanup_uses_model_not_vendor_tag() {
+        assert_eq!(
+            clean_gpu_name(
+                "Advanced Micro Devices, Inc. [AMD/ATI] Cezanne [Radeon Vega Series / Radeon Vega Mobile Series] (rev c5)"
+            ),
+            "Radeon Vega Series / Radeon Vega Mobile Series"
+        );
+        assert_eq!(
+            clean_gpu_name(
+                "NVIDIA Corporation GB203M / GN22-X9 [GeForce RTX 5080 Max-Q / Mobile] (rev a1)"
+            ),
+            "GeForce RTX 5080 Max-Q / Mobile"
+        );
+    }
+
+    #[test]
+    fn fan_probe_keeps_exposed_unreadable_channel() {
+        let dir = std::env::temp_dir().join(format!(
+            "legion-device-fan-probe-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fan2_input"), "not-a-number\n").unwrap();
+
+        let fans = collect_fans_from_hwmon(&dir, None);
+        assert_eq!(fans.len(), 1);
+        assert_eq!(fans[0].id, 2);
+        assert_eq!(fans[0].current_rpm, 0);
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

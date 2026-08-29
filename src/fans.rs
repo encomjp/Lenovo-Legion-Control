@@ -11,65 +11,107 @@ use crate::sensors::hwmon_by_name;
 /// every 2 s per fan, and each old call locked the hwmon cache mutex and
 /// cloned a `Vec<PathBuf>`.
 fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
-    static BACKEND: OnceLock<Option<(String, PathBuf)>> = OnceLock::new();
-    BACKEND
-        .get_or_init(|| {
-            if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
-                // Some models (LOQ 15AHP10/83JG) bind lenovo_wmi_other but the
-                // EC tachometer reads 0 — yogafan carries the live RPM there.
-                if let Some(yw) = hwmon_by_name("yogafan") {
-                    let any_live = (1..=4).any(|id| {
-                        std::fs::read_to_string(yw.join(format!("fan{id}_input")))
-                            .ok()
-                            .and_then(|s| s.trim().parse::<u32>().ok())
-                            .unwrap_or(0)
-                            > 0
-                    });
-                    if any_live {
-                        log::debug!(
-                            "fans::fan_hwmon: lenovo_wmi_other reads 0 — using yogafan at {}",
-                            yw.display()
-                        );
-                        return Some(("yogafan".into(), yw));
-                    }
-                }
-                log::debug!(
-                    "fans::fan_hwmon: backend lenovo_wmi_other at {}",
-                    hw.display()
-                );
-                return Some(("lenovo_wmi_other".into(), hw));
-            }
-            if let Some(hw) = hwmon_by_name("legion_hwmon") {
-                log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
-                return Some(("legion_hwmon".into(), hw));
-            }
-            // yogafan (kernel 7.1+): IdeaPad/Yoga/LOQ tachometer via ACPI EC.
-            // On IdeaPad Gaming 3 (82K2) there is no lenovo_wmi_other at all —
-            // this is the only fan source (read-only: no target/min/max attrs).
-            if let Some(hw) = hwmon_by_name("yogafan") {
-                log::debug!("fans::fan_hwmon: backend yogafan at {}", hw.display());
-                return Some(("yogafan".into(), hw));
-            }
-            // EC direct fallback for old kernels (7.0) without yogafan or
-            // for models where WMI reports 0 RPM. Reads EC registers via
-            // ec_sys debugfs, as done by lenovo-fan-monitor (0xE3/0xE7 for
-            // LOQ, 0x06 for IdeaPad). Only used when no hwmon exists.
-            if let Some((name, _)) = ec_fallback_rpms() {
-                log::info!("fans::fan_hwmon: EC fallback {name} available");
-                return Some(("ec-fallback".into(), PathBuf::from(format!("/tmp/ec-fallback-{name}"))));
-            }
-            log::warn!(
-                "fans::fan_hwmon: no fan backend (lenovo_wmi_other / legion_hwmon / yogafan) — fan control unavailable"
-            );
-            None
-        })
-        .as_ref()
+    static BACKEND: OnceLock<(String, PathBuf)> = OnceLock::new();
+    if let Some(backend) = BACKEND.get() {
+        return Some(backend);
+    }
+    let discovered = discover_fan_hwmon()?;
+    let _ = BACKEND.set(discovered);
+    BACKEND.get()
 }
 
-fn fan_path(fan: u8, suffix: &str) -> Option<PathBuf> {
-    let (_, hw) = fan_hwmon()?;
+fn has_fan_inputs(hw: &std::path::Path) -> bool {
+    std::fs::read_dir(hw).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("fan") && name.ends_with("_input")
+        })
+    })
+}
+
+fn has_live_fan_input(hw: &std::path::Path) -> bool {
+    (1..=4).any(|id| {
+        std::fs::read_to_string(hw.join(format!("fan{id}_input")))
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+            > 0
+    })
+}
+
+fn has_fan_targets(hw: &std::path::Path) -> bool {
+    std::fs::read_dir(hw).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("fan") && name.ends_with("_target")
+        })
+    })
+}
+
+fn fan_control_hwmon() -> Option<&'static (String, PathBuf)> {
+    static BACKEND: OnceLock<(String, PathBuf)> = OnceLock::new();
+    if let Some(backend) = BACKEND.get() {
+        return Some(backend);
+    }
+    let discovered = ["lenovo_wmi_other", "legion_hwmon"]
+        .into_iter()
+        .find_map(|name| {
+            hwmon_by_name(name)
+                .filter(|hw| has_fan_targets(hw))
+                .map(|hw| (name.to_string(), hw))
+        })?;
+    let _ = BACKEND.set(discovered);
+    BACKEND.get()
+}
+
+fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
+    if let Some(hw) = hwmon_by_name("lenovo_wmi_other").filter(|hw| has_fan_inputs(hw)) {
+        // Some models bind lenovo_wmi_other but its tachometer reads 0 while
+        // yogafan carries live RPM values.
+        if let Some(yw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
+            // Match device::probe_fans exactly: switch only when yogafan has
+            // a live reading and every WMI reading is zero/unreadable.
+            if has_live_fan_input(&yw) && !has_live_fan_input(&hw) {
+                log::debug!(
+                    "fans::fan_hwmon: lenovo_wmi_other reads 0 — using yogafan at {}",
+                    yw.display()
+                );
+                return Some(("yogafan".into(), yw));
+            }
+        }
+        log::debug!(
+            "fans::fan_hwmon: backend lenovo_wmi_other at {}",
+            hw.display()
+        );
+        return Some(("lenovo_wmi_other".into(), hw));
+    }
+    if let Some(hw) = hwmon_by_name("legion_hwmon").filter(|hw| has_fan_inputs(hw)) {
+        log::debug!("fans::fan_hwmon: backend legion_hwmon at {}", hw.display());
+        return Some(("legion_hwmon".into(), hw));
+    }
+    if let Some(hw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
+        log::debug!("fans::fan_hwmon: backend yogafan at {}", hw.display());
+        return Some(("yogafan".into(), hw));
+    }
+    if let Some((name, _)) = ec_fallback_rpms() {
+        log::info!("fans::fan_hwmon: EC fallback {name} available");
+        return Some((
+            "ec-fallback".into(),
+            PathBuf::from(format!("/tmp/ec-fallback-{name}")),
+        ));
+    }
+    log::warn!(
+        "fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan)"
+    );
+    None
+}
+
+fn fan_control_path(fan: u8, suffix: &str) -> Option<PathBuf> {
+    let (_, hw) = fan_control_hwmon()?;
     let path = hw.join(format!("fan{fan}_{suffix}"));
-    log::trace!("fans::fan_path: fan{fan}_{suffix} → {}", path.display());
+    log::trace!("fans::fan_control_path: fan{fan}_{suffix} → {}", path.display());
     Some(path)
 }
 
@@ -103,39 +145,81 @@ fn read_fan_u32(fan: u8, caller: &str, path: &std::path::Path) -> Option<u32> {
     }
 }
 
-pub fn read_rpm(fan: u8) -> Option<u32> {
-    // EC fallback path: read directly from EC registers.
-    if fan_hwmon().map(|(n, _)| n.as_str() == "ec-fallback").unwrap_or(false) {
-        if let Some((_, rpms)) = ec_fallback_rpms() {
-            let idx = match fan {
-                1 => 0,
-                2 | 4 => 1,
-                _ => return None,
-            };
-            return rpms.get(idx).copied().filter(|&v| v > 0);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanRpmState {
+    Readable,
+    NotExposed,
+    BackendUnavailable,
+    Unreadable,
+}
+
+impl FanRpmState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Readable => "readable",
+            Self::NotExposed => "not-exposed",
+            Self::BackendUnavailable => "backend-unavailable",
+            Self::Unreadable => "unreadable",
         }
-        return None;
     }
-    let path = fan_path(fan, "input")?;
-    read_fan_u32(fan, "read_rpm", &path)
+}
+
+pub fn rpm_status(fan: u8) -> (Option<u32>, FanRpmState) {
+    let Some((name, hw)) = fan_hwmon() else {
+        return (None, FanRpmState::BackendUnavailable);
+    };
+    if name == "ec-fallback" {
+        let Some(layout) = hw
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("ec-fallback-"))
+        else {
+            return (None, FanRpmState::Unreadable);
+        };
+        let Some(rpms) = ec_fallback_rpms_for(layout) else {
+            return (None, FanRpmState::Unreadable);
+        };
+        let index = match fan {
+            1 => 0,
+            2 | 4 => 1,
+            _ => return (None, FanRpmState::NotExposed),
+        };
+        return match rpms.get(index).copied() {
+            Some(rpm) => (Some(rpm), FanRpmState::Readable),
+            None => (None, FanRpmState::NotExposed),
+        };
+    }
+
+    let path = hw.join(format!("fan{fan}_input"));
+    if !path.is_file() {
+        return (None, FanRpmState::NotExposed);
+    }
+    match read_fan_u32(fan, "read_rpm", &path) {
+        Some(rpm) => (Some(rpm), FanRpmState::Readable),
+        None => (None, FanRpmState::Unreadable),
+    }
+}
+
+pub fn read_rpm(fan: u8) -> Option<u32> {
+    rpm_status(fan).0
 }
 
 pub fn read_target(fan: u8) -> Option<u32> {
-    let path = fan_path(fan, "target")?;
+    let path = fan_control_path(fan, "target")?;
     read_fan_u32(fan, "read_target", &path)
 }
 
 /// Lowest settable RPM for a fan channel. Reserved for the custom fan-curve
 /// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_min(fan: u8) -> Option<u32> {
-    let path = fan_path(fan, "min")?;
+    let path = fan_control_path(fan, "min")?;
     read_fan_u32(fan, "read_min", &path)
 }
 
 /// Highest settable RPM for a fan channel. Reserved for the custom fan-curve
 /// feature (docs/superpowers/plans/2026-08-25-custom-fan-curves-plan.md).
 pub fn read_max(fan: u8) -> Option<u32> {
-    let path = fan_path(fan, "max")?;
+    let path = fan_control_path(fan, "max")?;
     read_fan_u32(fan, "read_max", &path)
 }
 
@@ -153,6 +237,16 @@ pub fn channels() -> Vec<FanCapability> {
     }
     log::debug!("fans::channels: {} channel(s) enumerated", caps.len());
     caps
+}
+
+pub fn backend_name() -> String {
+    fan_hwmon()
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| device::detect().capabilities.fan_backend)
+}
+
+pub fn control_backend_name() -> Option<String> {
+    fan_control_hwmon().map(|(name, _)| name.clone())
 }
 
 /// Fan ids present on this machine (e.g. `[1, 2, 4]`).
@@ -231,7 +325,7 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
     if rpm != requested {
         log::info!("fan {fan} requested {requested} → clamped {rpm}");
     }
-    let path = match fan_path(fan, "target") {
+    let path = match fan_control_path(fan, "target") {
         Some(p) => p,
         None => {
             let msg =
@@ -271,6 +365,23 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
 /// Probes known EC layouts: LOQ 15IRH8 (0xE3/0xE7 16-bit LE) and
 /// IdeaPad Gaming 3 (0x06 8-bit *100). Validates 500-7500 RPM range.
 fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
+    let buf = ec_fallback_bytes()?;
+    for layout in ["loq-ec", "ideapad-ec", "legion-ec"] {
+        let rpms = ec_layout_rpms(layout, &buf)?;
+        let ceiling = if layout == "ideapad-ec" { 6000 } else { 7500 };
+        if rpms.iter().any(|rpm| (500..=ceiling).contains(rpm)) {
+            return Some((layout.to_string(), rpms));
+        }
+    }
+    None
+}
+
+fn ec_fallback_rpms_for(layout: &str) -> Option<Vec<u32>> {
+    let buf = ec_fallback_bytes()?;
+    ec_layout_rpms(layout, &buf)
+}
+
+fn ec_fallback_bytes() -> Option<Vec<u8>> {
     use std::io::Read;
     const EC_IO: &str = "/sys/kernel/debug/ec/ec0/io";
     // Try to ensure ec_sys is loaded if the file doesn't exist.
@@ -285,29 +396,29 @@ fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
     let mut buf = vec![0u8; 256];
     let mut f = std::fs::File::open(EC_IO).ok()?;
     f.read_exact(&mut buf).ok()?;
-    // Probe LOQ layout (0xE3/0xE4 LE 16-bit CPU, 0xE7/0xE8 GPU)
-    let loq_cpu = u16::from_le_bytes([buf[0xE3], buf[0xE4]]) as u32;
-    let loq_gpu = u16::from_le_bytes([buf[0xE7], buf[0xE8]]) as u32;
-    let loq_valid = (500..=7500).contains(&loq_cpu) || (500..=7500).contains(&loq_gpu);
-    if loq_valid {
-        return Some(("loq-ec".to_string(), vec![loq_cpu, loq_gpu]));
+    Some(buf)
+}
+
+fn ec_layout_rpms(layout: &str, buf: &[u8]) -> Option<Vec<u32>> {
+    if buf.len() < 0xe9 {
+        return None;
     }
-    // Probe IdeaPad layout (0x06 8-bit *100, single fan or dual at 0x06/0x07)
-    let idea_cpu = buf[0x06] as u32 * 100;
-    let idea_gpu = buf[0x07] as u32 * 100;
-    let idea_valid = (500..=6000).contains(&idea_cpu) || (500..=6000).contains(&idea_gpu);
-    if idea_valid {
-        // If only one fan has data, duplicate to second slot for UI.
-        let gpu = if idea_gpu > 0 { idea_gpu } else { idea_cpu };
-        return Some(("ideapad-ec".to_string(), vec![idea_cpu, gpu]));
+    match layout {
+        "loq-ec" => Some(vec![
+            u16::from_le_bytes([buf[0xe3], buf[0xe4]]) as u32,
+            u16::from_le_bytes([buf[0xe7], buf[0xe8]]) as u32,
+        ]),
+        "ideapad-ec" => {
+            let cpu = buf[0x06] as u32 * 100;
+            let gpu = buf[0x07] as u32 * 100;
+            Some(vec![cpu, if gpu > 0 { gpu } else { cpu }])
+        }
+        "legion-ec" => Some(vec![
+            u16::from_le_bytes([buf[0xe0], buf[0xe1]]) as u32,
+            u16::from_le_bytes([buf[0xe2], buf[0xe3]]) as u32,
+        ]),
+        _ => None,
     }
-    // Legion alternative (0xC5E0/0xC5E2 via EC RAM, but ec_sys may not expose there)
-    let leg_cpu = u16::from_le_bytes([buf[0xE0], buf[0xE1]]) as u32;
-    let leg_gpu = u16::from_le_bytes([buf[0xE2], buf[0xE3]]) as u32;
-    if (500..=7500).contains(&leg_cpu) || (500..=7500).contains(&leg_gpu) {
-        return Some(("legion-ec".to_string(), vec![leg_cpu, leg_gpu]));
-    }
-    None
 }
 
 /// Set all discovered fans to auto mode.
@@ -390,5 +501,31 @@ mod tests {
         assert_eq!(clamp_target_with(5500, 1200, 3000), 3000);
         assert_eq!(clamp_target_with(5500, 1200, 100), 1200);
         assert_eq!(clamp_target_with(5500, 1200, 9999), 5500);
+    }
+
+    #[test]
+    fn ec_layout_keeps_zero_rpm_as_a_valid_reading() {
+        let buf = vec![0u8; 256];
+        assert_eq!(ec_layout_rpms("loq-ec", &buf), Some(vec![0, 0]));
+        assert_eq!(ec_layout_rpms("ideapad-ec", &buf), Some(vec![0, 0]));
+        assert_eq!(ec_layout_rpms("legion-ec", &buf), Some(vec![0, 0]));
+        assert_eq!(ec_layout_rpms("unknown", &buf), None);
+    }
+
+    #[test]
+    fn read_only_backend_is_not_control_capable() {
+        let dir = std::env::temp_dir().join(format!(
+            "legion-fan-backend-probe-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fan1_input"), "1200\n").unwrap();
+        assert!(has_fan_inputs(&dir));
+        assert!(has_live_fan_input(&dir));
+        assert!(!has_fan_targets(&dir));
+
+        std::fs::write(dir.join("fan1_target"), "0\n").unwrap();
+        assert!(has_fan_targets(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
