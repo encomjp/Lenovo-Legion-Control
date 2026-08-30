@@ -22,7 +22,6 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
 
       - name: Build release binaries
-        working-directory: lenovo-legion-tool
         run: cargo build --release --locked
 
       - name: Install appimagetool
@@ -32,11 +31,11 @@ jobs:
           echo "APPIMAGETOOL=/tmp/appimagetool" >> $GITHUB_ENV
 
       - name: Build packages
-        working-directory: lenovo-legion-tool
         run: |
-          ./packaging/build-appimage.sh ../packaged || true
+          mkdir -p packaged
+          ./packaging/build-appimage.sh ./packaged || true
           ./packaging/build-all.sh || true
-          ls -lh ../packaged/ packaging/out/ || true
+          ls -lh packaged/ packaging/out/ || true
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
@@ -44,5 +43,5 @@ jobs:
           files: |
             packaged/*.AppImage
             packaged/*.tar.gz
-            lenovo-legion-tool/packaging/out/*
+            packaging/out/*
           fail_on_unmatched_files: false
