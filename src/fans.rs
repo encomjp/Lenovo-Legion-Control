@@ -40,6 +40,41 @@ fn has_live_fan_input(hw: &std::path::Path) -> bool {
     })
 }
 
+/// True when the tachometer is locked behind yogafan (LOQ 15AHP10 83JG / R8CN).
+/// `lenovo_wmi_other` binds but reads 0 RPM until `yogafan` is loaded.
+pub fn needs_yogafan_setup() -> bool {
+    let Some(wmi) = hwmon_by_name("lenovo_wmi_other") else {
+        return false;
+    };
+    if !has_fan_inputs(&wmi) {
+        return false;
+    }
+    if has_live_fan_input(&wmi) {
+        return false;
+    }
+    // WMI tach is 0 — yogafan must provide it
+    hwmon_by_name("yogafan").is_none()
+}
+
+/// Best-effort load of yogafan (daemon is root, no pkexec needed).
+pub fn ensure_yogafan_loaded() -> bool {
+    if hwmon_by_name("yogafan").is_some() {
+        return true;
+    }
+    let _ = std::process::Command::new("modprobe")
+        .args(["yogafan"])
+        .output();
+    // Give hwmon a moment to appear
+    for _ in 0..10 {
+        if hwmon_by_name("yogafan").is_some() {
+            let _ = std::fs::write("/etc/modules-load.d/legion-yogafan.conf", "yogafan\n");
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    hwmon_by_name("yogafan").is_some()
+}
+
 fn has_fan_targets(hw: &std::path::Path) -> bool {
     std::fs::read_dir(hw).is_ok_and(|entries| {
         entries.flatten().any(|entry| {
@@ -378,7 +413,16 @@ fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
 
 fn ec_fallback_rpms_for(layout: &str) -> Option<Vec<u32>> {
     let buf = ec_fallback_bytes()?;
-    ec_layout_rpms(layout, &buf)
+    // 83JG (IT5508) uses 0xFE/0xFF via yogafan, not 0xE3/0xE7 — garbage is 0xFF fill (65535)
+    if buf.iter().filter(|&&b| b == 0xFF).count() > 200 {
+        return None;
+    }
+    let rpms = ec_layout_rpms(layout, &buf)?;
+    let ceiling = if layout == "ideapad-ec" { 6000 } else { 7500 };
+    if rpms.iter().any(|rpm| *rpm > ceiling) {
+        return None;
+    }
+    Some(rpms)
 }
 
 fn ec_fallback_bytes() -> Option<Vec<u8>> {

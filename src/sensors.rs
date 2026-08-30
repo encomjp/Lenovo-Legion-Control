@@ -525,35 +525,26 @@ pub fn read_all() -> SensorReadings {
         exact_r8169.len()
     );
 
-    // ─── Fans ───
-    if let Some(hw) = hwmon_by_name("lenovo_wmi_other") {
-        log::debug!(
-            "sensors::read_all: fan hwmon lenovo_wmi_other at {}",
-            hw.display()
-        );
-        for fan_num in 1..=4 {
-            if let Some(val) = read_int(&hw.join(format!("fan{}_input", fan_num))) {
-                log::trace!("sensors::read_all: fan{fan_num}_input → {val} rpm");
-                match fan_num {
-                    1 => s.fan1_rpm = val as u32,
-                    2 => s.fan2_rpm = val as u32,
-                    4 => s.fan4_rpm = val as u32,
-                    _ => {}
-                }
-            }
-            if let Some(val) = read_int(&hw.join(format!("fan{}_target", fan_num))) {
-                log::trace!("sensors::read_all: fan{fan_num}_target → {val}");
-                match fan_num {
-                    1 => s.fan1_target = val as u32,
-                    2 => s.fan2_target = val as u32,
-                    4 => s.fan4_target = val as u32,
-                    _ => {}
-                }
-            }
+    // Fans -- via fans:: backend so 83JG yogafan is honored (reconciles flattened fields with FanLive)
+    for (fan_num, dst_rpm, dst_target) in [
+        (1u8, &mut s.fan1_rpm, &mut s.fan1_target),
+        (2u8, &mut s.fan2_rpm, &mut s.fan2_target),
+        (4u8, &mut s.fan4_rpm, &mut s.fan4_target),
+    ] {
+        if let Some(v) = crate::fans::read_rpm(fan_num) {
+            *dst_rpm = v;
         }
-    } else {
-        log::warn!("sensors::read_all: lenovo_wmi_other fan hwmon not found — no fan RPM readings");
+        if let Some(v) = crate::fans::read_target(fan_num) {
+            *dst_target = v;
+        }
     }
+    log::debug!(
+        "sensors::read_all: fans via fans:: backend {} (rpm {} {} {})",
+        crate::fans::backend_name(),
+        s.fan1_rpm,
+        s.fan2_rpm,
+        s.fan4_rpm
+    );
 
     // ─── Platform profile ───
     s.profile = read_file(Path::new("/sys/firmware/acpi/platform_profile"))

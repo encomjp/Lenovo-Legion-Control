@@ -211,7 +211,6 @@ headerbar windowtitle .subtitle {
     font-size: 0.95rem;
     font-weight: 700;
     opacity: 0.95;
-    min-width: max-content;
 }
 
 .section-sub {
@@ -269,7 +268,6 @@ headerbar windowtitle .subtitle {
     font-weight: 700;
     font-size: 0.90rem;
     letter-spacing: -0.01em;
-    min-width: max-content;
 }
 
 .row-sub {
@@ -324,7 +322,6 @@ headerbar windowtitle .subtitle {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     opacity: 0.44;
-    min-width: max-content;
 }
 
 .metric-chip .value {
@@ -805,8 +802,14 @@ scale trough highlight {
     padding-left: 12px;
     padding-right: 12px;
 }
-.pill-btn.suggested-action:disabled {
-    opacity: 0.42;
+/* Adwaita keeps the accent fill on suggested-action:disabled; opacity
+   alone still reads as a clickable red button. Neutralize the fill. */
+button.pill-btn.suggested-action:disabled {
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.45);
+    background: alpha(@theme_base_color, 0.38);
+    border-color: alpha(@window_fg_color, 0.09);
+    box-shadow: none;
 }
 
 /* Update dialog — compact card, notes on a second tab */

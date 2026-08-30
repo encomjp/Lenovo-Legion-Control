@@ -143,6 +143,62 @@ pub struct DeepReport {
     /// Digest of capability-relevant state — lets the server group models
     /// and spot new hardware variants.
     pub capability_digest: String,
+    // 0.2.5 additive -- all #[serde(default)] so schema stays v3
+    /// Explicit yogafan probe -- queryable without parsing installed_software strings.
+    #[serde(default)]
+    pub yogafan_loaded: bool,
+    #[serde(default)]
+    pub yogafan_hwmon: Option<String>,
+    /// ACPI/WMI3 probe results -- isolates R8CN EC-lock fleet (WMI3 err -5) vs healthy.
+    #[serde(default)]
+    pub acpi_probe: AcpiProbe,
+    /// Direct EC ACPI-space 0xB0/0xB4 via ec_sys debugfs (IT5508).
+    #[serde(default)]
+    pub ec_temps: EcTemps,
+    /// Typed PPT snapshot -- ClickHouse can slice without parsing ppt_attrs strings.
+    #[serde(default)]
+    pub ppt_snapshot: Vec<PptSnapshot>,
+    /// Raw yogafan fan attrs (fan*_input/label) -- cheap proof that yogafan actually tachd.
+    #[serde(default)]
+    pub yogafan_attrs: Vec<(String, String)>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct AcpiProbe {
+    #[serde(default)]
+    pub wmi3_available: bool,
+    #[serde(default)]
+    pub wmi3_cpu_temp: Option<String>,
+    #[serde(default)]
+    pub wmi3_gpu_temp: Option<String>,
+    #[serde(default)]
+    pub acpi_tmp_ok: bool,
+    #[serde(default)]
+    pub acpi_tmp_detail: String,
+    #[serde(default)]
+    pub ec_fans_acpi_path: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct EcTemps {
+    #[serde(default)]
+    pub b0: Option<u8>,
+    #[serde(default)]
+    pub b4: Option<u8>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub b0_delta_vs_k10temp: Option<i8>,
+    #[serde(default)]
+    pub b4_delta_vs_dgpu: Option<i8>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct PptSnapshot {
+    pub id: String,
+    pub current_w: u32,
+    pub min_w: u32,
+    pub max_w: u32,
 }
 
 /// One hwmon chip: name + every readable (attribute, value) pair.
@@ -692,6 +748,46 @@ fn collect_deep(reason: &str) -> DeepReport {
     }
     deep.hwmon_dump.sort_by(|a, b| a.hwmon.cmp(&b.hwmon));
 
+    // yogafan_loaded + yogafan_hwmon + yogafan_attrs (explicit, queryable)
+    {
+        let yw = crate::sensors::hwmon_by_name("yogafan");
+        deep.yogafan_loaded = yw.is_some();
+        deep.yogafan_hwmon = yw.as_ref().map(|p| {
+            let hwmon = p.file_name().and_then(|n| n.to_str()).unwrap_or("hwmon?");
+            format!("{}/yogafan", hwmon)
+        });
+        for chip in &deep.hwmon_dump {
+            if chip.name == "yogafan" || chip.name == "lenovo_wmi_other" {
+                for (attr, val) in &chip.attrs {
+                    if attr.starts_with("fan") {
+                        deep.yogafan_attrs
+                            .push((format!("{}/{}", chip.hwmon, attr), val.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    // ACPI probe (WMI3 + acpitz + EC FANS path)
+    deep.acpi_probe = probe_acpi();
+
+    // EC direct temps 0xB0/0xB4 via ec_sys debugfs
+    {
+        let sensors = crate::sensors::read_all();
+        deep.ec_temps = read_ec_acpi_temps(&sensors);
+    }
+
+    // PPT typed snapshot
+    deep.ppt_snapshot = crate::profile::all_ppt_limits()
+        .into_iter()
+        .map(|l| PptSnapshot {
+            id: l.id.to_string(),
+            current_w: l.current as u32,
+            min_w: l.min as u32,
+            max_w: l.max as u32,
+        })
+        .collect();
+
     // ─── fan detail: every fanN_* attr on every fan-ish hwmon ───
     for chip in &deep.hwmon_dump {
         if chip.name.contains("wmi") || chip.name.contains("legion") || chip.name.contains("yoga") {
@@ -780,6 +876,22 @@ fn collect_deep(reason: &str) -> DeepReport {
         "amdgpu_loaded",
         Path::new("/sys/module/amdgpu").is_dir().to_string(),
     );
+    push(
+        sw,
+        "yogafan_loaded",
+        std::path::Path::new("/sys/class/hwmon")
+            .read_dir()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                std::fs::read_to_string(e.path().join("name"))
+                    .unwrap_or_default()
+                    .trim()
+                    == "yogafan"
+            })
+            .to_string(),
+    );
     push(sw, "kernel", {
         std::fs::read_to_string("/proc/sys/kernel/osrelease")
             .map(|s| s.trim().to_string())
@@ -788,6 +900,110 @@ fn collect_deep(reason: &str) -> DeepReport {
 
     deep.capability_digest = capability_digest();
     deep
+}
+
+fn probe_acpi() -> AcpiProbe {
+    let mut p = AcpiProbe::default();
+    p.wmi3_available = Path::new("/sys/bus/wmi/devices/887B54E3-DDDC-4B2C-8B88-68A26A8835D0").exists()
+        || std::fs::read_dir("/sys/bus/wmi/devices")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .to_ascii_uppercase()
+                    .contains("887B54E3")
+            });
+    let mut details: Vec<String> = Vec::new();
+    let mut any_ok = false;
+    if let Ok(zones) = std::fs::read_dir("/sys/class/thermal") {
+        for entry in zones.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("thermal_zone") {
+                continue;
+            }
+            let ttype = std::fs::read_to_string(entry.path().join("type"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            match std::fs::read_to_string(entry.path().join("temp")) {
+                Ok(raw) => {
+                    if let Ok(mc) = raw.trim().parse::<i32>() {
+                        if mc > 0 {
+                            any_ok = true;
+                            details.push(format!("{name}({ttype}): {:.1}C", mc as f64 / 1000.0));
+                        } else {
+                            details.push(format!("{name}({ttype}): 0"));
+                        }
+                    } else {
+                        details.push(format!("{name}({ttype}): unparsable {raw:?}"));
+                    }
+                }
+                Err(e) => details.push(format!(
+                    "{name}({ttype}): err {} (raw {})",
+                    e,
+                    e.raw_os_error().unwrap_or(-1)
+                )),
+            }
+        }
+    }
+    details.sort();
+    p.acpi_tmp_ok = any_ok;
+    p.acpi_tmp_detail = if details.is_empty() {
+        "no thermal zones".into()
+    } else {
+        details.join(" | ")
+    };
+    p.ec_fans_acpi_path = std::fs::read_dir("/sys/bus/acpi/devices")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .find_map(|e| {
+            let acpi_path = std::fs::read_to_string(e.path().join("path")).ok()?.trim().to_string();
+            if acpi_path.contains("EC0") {
+                Some(acpi_path)
+            } else {
+                None
+            }
+        });
+    if p.wmi3_available {
+        p.wmi3_cpu_temp = Some("wmi3 bound -- temps via EC 0xB0 fallback (see ec_temps)".into());
+        p.wmi3_gpu_temp = Some("wmi3 bound -- temps via EC 0xB4 fallback (see ec_temps)".into());
+    }
+    p
+}
+
+fn read_ec_acpi_temps(sensors: &crate::sensors::SensorReadings) -> EcTemps {
+    let mut out = EcTemps::default();
+    const EC_IO: &str = "/sys/kernel/debug/ec/ec0/io";
+    let path = Path::new(EC_IO);
+    if !path.exists() {
+        out.source =
+            "unavailable: /sys/kernel/debug/ec/ec0/io missing (debugfs off or ec_sys not loaded)"
+                .into();
+        return out;
+    }
+    let buf: Option<Vec<u8>> = (|| {
+        use std::io::Read;
+        let mut buf = vec![0u8; 256];
+        let mut f = std::fs::File::open(path).ok()?;
+        f.read_exact(&mut buf).ok()?;
+        Some(buf)
+    })();
+    match buf {
+        Some(b) if b.len() >= 0xB5 => {
+            out.b0 = Some(b[0xB0]);
+            out.b4 = Some(b[0xB4]);
+            out.source = "ec_sys:/sys/kernel/debug/ec/ec0/io".into();
+            out.b0_delta_vs_k10temp = Some((b[0xB0] as i16 - sensors.cpu_temp as i16) as i8);
+            if sensors.dgpu_temp > 0.0 {
+                out.b4_delta_vs_dgpu = Some((b[0xB4] as i16 - sensors.dgpu_temp as i16) as i8);
+            }
+        }
+        Some(_) => out.source = "unavailable: EC io short read".into(),
+        None => out.source = "unavailable: read failed (permission or race)".into(),
+    }
+    out
 }
 
 fn report_os_kernel() -> String {

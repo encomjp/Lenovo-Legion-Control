@@ -129,6 +129,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
     update_btn.set_halign(Align::Fill);
     update_btn.set_hexpand(true);
     update_btn.set_sensitive(false);
+    update_btn.remove_css_class("suggested-action");
 
     actions.append(&check_btn);
     actions.append(&update_btn);
@@ -174,6 +175,11 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                             if info.is_newer {
                                 let can_apply = legion_core::update::can_apply(&info);
                                 update_btn.set_sensitive(can_apply);
+                                if can_apply {
+                                    update_btn.add_css_class("suggested-action");
+                                } else {
+                                    update_btn.remove_css_class("suggested-action");
+                                }
                                 row.set_subtitle(&format!(
                                     "New version available: v{} (installed: v{})",
                                     info.version,
@@ -188,6 +194,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                                 }
                             } else {
                                 update_btn.set_sensitive(false);
+                                update_btn.remove_css_class("suggested-action");
                                 row.set_subtitle(&format!(
                                     "Up to date (v{} is the latest release)",
                                     legion_core::update::CURRENT_VERSION
@@ -242,10 +249,11 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     let win = adw::Window::builder()
         .title("Update available")
         .default_width(520)
-        .default_height(420)
+        .default_height(380)
         .modal(true)
         .build();
     win.add_css_class("update-dialog");
+    win.set_resizable(false);
     if let Some(parent) = active_settings_window() {
         win.set_transient_for(Some(&parent));
     }
@@ -257,10 +265,10 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     stack.set_vexpand(true);
 
     let release = gtk::Box::new(Orientation::Vertical, 12);
-    release.set_margin_top(8);
+    release.set_margin_top(16);
     release.set_margin_bottom(8);
-    release.set_margin_start(20);
-    release.set_margin_end(20);
+    release.set_margin_start(24);
+    release.set_margin_end(24);
     release.set_halign(Align::Fill);
     release.set_valign(Align::Center);
     release.set_vexpand(true);
@@ -293,11 +301,13 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     how.set_max_width_chars(46);
     release.append(&how);
 
+    // Breeze (KDE) often lacks GNOME-only symbolic names; missing icons
+    // render as the red broken-image tile.
     stack.add_titled_with_icon(
         &release,
         Some("release"),
         "Release",
-        "software-update-available-symbolic",
+        "view-refresh-symbolic",
     );
 
     let notes_text = if notes.is_empty() {
@@ -314,18 +324,20 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     let notes_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .propagate_natural_height(true)
+        .propagate_natural_height(false)
         .child(&notes_label)
         .build();
+    notes_scroll.set_vexpand(true);
+    notes_scroll.set_hexpand(true);
     notes_scroll.set_margin_top(8);
-    notes_scroll.set_margin_bottom(8);
+    notes_scroll.set_margin_bottom(4);
     notes_scroll.set_margin_start(16);
     notes_scroll.set_margin_end(16);
     stack.add_titled_with_icon(
         &notes_scroll,
         Some("notes"),
         "What's new",
-        "view-list-symbolic",
+        "help-about-symbolic",
     );
 
     let switcher = adw::ViewSwitcher::new();
@@ -336,10 +348,25 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     let later = gtk::Button::with_label("Later");
     later.add_css_class("pill-btn");
     later.set_hexpand(true);
-    let action = if can_apply {
-        primary_button_tip("Update now", Some(kind.apply_blurb()))
+    // Source installs can do a full cargo build (2-4 min) *or* a quick AppImage swap
+    let is_source_with_appimage = kind == legion_core::update::InstallKind::Source
+        && info.appimage.is_some();
+    let (action, appimage_btn) = if is_source_with_appimage {
+        let a = primary_button_tip("Build from source", Some("Rebuilds locally — 2-4 min"));
+        let b = gtk::Button::with_label("Use AppImage");
+        b.set_tooltip_text(Some("Download AppImage (10s) instead of building"));
+        b.add_css_class("pill-btn");
+        (a, Some(b))
+    } else if can_apply {
+        (
+            primary_button_tip("Update now", Some(kind.apply_blurb())),
+            None,
+        )
     } else {
-        primary_button_tip("Open release", Some("Open the GitHub release page"))
+        (
+            primary_button_tip("Open release", Some("Open the GitHub release page")),
+            None,
+        )
     };
     action.set_hexpand(true);
     action.set_halign(Align::Fill);
@@ -351,6 +378,9 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     actions.set_margin_end(16);
     actions.set_homogeneous(true);
     actions.append(&later);
+    if let Some(ref b) = appimage_btn {
+        actions.append(b);
+    }
     actions.append(&action);
 
     let page = gtk::Box::new(Orientation::Vertical, 0);
@@ -361,6 +391,7 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&page));
     win.set_content(Some(&toolbar));
+    win.set_default_widget(Some(&action));
 
     let win_later = win.clone();
     later.connect_clicked(move |_| {
@@ -369,10 +400,17 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
 
     let win_action = win.clone();
     let info_c = info.clone();
+    let info_appimage = info.clone();
+    let is_source_with_appimage_c = is_source_with_appimage;
     action.connect_clicked(move |_| {
         win_action.close();
         if can_apply {
-            begin_in_app_update(&info_c);
+            let forced = if is_source_with_appimage_c {
+                Some(legion_core::update::InstallKind::Source)
+            } else {
+                None
+            };
+            begin_in_app_update_with_kind(&info_c, forced);
         } else if let Err(e) = gtk::gio::AppInfo::launch_default_for_uri(
             &info_c.html_url,
             None::<&gtk::gio::AppLaunchContext>,
@@ -382,36 +420,58 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
                 Some(&format!("{e}\n\n{}", info_c.html_url)),
             );
             err.add_response("ok", "OK");
-            err.present(None::<&gtk::Window>);
+            err.present(active_settings_window().as_ref());
         }
     });
+    if let Some(btn) = appimage_btn {
+        let win2 = win.clone();
+        let info2 = info_appimage.clone();
+        btn.connect_clicked(move |_| {
+            win2.close();
+            begin_in_app_update_with_kind(&info2, Some(legion_core::update::InstallKind::AppImage));
+        });
+    }
 
     win.present();
 }
 
 fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
+    begin_in_app_update_with_kind(info, None)
+}
+
+fn begin_in_app_update_with_kind(
+    info: &legion_core::update::ReleaseInfo,
+    forced_kind: Option<legion_core::update::InstallKind>,
+) {
     let info = info.clone();
-    let kind = legion_core::update::detect_install_kind();
+    let kind = forced_kind.unwrap_or_else(legion_core::update::detect_install_kind);
     let dialog = adw::AlertDialog::new(
         Some("Updating Legion Control"),
-        Some(&format!("Downloading v{}…", info.version)),
+        Some(&format!("Updating to v{}…", info.version)),
     );
     let bar = gtk::ProgressBar::new();
     bar.set_show_text(true);
     bar.set_pulse_step(0.08);
     dialog.set_extra_child(Some(&bar));
     dialog.set_can_close(false);
-    dialog.present(None::<&gtk::Window>);
+    dialog.present(active_settings_window().as_ref());
 
     let (ptx, prx) = mpsc::channel();
     let info_w = info.clone();
     let finished = Rc::new(Cell::new(false));
     let finished_done = finished.clone();
+    let forced_kind_c = forced_kind;
     dispatch_async(
         move || {
-            legion_core::update::apply_update(&info_w, |phase, bytes, total| {
-                let _ = ptx.send((phase, bytes, total));
-            })
+            if let Some(k) = forced_kind_c {
+                legion_core::update::apply_update_for_kind(&info_w, k, |phase, bytes, total| {
+                    let _ = ptx.send((phase, bytes, total));
+                })
+            } else {
+                legion_core::update::apply_update(&info_w, |phase, bytes, total| {
+                    let _ = ptx.send((phase, bytes, total));
+                })
+            }
         },
         "Update download stopped",
         {
@@ -430,22 +490,32 @@ fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
                         let err = adw::AlertDialog::new(Some("Update failed"), Some(&e));
                         err.add_response("ok", "OK");
                         err.set_default_response(Some("ok"));
-                        err.present(None::<&gtk::Window>);
+                        err.present(active_settings_window().as_ref());
                     }
                 }
             }
         },
     );
 
-    glib::timeout_add_local(Duration::from_millis(150), move || {
+    // Keep current phase + cargo tail so Building can pulse with live log
+    let current_phase: Rc<RefCell<Option<legion_core::update::UpdatePhase>>> =
+        Rc::new(RefCell::new(None));
+    let tail: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let current_phase_c = current_phase.clone();
+    let tail_c = tail.clone();
+    glib::timeout_add_local(Duration::from_millis(80), move || {
         if finished.get() {
             return glib::ControlFlow::Break;
         }
         let mut last = None;
         while let Ok(msg) = prx.try_recv() {
+            if let legion_core::update::UpdatePhase::BuildingLog(ref s) = msg.0 {
+                *tail_c.borrow_mut() = Some(s.clone());
+            }
             last = Some(msg);
         }
         if let Some((phase, bytes, total)) = last {
+            *current_phase_c.borrow_mut() = Some(phase.clone());
             match phase {
                 legion_core::update::UpdatePhase::Downloading => {
                     dialog.set_heading(Some("Downloading…"));
@@ -465,15 +535,32 @@ fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
                     bar.set_fraction(1.0);
                     bar.set_text(Some("sha256"));
                 }
-                legion_core::update::UpdatePhase::Building => {
-                    dialog.set_heading(Some("Building…"));
+                legion_core::update::UpdatePhase::Building
+                | legion_core::update::UpdatePhase::BuildingLog(_) => {
+                    dialog.set_heading(Some("Building from source…"));
                     bar.pulse();
-                    bar.set_text(Some("cargo"));
+                    let display = phase
+                        .building_tail()
+                        .map(|s| s.to_string())
+                        .or_else(|| tail_c.borrow().clone())
+                        .unwrap_or_else(|| "cargo — 2-4 min on first build".into());
+                    bar.set_text(Some(&display));
                 }
                 legion_core::update::UpdatePhase::Installing => {
                     dialog.set_heading(Some("Installing…"));
                     bar.set_fraction(1.0);
                     bar.set_text(Some(kind.label()));
+                }
+            }
+        } else {
+            let is_building = current_phase_c
+                .borrow()
+                .as_ref()
+                .is_some_and(|p| p.is_building());
+            if is_building {
+                bar.pulse();
+                if let Some(t) = tail_c.borrow().clone() {
+                    bar.set_text(Some(&t));
                 }
             }
         }
@@ -522,11 +609,11 @@ fn prompt_restart_dialog(
                     )),
                 );
                 err.add_response("ok", "OK");
-                err.present(None::<&gtk::Window>);
+                err.present(active_settings_window().as_ref());
             }
         }
     });
-    dialog.present(None::<&gtk::Window>);
+    dialog.present(active_settings_window().as_ref());
 }
 
 pub(crate) fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {

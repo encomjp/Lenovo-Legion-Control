@@ -293,6 +293,15 @@ fn main() {
         info.capabilities.platform_profiles.join(", "),
         info.capabilities.peak_gpu_w
     );
+    // LOQ 15AHP10 83JG — silently ensure yogafan is loaded (in-tree, Fedora 44+)
+    if legion_core::fans::needs_yogafan_setup() {
+        log::info!("fans: yogafan missing but WMI tach is 0 — attempting auto modprobe");
+        if legion_core::fans::ensure_yogafan_loaded() {
+            log::info!("fans: yogafan auto-loaded");
+        } else {
+            log::warn!("fans: yogafan auto-load failed — UI will show Unlock prompt");
+        }
+    }
     undervolt::start_persistence_worker();
 
     // Adopt the boot-time limiter state so the watchdog maintains it across

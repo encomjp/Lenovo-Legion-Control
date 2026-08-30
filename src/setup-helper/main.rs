@@ -368,6 +368,49 @@ fn install_udev_rule() -> Result<(), String> {
     Ok(())
 }
 
+fn install_yogafan() -> Result<(), String> {
+    if Path::new("/sys/class/hwmon").read_dir().ok().is_some_and(|iter| {
+        iter.flatten().any(|e| {
+            std::fs::read_to_string(e.path().join("name"))
+                .unwrap_or_default()
+                .trim()
+                == "yogafan"
+        })
+    }) {
+        // Already present — just ensure persistence
+        let _ = fs::write("/etc/modules-load.d/legion-yogafan.conf", "yogafan\n");
+        println!("yogafan already loaded");
+        return Ok(());
+    }
+    let modprobe = executable(&["/usr/bin/modprobe", "/usr/sbin/modprobe"])?;
+    let status = std::process::Command::new(modprobe)
+        .args(["yogafan"])
+        .status()
+        .map_err(|e| format!("cannot run modprobe yogafan: {e}"))?;
+    if !status.success() {
+        return Err(format!("modprobe yogafan failed with {status}"));
+    }
+    // Wait up to 1s for hwmon to appear
+    for _ in 0..10 {
+        let found = Path::new("/sys/class/hwmon").read_dir().ok().is_some_and(|iter| {
+            iter.flatten().any(|e| {
+                std::fs::read_to_string(e.path().join("name"))
+                    .unwrap_or_default()
+                    .trim()
+                    == "yogafan"
+            })
+        });
+        if found {
+            fs::write("/etc/modules-load.d/legion-yogafan.conf", "yogafan\n")
+                .map_err(|e| format!("cannot persist yogafan at boot: {e}"))?;
+            println!("yogafan loaded and enabled at boot");
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err("yogafan loaded but hwmon did not appear — kernel may lack the driver (needs >=6.14)".into())
+}
+
 fn real_main() -> Result<(), String> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("this helper must be authorized through PolicyKit".into());
@@ -377,8 +420,9 @@ fn real_main() -> Result<(), String> {
         Some("remove-ryzen-smu") => remove_ryzen_smu(),
         Some("enable-daemon") => enable_daemon(),
         Some("install-udev") => install_udev_rule(),
+        Some("install-yogafan") => install_yogafan(),
         _ => Err(
-            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, install-udev"
+            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, install-udev, install-yogafan"
                 .into(),
         ),
     }

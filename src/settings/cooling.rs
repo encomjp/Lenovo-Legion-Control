@@ -8,6 +8,73 @@ pub(crate) fn build_cooling_overview_page(
     gate: &DaemonGate,
 ) -> gtk::Box {
     let page = page_lede("");
+    // LOQ 15AHP10 / R8CN — tachometer locked behind yogafan
+    if legion_core::fans::needs_yogafan_setup() {
+        let locked = pref_group("Fans locked — driver required", None);
+        tip(
+            &locked,
+            "lenovo_wmi_other binds but reads 0 RPM on this model; yogafan provides the real tachometer",
+        );
+        let banner = adw::Banner::new(
+            "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+        );
+        banner.set_button_label(Some("Unlock fans"));
+        locked.add(&banner);
+        let hint = gtk::Label::new(Some(
+            "On LOQ 15AHP10 (83JG) the EC tachometer is behind the yogafan ACPI driver. One password prompt loads it and enables it at boot.",
+        ));
+        hint.set_wrap(true);
+        hint.add_css_class("dim-label");
+        hint.set_xalign(0.0);
+        hint.set_margin_start(12);
+        hint.set_margin_end(12);
+        locked.add(&hint);
+        // Show grayed-out fan cards so layout stays stable
+        for ch in &legion_core::fans::channels() {
+            let card = fan_card(
+                ch.id,
+                &ch.title,
+                ch.min_rpm as f64,
+                ch.max_rpm as f64,
+                toast_overlay,
+                apply_queue,
+            );
+            card.set_sensitive(false);
+            card.add_css_class("dim-label");
+            locked.add(&card);
+        }
+        let overlay = toast_overlay.clone();
+        let banner_c = banner.clone();
+        let locked_c = locked.clone();
+        banner.connect_button_clicked(move |_| {
+            banner_c.set_sensitive(false);
+            banner_c.set_title("Installing…");
+            let overlay = overlay.clone();
+            let banner_c = banner_c.clone();
+            let locked_c = locked_c.clone();
+            run_setup_helper("install-yogafan", move |result| match result {
+                Ok(_) => {
+                    toast_ok(&overlay, "Fans unlocked — reopen the Cooling page to see RPM");
+                    banner_c.set_title("Installed — reopen this page");
+                    locked_c.set_sensitive(false);
+                }
+                Err(e) => {
+                    toast_error(&overlay, &e);
+                    banner_c.set_sensitive(true);
+                    banner_c.set_title(
+                        "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+                    );
+                }
+            });
+        });
+        page.append(&locked);
+        // Also try silent daemon-side load in background
+        std::thread::spawn(|| {
+            let _ = legion_core::fans::ensure_yogafan_loaded();
+        });
+        gate.track(&locked);
+        return page;
+    }
     let overview = pref_group("Fans overview", None);
     tip(&overview, "Each card exposes full tuning for that fan");
     let channels = legion_core::fans::channels();

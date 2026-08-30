@@ -916,7 +916,8 @@ fn main() {
                             let label = match phase {
                                 legion_core::update::UpdatePhase::Downloading => "downloading",
                                 legion_core::update::UpdatePhase::Verifying => "verifying",
-                                legion_core::update::UpdatePhase::Building => "building",
+                                legion_core::update::UpdatePhase::Building
+                                | legion_core::update::UpdatePhase::BuildingLog(_) => "building",
                                 legion_core::update::UpdatePhase::Installing => "installing",
                             };
                             if let Some(t) = total.filter(|t| *t > 0) {

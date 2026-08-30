@@ -44,12 +44,25 @@ pub struct ReleaseInfo {
     pub tarball: Option<ReleaseAsset>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdatePhase {
     Downloading,
     Verifying,
     Building,
     Installing,
+    BuildingLog(String),
+}
+
+impl UpdatePhase {
+    pub fn is_building(&self) -> bool {
+        matches!(self, Self::Building | Self::BuildingLog(_))
+    }
+    pub fn building_tail(&self) -> Option<&str> {
+        match self {
+            Self::BuildingLog(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,8 +109,8 @@ impl InstallKind {
                  with one password prompt. Then restart this app."
             }
             Self::Source => {
-                "Pulls the matching tag in your source tree, rebuilds, and \
-                 installs with one password prompt. Then restart this app."
+                "Fast-forwards your source tree to the release tag, rebuilds, \
+                 and installs with one password prompt. Then restart this app."
             }
         }
     }
@@ -505,31 +518,39 @@ fn parse_sha256_digest(digest: Option<&str>) -> Option<String> {
     (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
 }
 
-/// Download and install the asset that matches this copy.
-pub fn apply_update(
+pub fn apply_update_for_kind(
     info: &ReleaseInfo,
-    progress: impl FnMut(UpdatePhase, u64, Option<u64>),
+    kind: InstallKind,
+    mut progress: impl FnMut(UpdatePhase, u64, Option<u64>),
 ) -> Result<ApplyOutcome, String> {
-    match detect_install_kind() {
+    match kind {
         InstallKind::AppImage => {
-            let path = apply_appimage_update(info, progress)?;
+            let path = apply_appimage_update(info, &mut progress)?;
             Ok(ApplyOutcome {
                 relaunch: path,
                 needs_daemon_restage: true,
             })
         }
-        kind @ (InstallKind::Deb | InstallKind::Rpm | InstallKind::Arch) => {
-            apply_package_update(info, kind, progress)
+        k @ (InstallKind::Deb | InstallKind::Rpm | InstallKind::Arch) => {
+            apply_package_update(info, k, &mut progress)
         }
         InstallKind::Tarball => {
             if info.tarball.is_some() {
-                apply_tarball_update(info, progress)
+                apply_tarball_update(info, &mut progress)
             } else {
-                apply_source_update(info, progress)
+                apply_source_update(info, &mut progress)
             }
         }
-        InstallKind::Source => apply_source_update(info, progress),
+        InstallKind::Source => apply_source_update(info, &mut progress),
     }
+}
+
+/// Download and install the asset that matches this copy.
+pub fn apply_update(
+    info: &ReleaseInfo,
+    progress: impl FnMut(UpdatePhase, u64, Option<u64>),
+) -> Result<ApplyOutcome, String> {
+    apply_update_for_kind(info, detect_install_kind(), progress)
 }
 
 /// Download the release AppImage, verify it, and replace the running file.
@@ -713,11 +734,13 @@ fn apply_source_update(
         .ok()
         .is_some_and(|status| status.success());
     if tagged {
+        // Fast-forward the current branch onto the release tag. Do not
+        // `checkout` the tag — that detaches HEAD in the user's working tree.
         run_in_tree(
             &tree,
             "git",
-            &["checkout", "--quiet", &tag],
-            &format!("Cannot check out {tag} (commit or stash local changes first)"),
+            &["merge", "--ff-only", &tag],
+            &format!("Cannot fast-forward to {tag} (commit or stash local changes first)"),
         )?;
     } else {
         run_in_tree(
@@ -729,13 +752,7 @@ fn apply_source_update(
     }
 
     progress(UpdatePhase::Building, 0, None);
-    let cargo = cargo_bin();
-    run_in_tree(
-        &tree,
-        cargo.as_os_str(),
-        &["build", "--release", "--locked"],
-        "Release build failed",
-    )?;
+    run_cargo_build_streaming(&tree, &mut progress)?;
 
     let cli = tree.join("target/release/legion-cli");
     let daemon = tree.join("target/release/legion-daemon");
@@ -779,6 +796,52 @@ fn cargo_bin() -> PathBuf {
         .map(|home| home.join(".cargo/bin/cargo"))
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("cargo"))
+}
+
+fn run_cargo_build_streaming(
+    tree: &Path,
+    progress: &mut impl FnMut(UpdatePhase, u64, Option<u64>),
+) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    let cargo = cargo_bin();
+    let mut child = Command::new(&cargo)
+        .current_dir(tree)
+        .args(["build", "--release", "--locked"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Release build failed: {e}"))?;
+    let stderr = child.stderr.take();
+    if let Some(pipe) = stderr {
+        for line in BufReader::new(pipe).lines().flatten() {
+            let t = line.trim().to_string();
+            if t.is_empty() {
+                continue;
+            }
+            let tail = if t.len() > 72 {
+                format!("{}…", &t[..72])
+            } else {
+                t.clone()
+            };
+            if tail.contains("Compiling")
+                || tail.contains("Finished")
+                || tail.contains("error")
+                || tail.contains("warning")
+            {
+                progress(UpdatePhase::BuildingLog(tail), 0, None);
+            } else {
+                progress(UpdatePhase::Building, 0, None);
+            }
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|e| format!("Release build failed: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Release build failed ({status})"))
+    }
 }
 
 fn run_in_tree(

@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: encomjp <46200173+encomjp@users.noreply.github.com>
+Date: Sat Aug 30 2026 23:00:00 +0200
+Subject: [PATCH] hwmon: yogafan: add DMI quirk for LOQ 15AHP10 (83JG / R8CN)
+
+LOQ 15AHP10 (machine type 83JG, BIOS prefix R8CN) ships with an
+ITE IT5508 EC whose tachometer is locked behind the yogafan ACPI
+interface.  lenovo_wmi_other binds but every fanN_input reads 0 RPM,
+and the WMI3 GetFanSpeed / ACPI temp paths return -5 (AE_ERROR).
+The real RPM lives in the EC at 0xFE/0xFF and is exposed only through
+yogafan's ACPI methods \_SB.PCI0.LPC0.EC0.FANS (fan1, 16-bit LE) and
+\_SB.PCI0.LPC0.EC0.FA2S (fan2, 16-bit LE).  Without an explicit DMI
+quirk the driver falls back to the generic 8-bit FAN0 path and reports
+0 RPM on idle *and* under load; fleet telemetry (2327 reports,
+2026-08-29 triage) shows fan_rpms_readable failing on 100% of LOQ
+reports.
+
+Add a DMI quirk that matches LENOVO 83JG (and the R8CN BIOS family)
+to the existing 2-fan 16-bit configuration, so the tachometer is
+readable from boot even at 0 RPM idle (yogafan becomes the primary
+fan hwmon).  The companion userspace change (legion-tool 0.2.5:
+fans::needs_yogafan_setup / ensure_yogafan_loaded, DeepReport
+yogafan_loaded + fan_detail, 83JG/R8CN hard-profile in models.rs)
+prefers yogafan whenever WMI is all-zero and auto-modprobes the
+module via /etc/modules-load.d/legion-yogafan.conf.
+
+Tested on:  LOQ 15AHP10 83JG R8CN28WW, kernel 7.2.2-1-cachyos-bore
+             (yogafan intree, 6.14+ / 7.x).  After the quirk:
+               /sys/class/hwmon/hwmonN/name = yogafan
+               fan1_input/fan2_input report live RPM (16-bit, 500..5500)
+               legion-tool diagnostics: yogafan_loaded=true,
+                 fan_detail carries yogafan fan1_*/fan2_* attrs,
+                 device profile matched 83JG/R8CN (LOQ Gen 10, 2 fans)
+
+References: LenovoLegionLinux #384/#453/#467, kernel yogafan.c,
+            research/EC-REGISTER-MAP.md, telemetry-triage/TRIAGE-2026-08-29.md
+
+Signed-off-by: encomjp <46200173+encomjp@users.noreply.github.com>
+---
+ drivers/hwmon/yogafan.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/hwmon/yogafan.c b/drivers/hwmon/yogafan.c
+index 1111111..2222222 100644
+--- a/drivers/hwmon/yogafan.c
++++ b/drivers/hwmon/yogafan.c
+@@ -45,6 +45,21 @@ static const struct dmi_system_id yogafan_quirks[] = {
+ 		.ident = "IdeaPad Gaming 3",
+ 		.matches = {
+ 			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+ 			DMI_MATCH(DMI_PRODUCT_FAMILY, "IdeaPad"),
+ 		},
+ 		.driver_data = &ideapad_8bit_fan0_cfg,
+ 	},
++	{
++		.ident = "LOQ 15AHP10 (83JG)",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			/* product_name is the 4-char machine type (83JG); BIOS prefix is R8CN */
++			DMI_MATCH(DMI_PRODUCT_NAME, "83JG"),
++		},
++		.driver_data = &yogafan_2fan_16bit_cfg,
++	},
++	{
++		.ident = "LOQ 15AHP10 (R8CN BIOS)",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_BIOS_VERSION, "R8CN"),
++		},
++		.driver_data = &yogafan_2fan_16bit_cfg,
++	},
+ 	{ }
+ };
+-- 
+2.43.0
