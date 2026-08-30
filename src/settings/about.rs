@@ -227,73 +227,166 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
     group
 }
 
-fn changelog_preview(info: &legion_core::update::ReleaseInfo) -> String {
-    let changelog: String = info
-        .body
-        .lines()
-        .filter(|l| !l.trim_start().starts_with('|'))
-        .map(|l| l.trim_start_matches('#').trim())
-        .filter(|l| !l.is_empty())
-        .take(14)
-        .collect::<Vec<_>>()
-        .join("\n");
-    changelog.chars().take(600).collect()
+fn active_settings_window() -> Option<gtk::Window> {
+    gtk::gio::Application::default()
+        .and_then(|app| app.downcast::<gtk::Application>().ok())
+        .and_then(|app| app.active_window())
 }
 
 pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
-    let changelog_short = changelog_preview(info);
     let can_apply = legion_core::update::can_apply(info);
-    let notes = if changelog_short.is_empty() {
-        String::new()
-    } else {
-        format!("\n\nWhat's new:\n{changelog_short}")
-    };
     let kind = legion_core::update::detect_install_kind();
-    let body = if can_apply {
-        format!(
-            "A new version of Legion Control is available.\n\n\
-             Installed: v{}\n\
-             Latest:    v{} ({})\n\
-             This copy: {}\n\n\
-             {}{notes}",
-            legion_core::update::CURRENT_VERSION,
-            info.version,
-            info.name,
-            kind.label(),
-            kind.apply_blurb(),
-        )
-    } else {
-        format!(
-            "A new version of Legion Control is available.\n\n\
-             Installed: v{}\n\
-             Latest:    v{} ({})\n\n\
-             {}{notes}",
-            legion_core::update::CURRENT_VERSION,
-            info.version,
-            info.name,
-            legion_core::update::manual_update_hint(),
-        )
-    };
+    let headline = legion_core::update::changelog_headline(&info.body);
+    let notes = legion_core::update::changelog_notes(&info.body);
 
-    let dialog = adw::AlertDialog::new(Some("Update available"), Some(&body));
-    dialog.add_response("later", "Later");
-    dialog.set_close_response("later");
-    if can_apply {
-        dialog.add_response("update", "Update now");
-        dialog.set_response_appearance("update", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("update"));
-    } else {
-        dialog.set_default_response(Some("later"));
+    let win = adw::Window::builder()
+        .title("Update available")
+        .default_width(520)
+        .default_height(420)
+        .modal(true)
+        .build();
+    win.add_css_class("update-dialog");
+    if let Some(parent) = active_settings_window() {
+        win.set_transient_for(Some(&parent));
     }
 
-    let info = info.clone();
-    dialog.connect_response(None, move |_, response| {
-        if response == "update" {
-            begin_in_app_update(&info);
+    let header = adw::HeaderBar::new();
+    header.add_css_class("flat");
+
+    let stack = adw::ViewStack::new();
+    stack.set_vexpand(true);
+
+    let release = gtk::Box::new(Orientation::Vertical, 12);
+    release.set_margin_top(8);
+    release.set_margin_bottom(8);
+    release.set_margin_start(20);
+    release.set_margin_end(20);
+    release.set_halign(Align::Fill);
+    release.set_valign(Align::Center);
+    release.set_vexpand(true);
+
+    let version = gtk::Label::new(Some(&format!(
+        "v{}  →  v{}",
+        legion_core::update::CURRENT_VERSION,
+        info.version
+    )));
+    version.add_css_class("update-version");
+    version.set_wrap(true);
+    version.set_justify(gtk::Justification::Center);
+    release.append(&version);
+
+    let blurb = gtk::Label::new(Some(&headline));
+    blurb.add_css_class("update-blurb");
+    blurb.set_wrap(true);
+    blurb.set_justify(gtk::Justification::Center);
+    blurb.set_max_width_chars(46);
+    release.append(&blurb);
+
+    let how = gtk::Label::new(Some(if can_apply {
+        kind.apply_blurb()
+    } else {
+        "Open the GitHub release to download this version."
+    }));
+    how.add_css_class("dim-label");
+    how.set_wrap(true);
+    how.set_justify(gtk::Justification::Center);
+    how.set_max_width_chars(46);
+    release.append(&how);
+
+    stack.add_titled_with_icon(
+        &release,
+        Some("release"),
+        "Release",
+        "software-update-available-symbolic",
+    );
+
+    let notes_text = if notes.is_empty() {
+        "No release notes for this version.".to_string()
+    } else {
+        notes
+    };
+    let notes_label = gtk::Label::new(Some(&notes_text));
+    notes_label.add_css_class("update-notes");
+    notes_label.set_wrap(true);
+    notes_label.set_xalign(0.0);
+    notes_label.set_yalign(0.0);
+    notes_label.set_selectable(true);
+    let notes_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_height(true)
+        .child(&notes_label)
+        .build();
+    notes_scroll.set_margin_top(8);
+    notes_scroll.set_margin_bottom(8);
+    notes_scroll.set_margin_start(16);
+    notes_scroll.set_margin_end(16);
+    stack.add_titled_with_icon(
+        &notes_scroll,
+        Some("notes"),
+        "What's new",
+        "view-list-symbolic",
+    );
+
+    let switcher = adw::ViewSwitcher::new();
+    switcher.set_stack(Some(&stack));
+    switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+    header.set_title_widget(Some(&switcher));
+
+    let later = gtk::Button::with_label("Later");
+    later.add_css_class("pill-btn");
+    later.set_hexpand(true);
+    let action = if can_apply {
+        primary_button_tip("Update now", Some(kind.apply_blurb()))
+    } else {
+        primary_button_tip("Open release", Some("Open the GitHub release page"))
+    };
+    action.set_hexpand(true);
+    action.set_halign(Align::Fill);
+
+    let actions = gtk::Box::new(Orientation::Horizontal, 8);
+    actions.set_margin_top(10);
+    actions.set_margin_bottom(14);
+    actions.set_margin_start(16);
+    actions.set_margin_end(16);
+    actions.set_homogeneous(true);
+    actions.append(&later);
+    actions.append(&action);
+
+    let page = gtk::Box::new(Orientation::Vertical, 0);
+    page.append(&stack);
+    page.append(&actions);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&page));
+    win.set_content(Some(&toolbar));
+
+    let win_later = win.clone();
+    later.connect_clicked(move |_| {
+        win_later.close();
+    });
+
+    let win_action = win.clone();
+    let info_c = info.clone();
+    action.connect_clicked(move |_| {
+        win_action.close();
+        if can_apply {
+            begin_in_app_update(&info_c);
+        } else if let Err(e) = gtk::gio::AppInfo::launch_default_for_uri(
+            &info_c.html_url,
+            None::<&gtk::gio::AppLaunchContext>,
+        ) {
+            let err = adw::AlertDialog::new(
+                Some("Could not open the release"),
+                Some(&format!("{e}\n\n{}", info_c.html_url)),
+            );
+            err.add_response("ok", "OK");
+            err.present(None::<&gtk::Window>);
         }
     });
 
-    dialog.present(None::<&gtk::Window>);
+    win.present();
 }
 
 fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
@@ -371,6 +464,11 @@ fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
                     dialog.set_heading(Some("Verifying checksum…"));
                     bar.set_fraction(1.0);
                     bar.set_text(Some("sha256"));
+                }
+                legion_core::update::UpdatePhase::Building => {
+                    dialog.set_heading(Some("Building…"));
+                    bar.pulse();
+                    bar.set_text(Some("cargo"));
                 }
                 legion_core::update::UpdatePhase::Installing => {
                     dialog.set_heading(Some("Installing…"));

@@ -3,10 +3,15 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
 
 ## Unreleased
+
+## 0.2.4 - 2026-08-30
+
+- Source `/usr/local` installs can use **Update now** (git tag + rebuild, or the portable tarball).
+- Update dialog is a wider two-tab window (Release / What's new) instead of a Later-only notes dump.
 
 ## 0.2.3 - 2026-08-30
 

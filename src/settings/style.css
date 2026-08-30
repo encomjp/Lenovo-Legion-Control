@@ -805,6 +805,29 @@ scale trough highlight {
     padding-left: 12px;
     padding-right: 12px;
 }
+.pill-btn.suggested-action:disabled {
+    opacity: 0.42;
+}
+
+/* Update dialog — compact card, notes on a second tab */
+.update-dialog {
+    min-width: 480px;
+}
+.update-dialog .update-version {
+    font-size: 1.28rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+}
+.update-dialog .update-blurb {
+    font-size: 0.95rem;
+    opacity: 0.78;
+    line-height: 1.35;
+}
+.update-dialog .update-notes {
+    font-size: 0.86rem;
+    line-height: 1.45;
+    opacity: 0.88;
+}
 
 @media (prefers-reduced-motion: reduce) {
     * {

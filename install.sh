@@ -618,6 +618,12 @@ fi
 say ""
 printf '%s══════════════════════════════════════════════%s\n' "$C_GRN" "$C_RST"
 ok "Legion Control is installed"
+# Remember the git checkout so in-app update can pull + rebuild later.
+SOURCE_STAMP_USER="${XDG_CONFIG_HOME:-$HOME/.config}/legion-control/source-tree"
+mkdir -p "$(dirname "$SOURCE_STAMP_USER")"
+printf '%s\n' "$ROOT" > "$SOURCE_STAMP_USER" || true
+sudo_run mkdir -p /var/lib/legion-control
+printf '%s\n' "$ROOT" | sudo_run tee /var/lib/legion-control/source-tree >/dev/null || true
 say ""
 say "  ${C_BLD}GUI${C_RST}     legion-settings"
 say "  ${C_BLD}CLI${C_RST}     legion-cli status"

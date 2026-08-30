@@ -48,6 +48,7 @@ pub struct ReleaseInfo {
 pub enum UpdatePhase {
     Downloading,
     Verifying,
+    Building,
     Installing,
 }
 
@@ -94,7 +95,10 @@ impl InstallKind {
                 "The binary archive will download and install under /usr/local \
                  with one password prompt. Then restart this app."
             }
-            Self::Source => "",
+            Self::Source => {
+                "Pulls the matching tag in your source tree, rebuilds, and \
+                 installs with one password prompt. Then restart this app."
+            }
         }
     }
 
@@ -119,6 +123,12 @@ pub fn detect_install_kind() -> InstallKind {
         return kind;
     }
     if exe.starts_with("/usr/local") {
+        // install.sh stages here. Treat as a tarball only when a portable
+        // archive is how this copy is meant to update; otherwise keep it as
+        // a source tree so git pull + rebuild still works.
+        if source_tree().is_some() {
+            return InstallKind::Source;
+        }
         return InstallKind::Tarball;
     }
     InstallKind::Source
@@ -164,6 +174,97 @@ pub fn selected_asset(info: &ReleaseInfo) -> Option<&ReleaseAsset> {
 
 pub fn can_apply(info: &ReleaseInfo) -> bool {
     selected_asset(info).is_some()
+        || (matches!(
+            detect_install_kind(),
+            InstallKind::Tarball | InstallKind::Source
+        ) && source_tree().is_some())
+}
+
+/// First useful changelog line for the compact update card.
+pub fn changelog_headline(body: &str) -> String {
+    body.lines()
+        .map(|line| line.trim().trim_start_matches('#').trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('|'))
+        .map(|line| line.trim_start_matches(['-', '*']).trim())
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            !lower.starts_with("changelog")
+                && lower != "fixes"
+                && lower != "notes"
+                && lower != "new"
+                && lower != "fixed"
+        })
+        .filter(|line| !line.is_empty())
+        .map(|line| line.chars().take(160).collect())
+        .unwrap_or_else(|| "A new version of Legion Control is available.".into())
+}
+
+/// Full notes for the What's new tab (tables stripped).
+pub fn changelog_notes(body: &str) -> String {
+    let notes = body
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('|'))
+        .map(|line| line.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+    notes.trim().to_string()
+}
+
+fn looks_like_source_tree(path: &Path) -> bool {
+    path.join("Cargo.toml").is_file() && path.join("install.sh").is_file()
+}
+
+fn source_stamp_paths() -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from("/var/lib/legion-control/source-tree")];
+    if let Some(config) = dirs::config_dir() {
+        paths.push(config.join("legion-control").join("source-tree"));
+    }
+    paths
+}
+
+/// Git checkout used by `./install.sh`, if we can still find it.
+pub fn source_tree() -> Option<PathBuf> {
+    for stamp in source_stamp_paths() {
+        if let Ok(raw) = fs::read_to_string(stamp) {
+            let path = PathBuf::from(raw.trim());
+            if looks_like_source_tree(&path) {
+                return Some(path);
+            }
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let mut cursor = exe;
+        for _ in 0..4 {
+            let Some(parent) = cursor.parent() else {
+                break;
+            };
+            cursor = parent.to_path_buf();
+            if looks_like_source_tree(&cursor) {
+                return Some(cursor);
+            }
+        }
+    }
+    let home = dirs::home_dir()?;
+    for rel in [
+        "Documents/lenovo-legion-control/lenovo-legion-tool",
+        "Documents/Lenovo-Legion-Control",
+        "src/lenovo-legion-tool",
+        "src/Lenovo-Legion-Control",
+    ] {
+        let path = home.join(rel);
+        if looks_like_source_tree(&path) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn remember_source_tree(tree: &Path) {
+    if let Some(dir) = dirs::config_dir() {
+        let dir = dir.join("legion-control");
+        let _ = fs::create_dir_all(&dir);
+        let _ = fs::write(dir.join("source-tree"), tree.to_string_lossy().as_bytes());
+    }
 }
 
 /// True when this process can download and replace itself from a release asset.
@@ -193,9 +294,16 @@ pub fn manual_update_hint() -> String {
             "This copy lives under /usr/local. Update with the x86_64 tarball from the release, or:\n  git pull && ./install.sh"
                 .into()
         }
-        InstallKind::Source => {
-            "This copy was built from source. Update with:\n  git pull && ./install.sh".into()
-        }
+        InstallKind::Source => source_tree()
+            .map(|tree| {
+                format!(
+                    "This copy was built from source at {}.\nUpdate with:\n  git pull && ./install.sh",
+                    tree.display()
+                )
+            })
+            .unwrap_or_else(|| {
+                "This copy was built from source. Update with:\n  git pull && ./install.sh".into()
+            }),
     }
 }
 
@@ -413,8 +521,14 @@ pub fn apply_update(
         kind @ (InstallKind::Deb | InstallKind::Rpm | InstallKind::Arch) => {
             apply_package_update(info, kind, progress)
         }
-        InstallKind::Tarball => apply_tarball_update(info, progress),
-        InstallKind::Source => Err(manual_update_hint()),
+        InstallKind::Tarball => {
+            if info.tarball.is_some() {
+                apply_tarball_update(info, progress)
+            } else {
+                apply_source_update(info, progress)
+            }
+        }
+        InstallKind::Source => apply_source_update(info, progress),
     }
 }
 
@@ -577,6 +691,117 @@ fn apply_tarball_update(
         relaunch,
         needs_daemon_restage: false,
     })
+}
+
+fn apply_source_update(
+    info: &ReleaseInfo,
+    mut progress: impl FnMut(UpdatePhase, u64, Option<u64>),
+) -> Result<ApplyOutcome, String> {
+    let tree = source_tree().ok_or_else(manual_update_hint)?;
+    progress(UpdatePhase::Downloading, 0, None);
+    run_in_tree(
+        &tree,
+        "git",
+        &["fetch", "--tags", "--force", "origin"],
+        "Cannot fetch the source tree",
+    )?;
+    let tag = format!("v{}", info.version);
+    let tagged = Command::new("git")
+        .current_dir(&tree)
+        .args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])
+        .status()
+        .ok()
+        .is_some_and(|status| status.success());
+    if tagged {
+        run_in_tree(
+            &tree,
+            "git",
+            &["checkout", "--quiet", &tag],
+            &format!("Cannot check out {tag} (commit or stash local changes first)"),
+        )?;
+    } else {
+        run_in_tree(
+            &tree,
+            "git",
+            &["pull", "--ff-only"],
+            "Cannot fast-forward the source tree",
+        )?;
+    }
+
+    progress(UpdatePhase::Building, 0, None);
+    let cargo = cargo_bin();
+    run_in_tree(
+        &tree,
+        cargo.as_os_str(),
+        &["build", "--release", "--locked"],
+        "Release build failed",
+    )?;
+
+    let cli = tree.join("target/release/legion-cli");
+    let daemon = tree.join("target/release/legion-daemon");
+    let settings = tree.join("target/release/legion-settings");
+    let helper = tree.join("target/release/legion-control-setup");
+    for bin in [&cli, &daemon, &settings, &helper] {
+        if !bin.is_file() {
+            return Err(format!("Build did not produce {}", bin.display()));
+        }
+    }
+
+    progress(UpdatePhase::Installing, 0, None);
+    let script = "install -Dm755 \"$1\" /usr/local/bin/legion-cli \
+                  && install -Dm755 \"$2\" /usr/local/bin/legion-daemon \
+                  && install -Dm755 \"$3\" /usr/local/bin/legion-settings \
+                  && install -Dm755 \"$4\" /usr/local/libexec/legion-control-setup \
+                  && mkdir -p /var/lib/legion-control \
+                  && printf '%s\\n' \"$5\" > /var/lib/legion-control/source-tree \
+                  && systemctl try-restart legion-control.service >/dev/null 2>&1 || true";
+    let output = Command::new("pkexec")
+        .args(["/bin/sh", "-c", script, "legion-update"])
+        .arg(&cli)
+        .arg(&daemon)
+        .arg(&settings)
+        .arg(&helper)
+        .arg(&tree)
+        .output()
+        .map_err(|e| format!("Cannot start PolicyKit install: {e}"))?;
+    if !output.status.success() {
+        return Err(pkexec_error(&output));
+    }
+    remember_source_tree(&tree);
+    Ok(ApplyOutcome {
+        relaunch: PathBuf::from("/usr/local/bin/legion-settings"),
+        needs_daemon_restage: false,
+    })
+}
+
+fn cargo_bin() -> PathBuf {
+    dirs::home_dir()
+        .map(|home| home.join(".cargo/bin/cargo"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("cargo"))
+}
+
+fn run_in_tree(
+    tree: &Path,
+    program: impl AsRef<std::ffi::OsStr>,
+    args: &[&str],
+    context: &str,
+) -> Result<(), String> {
+    let output = Command::new(program)
+        .current_dir(tree)
+        .args(args)
+        .output()
+        .map_err(|e| format!("{context}: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if err.is_empty() {
+            Err(format!("{context} ({})", output.status))
+        } else {
+            Err(format!("{context}: {err}"))
+        }
+    }
 }
 
 fn download_verified(
@@ -1117,5 +1342,24 @@ mod tests {
         assert!(safe_filename("legion-control_0.2.0_amd64.deb").is_ok());
         assert!(safe_filename("../etc/passwd").is_err());
         assert!(safe_filename("foo bar.deb").is_err());
+    }
+
+    #[test]
+    fn changelog_headline_skips_heading_noise() {
+        let body = "# Changelog - 0.2.3 (2026-08-30)\n\n## Fixes\n\n### LOQ / IdeaPad fan RPM at idle\n\n- Prefer yogafan\n";
+        assert_eq!(changelog_headline(body), "LOQ / IdeaPad fan RPM at idle");
+    }
+
+    #[test]
+    fn looks_like_source_tree_requires_cargo_and_installer() {
+        let dir = std::env::temp_dir().join(format!("legion-src-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert!(!looks_like_source_tree(&dir));
+        fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
+        assert!(!looks_like_source_tree(&dir));
+        fs::write(dir.join("install.sh"), "#!/bin/sh\n").unwrap();
+        assert!(looks_like_source_tree(&dir));
+        let _ = fs::remove_dir_all(&dir);
     }
 }
