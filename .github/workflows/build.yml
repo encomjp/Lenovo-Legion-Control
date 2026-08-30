@@ -1,0 +1,48 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      RUSTFLAGS: "-C target-cpu=x86-64-v3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
+
+      - name: Build release binaries
+        working-directory: lenovo-legion-tool
+        run: cargo build --release --locked
+
+      - name: Install appimagetool
+        run: |
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          echo "APPIMAGETOOL=/tmp/appimagetool" >> $GITHUB_ENV
+
+      - name: Build packages
+        working-directory: lenovo-legion-tool
+        run: |
+          ./packaging/build-appimage.sh ../packaged || true
+          ./packaging/build-all.sh || true
+          ls -lh ../packaged/ packaging/out/ || true
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packaged/*.AppImage
+            packaged/*.tar.gz
+            lenovo-legion-tool/packaging/out/*
+          fail_on_unmatched_files: false
