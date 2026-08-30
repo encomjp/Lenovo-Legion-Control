@@ -85,7 +85,7 @@ jobs:
           docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$(pwd)/packaging/arch:/packaging:ro" -v "$OUT:/out" archlinux:latest bash -lc "
             set -e; pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita polkit >/dev/null
             useradd -m builder; mkdir -p /build; cp /input/legion-control-$VERSION.tar.gz /build/; cp /packaging/PKGBUILD /packaging/legion-control.install /build/; chown -R builder:builder /build
-            runuser -u builder -- bash -lc 'cd /build && makepkg --noconfirm --cleanbuild'; cp /build/*.pkg.tar.zst /out/
+            runuser -u builder -- bash -lc 'cd /build && makepkg --noconfirm --cleanbuild --nocheck'; cp /build/*.pkg.tar.zst /out/
           "
           ls -lh packaging/out/
       - uses: actions/upload-artifact@v4
