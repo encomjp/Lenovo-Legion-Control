@@ -68,12 +68,11 @@ fn fan_control_hwmon() -> Option<&'static (String, PathBuf)> {
 
 fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
     if let Some(hw) = hwmon_by_name("lenovo_wmi_other").filter(|hw| has_fan_inputs(hw)) {
-        // Some models bind lenovo_wmi_other but its tachometer reads 0 while
-        // yogafan carries live RPM values.
-        if let Some(yw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
-            // Match device::probe_fans exactly: switch only when yogafan has
-            // a live reading and every WMI reading is zero/unreadable.
-            if has_live_fan_input(&yw) && !has_live_fan_input(&hw) {
+        // LOQ 83JG (and similar): lenovo_wmi_other binds but the EC tach
+        // is locked at 0. Real RPM is yogafan. Idle 0 rpm is valid there,
+        // so do not wait for a nonzero yogafan sample before switching.
+        if !has_live_fan_input(&hw) {
+            if let Some(yw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
                 log::debug!(
                     "fans::fan_hwmon: lenovo_wmi_other reads 0 — using yogafan at {}",
                     yw.display()
@@ -525,6 +524,20 @@ mod tests {
 
         std::fs::write(dir.join("fan1_target"), "0\n").unwrap();
         assert!(has_fan_targets(&dir));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn idle_zero_rpm_is_not_a_live_reading() {
+        let dir = std::env::temp_dir().join(format!("legion-fan-idle-zero-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fan1_input"), "0\n").unwrap();
+        std::fs::write(dir.join("fan2_input"), "0\n").unwrap();
+        assert!(has_fan_inputs(&dir));
+        assert!(
+            !has_live_fan_input(&dir),
+            "WMI/yogafan idle 0 must not count as a live tachometer"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

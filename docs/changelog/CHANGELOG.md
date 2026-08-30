@@ -3,10 +3,15 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
 
 ## Unreleased
+
+## 0.2.3 - 2026-08-30
+
+- Prefer yogafan for RPM when `lenovo_wmi_other` is bound but locked at 0 (LOQ 83JG idle fans).
+- Includes unpublished 0.2.2: nvidia-caps DeviceAllow, GPU card fallback, metric-chip ellipsis, CLI `—` for missing temps.
 
 ## 0.2.2 - 2026-08-30
 
