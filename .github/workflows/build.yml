@@ -9,42 +9,99 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  appimage:
     runs-on: ubuntu-24.04
     env:
       RUSTFLAGS: "-C target-cpu=x86-64-v3"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
-
-      - name: Build release binaries
-        run: cargo build --release --locked
-
-      - name: Install appimagetool
-        run: |
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
+      - run: cargo build --release --locked
+      - run: |
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
           chmod +x /tmp/appimagetool
-          echo "APPIMAGETOOL=/tmp/appimagetool" >> $GITHUB_ENV
-
-      - name: Build packages
-        run: |
           mkdir -p packaged
-          ./packaging/build-appimage.sh ./packaged || true
-          ./packaging/build-all.sh || true
-          ls -lh packaged/ packaging/out/ || true
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+          APPIMAGETOOL=/tmp/appimagetool ./packaging/build-appimage.sh ./packaged
+          ls -lh packaged/
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
-            packaged/*.AppImage
-            packaged/*.tar.gz
-            packaging/out/*
+          name: appimage
+          path: packaged/*.AppImage
+
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
+          SOURCE="$WORK/legion-control-$VERSION.tar.gz"
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" ubuntu:24.04 bash -lc "
+            set -e; export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq; apt-get install -y -qq build-essential curl pkg-config dpkg-dev libgtk-4-dev libadwaita-1-dev >/dev/null
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable >/dev/null; . /root/.cargo/env
+            tar -xzf /input/legion-control-$VERSION.tar.gz -C /tmp; cd /tmp/legion-control-$VERSION
+            cargo build --release --locked; chmod +x packaging/debian/build.sh; OUT_DIR=/out packaging/debian/build.sh
+          "
+          ls -lh packaging/out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: packaging/out/*.deb
+
+  rpm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
+          SOURCE="$WORK/legion-control-$VERSION.tar.gz"
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" fedora:42 bash -lc "
+            set -e; dnf install -y -q rpm-build cargo rust gtk4-devel libadwaita-devel >/dev/null
+            mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+            cp /input/legion-control-$VERSION.tar.gz /tmp/rpmbuild/SOURCES/; cp /input/legion-control-$VERSION.tar.gz /tmp/source.tar.gz
+            tar -xzf /tmp/source.tar.gz -C /tmp; cp /tmp/legion-control-$VERSION/packaging/rpm/legion-control.spec /tmp/rpmbuild/SPECS/
+            rpmbuild -bb /tmp/rpmbuild/SPECS/legion-control.spec --define '_topdir /tmp/rpmbuild'; cp /tmp/rpmbuild/RPMS/*/*.rpm /out/
+          "
+          ls -lh packaging/out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: packaging/out/*.rpm
+
+  arch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
+          SOURCE="$WORK/legion-control-$VERSION.tar.gz"
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$(pwd)/packaging/arch:/packaging:ro" -v "$OUT:/out" archlinux:latest bash -lc "
+            set -e; pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita >/dev/null
+            useradd -m builder; mkdir -p /build; cp /input/legion-control-$VERSION.tar.gz /build/; cp /packaging/PKGBUILD /packaging/legion-control.install /build/; chown -R builder:builder /build
+            runuser -u builder -- bash -lc 'cd /build && makepkg --noconfirm --cleanbuild'; cp /build/*.pkg.tar.zst /out/
+          "
+          ls -lh packaging/out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: packaging/out/*.pkg.tar.zst
+
+  release:
+    needs: [appimage, deb, rpm, arch]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: ls -R artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
           fail_on_unmatched_files: false
