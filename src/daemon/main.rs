@@ -1139,9 +1139,7 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
                     if &digest != d {
                         Some("capability-change")
                     } else if now.duration_since(*t)
-                        >= Duration::from_secs(
-                            legion_core::diagnostics::DEEP_INTERVAL_SECS,
-                        )
+                        >= Duration::from_secs(legion_core::diagnostics::DEEP_INTERVAL_SECS)
                     {
                         Some("hourly")
                     } else {

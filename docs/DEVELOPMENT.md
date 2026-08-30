@@ -88,6 +88,8 @@ The Rust hardware and application layers are organized as follows:
 - `src/lib.rs` registers the public core modules and describes the hardware abstraction.
 - `src/comms.rs` defines the Unix-socket protocol and daemon command classification.
 - `src/device.rs` detects model, BIOS, capabilities, and the hardware fingerprint.
+- `src/gpu_ids.rs` maps PCI device IDs to laptop GPU marketing names (`data/gpu-ids.yaml`).
+- `src/cpu_ids.rs` maps CPU SKU tokens to laptop CPU marketing names (`data/cpu-ids.yaml`).
 - `src/sensors.rs` reads hwmon, sysfs, power, and `nvidia-smi` telemetry.
 - `src/fans.rs` reads and writes fan state.
 - `src/profile.rs` handles ACPI platform profiles and PPT.
@@ -140,6 +142,8 @@ packaging/out/legion-control-<version>-1-x86_64.pkg.tar.zst
 Package-specific staging is implemented in `packaging/debian/build.sh`, `packaging/rpm/legion-control.spec`, and `packaging/arch/PKGBUILD`. The packages include the daemon, CLI, GTK application, setup helper, systemd unit, udev rules, PolicyKit policy, desktop entry, icons, and pinned optional `ryzen_smu` source. The Arch recipe runs `cargo test --all-targets --locked` during its package check.
 
 The native packages install binaries under `/usr/bin`; the source installer normally installs them under `/usr/local/bin`. `packaging/README.md` explicitly warns not to install both styles at the same time. Packages do not automatically install or load the optional `ryzen_smu` DKMS module. The optional backend requires DKMS and matching kernel headers and may require Secure Boot signing.
+
+Release notes live in `docs/changelog/`. Put GitHub body text in `docs/changelog/vX.Y.Z.md` and pass that path to `gh release create --notes-file`. The settings app reads the published GitHub release body, not those files.
 
 For a source build and install, `install.sh` checks native dependencies, ensures Rust 1.87+, builds release binaries with `cargo build --release`, and installs the binaries and selected integration files. Review its options and prefix behavior before running it on a development machine.
 

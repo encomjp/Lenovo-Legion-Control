@@ -82,7 +82,11 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             false,
             format!("{pct}% out of range"),
         )),
-        (None, _) => out.push(check("battery_capacity", false, "battery capacity unreadable")),
+        (None, _) => out.push(check(
+            "battery_capacity",
+            false,
+            "battery capacity unreadable",
+        )),
     }
     let status = battery::status().unwrap_or_default();
     out.push(check(
@@ -113,11 +117,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     out.push(check(
         "fans_enumerated",
         !channels.is_empty(),
-        format!(
-            "{} channel(s) via {}",
-            channels.len(),
-            fans::backend_name()
-        ),
+        format!("{} channel(s) via {}", channels.len(), fans::backend_name()),
     ));
     // Missing RPM support is a capability state, not a failed read. Only an
     // attribute that exists but cannot be read indicates a broken backend.
@@ -341,8 +341,7 @@ pub fn scan_faults() -> Vec<Fault> {
     // "fans off" (fleet false-positive at 81°C).
     let hottest = s.cpu_temp.max(s.dgpu_temp.max(-1.0));
     let fan_ids = fans::ids();
-    let readings: Vec<Option<u32>> =
-        fan_ids.iter().map(|id| fans::read_rpm(*id)).collect();
+    let readings: Vec<Option<u32>> = fan_ids.iter().map(|id| fans::read_rpm(*id)).collect();
     let any_readable = readings.iter().any(|r| r.is_some());
     let any_airflow = readings.iter().any(|r| r.unwrap_or(0) > 0);
     if hottest >= 80.0 && any_readable && !any_airflow {
@@ -467,12 +466,11 @@ pub fn scan_faults() -> Vec<Fault> {
             // Cap threshold must respect THIS CPU's ceiling — MAX_FULL is the
             // 5.46 GHz reference (9955HX3D); a 4.28 GHz APU parked at its own
             // policy max is not "throttled" (IdeaPad fleet false-positive).
-            let policy_max = std::fs::read_to_string(
-                "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-            )
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .unwrap_or(thermal::MAX_FULL);
+            let policy_max =
+                std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                    .unwrap_or(thermal::MAX_FULL);
             let cap_threshold = policy_max.saturating_sub(100_000);
             let restore_mc = (cfg.max_temp as i32 - 7) * 1000;
             if cur < cap_threshold && temp_mc(&s) < restore_mc - 3_000 {

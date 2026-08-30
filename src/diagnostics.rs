@@ -694,10 +694,7 @@ fn collect_deep(reason: &str) -> DeepReport {
 
     // ─── fan detail: every fanN_* attr on every fan-ish hwmon ───
     for chip in &deep.hwmon_dump {
-        if chip.name.contains("wmi")
-            || chip.name.contains("legion")
-            || chip.name.contains("yoga")
-        {
+        if chip.name.contains("wmi") || chip.name.contains("legion") || chip.name.contains("yoga") {
             for (attr, val) in &chip.attrs {
                 if attr.starts_with("fan") {
                     deep.fan_detail
@@ -729,14 +726,22 @@ fn collect_deep(reason: &str) -> DeepReport {
     // ─── installed support software ───
     let sw = &mut deep.installed_software;
     let push = |sw: &mut Vec<(String, String)>, k: &str, v: String| sw.push((k.into(), v));
-    push(sw, "ryzen_smu_loaded", Path::new("/sys/kernel/ryzen_smu_drv").is_dir().to_string());
+    push(
+        sw,
+        "ryzen_smu_loaded",
+        Path::new("/sys/kernel/ryzen_smu_drv").is_dir().to_string(),
+    );
     push(
         sw,
         "ryzen_smu_dkms_registered",
         std::process::Command::new("dkms")
             .arg("status")
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.contains("ryzen_smu")))
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .any(|l| l.contains("ryzen_smu"))
+            })
             .unwrap_or(false)
             .to_string(),
     );
@@ -753,17 +758,16 @@ fn collect_deep(reason: &str) -> DeepReport {
     push(
         sw,
         "kernel_headers",
-        Path::new(&format!(
-            "/lib/modules/{}/build",
-            report_os_kernel()
-        ))
-        .is_dir()
-        .to_string(),
+        Path::new(&format!("/lib/modules/{}/build", report_os_kernel()))
+            .is_dir()
+            .to_string(),
     );
     push(
         sw,
         "aw88399_firmware",
-        Path::new("/lib/firmware/aw88399_acf.bin").is_file().to_string(),
+        Path::new("/lib/firmware/aw88399_acf.bin")
+            .is_file()
+            .to_string(),
     );
     if let Some(ver) = std::fs::read_to_string("/sys/module/nvidia/version")
         .ok()

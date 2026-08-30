@@ -341,12 +341,19 @@ fn looks_integrated_gpu(card: &PciGpu) -> bool {
             "radeon 7",
             "radeon 8",
             "radeon 9",
+            "8050s",
+            "8060s",
         ]
         .iter()
         .any(|marker| name.contains(marker)),
-        "0x8086" => ["uhd graphics", "iris", "arc graphics", "integrated graphics"]
-            .iter()
-            .any(|marker| name.contains(marker)),
+        "0x8086" => [
+            "uhd graphics",
+            "iris",
+            "arc graphics",
+            "integrated graphics",
+        ]
+        .iter()
+        .any(|marker| name.contains(marker)),
         _ => false,
     }
 }
@@ -357,6 +364,9 @@ fn resolve_gpu_name(card: &PciGpu) -> String {
         .find(|(sysfs, _, _)| sysfs.eq_ignore_ascii_case(&card.vendor))
         .copied()
         .unwrap_or((card.vendor.as_str(), "unknown", "GPU"));
+    if let Some(pretty) = crate::gpu_ids::pretty_name(&card.vendor, &card.device) {
+        return pretty;
+    }
     if let Ok(output) = std::process::Command::new("lspci")
         .args(["-s", card.slot.as_str()])
         .output()
@@ -384,11 +394,9 @@ fn resolve_gpu_name(card: &PciGpu) -> String {
 fn gpu_inventory_uncached() -> GpuInventory {
     let cards = pci_gpus();
     let discrete = select_discrete_gpu(&cards);
-    let integrated = cards
-        .iter()
-        .find(|card| {
-            discrete.is_none_or(|dgpu| dgpu.slot != card.slot) && looks_integrated_gpu(card)
-        });
+    let integrated = cards.iter().find(|card| {
+        discrete.is_none_or(|dgpu| dgpu.slot != card.slot) && looks_integrated_gpu(card)
+    });
     GpuInventory {
         discrete_name: discrete.map(|card| card.name.clone()),
         integrated_name: integrated.map(|card| card.name.clone()),
@@ -890,7 +898,10 @@ fn read_cpu_model() -> Option<String> {
     };
     for line in text.lines() {
         if line.starts_with("model name") {
-            return line.split(':').nth(1).map(|s| s.trim().to_string());
+            return line.split(':').nth(1).map(|s| {
+                let raw = s.trim();
+                crate::cpu_ids::display_name(raw)
+            });
         }
     }
     log::trace!("cpu model: /proc/cpuinfo has no \"model name\" line");
@@ -1030,11 +1041,7 @@ mod tests {
         let nvidia_only = [test_gpu("0000:01:00.0", "0x10de", "GeForce RTX GPU")];
         assert!(select_discrete_gpu(&nvidia_only).is_some());
 
-        let amd_dgpu_only = [test_gpu(
-            "0000:03:00.0",
-            "0x1002",
-            "Radeon RX 7700S",
-        )];
+        let amd_dgpu_only = [test_gpu("0000:03:00.0", "0x1002", "Radeon RX 7700S")];
         assert!(select_discrete_gpu(&amd_dgpu_only).is_some());
 
         let muxed_amd = [
@@ -1044,6 +1051,28 @@ mod tests {
         assert_eq!(
             select_discrete_gpu(&muxed_amd).map(|gpu| gpu.slot.as_str()),
             Some("0000:03:00.0")
+        );
+    }
+
+    #[test]
+    fn cpu_name_uses_sku_map() {
+        assert_eq!(
+            crate::cpu_ids::display_name("AMD Ryzen 9 9955HX3D 16-Core Processor"),
+            "AMD Ryzen 9 9955HX3D"
+        );
+    }
+
+    #[test]
+    fn gpu_name_prefers_yaml_pci_map() {
+        let card = PciGpu {
+            slot: "0000:01:00.0".into(),
+            vendor: "0x10de".into(),
+            device: "2C19".into(),
+            name: String::new(),
+        };
+        assert_eq!(
+            resolve_gpu_name(&card),
+            "NVIDIA GeForce RTX 5080 Laptop GPU"
         );
     }
 
@@ -1065,10 +1094,8 @@ mod tests {
 
     #[test]
     fn fan_probe_keeps_exposed_unreadable_channel() {
-        let dir = std::env::temp_dir().join(format!(
-            "legion-device-fan-probe-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("legion-device-fan-probe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("fan2_input"), "not-a-number\n").unwrap();
 

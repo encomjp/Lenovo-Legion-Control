@@ -1,0 +1,256 @@
+# Laptop GPU marketing names keyed by PCI device ID.
+#
+# Used when nvidia-smi is asleep/missing. lspci dumps chip + Max-Q tags;
+# this map turns 10de:2c19 into "NVIDIA GeForce RTX 5080 Laptop GPU".
+#
+# Vendor is the section name (nvidia → 10de, amd → 1002).
+# IDs are hex without 0x. Same chip often has several IDs (M vs BM, OEM).
+# TGP still comes from nvidia-smi / PSREF — PCI ID cannot tell 80W from 175W.
+#
+# Sources: pci.ids (hwdata), NVIDIA mobile PCI ID lists, Lenovo PSREF SKUs.
+# Add a row when a new laptop ID shows up as "NVIDIA GPU (10de:xxxx)".
+
+nvidia:
+  # ── Maxwell — GTX 9xxM / MX110 — Legion Y700/Y720, IdeaPad 500/700
+  "139a": NVIDIA GeForce GTX 950M  # GM107M
+  "139b": NVIDIA GeForce GTX 960M  # GM107M
+  "13d7": NVIDIA GeForce GTX 980M  # GM204M
+  "13d8": NVIDIA GeForce GTX 970M  # GM204M
+  "13d9": NVIDIA GeForce GTX 965M  # GM204M
+  "1617": NVIDIA GeForce GTX 980M  # GM204M
+  "1618": NVIDIA GeForce GTX 970M  # GM204M
+  "174d": NVIDIA GeForce MX130  # GM108M
+  "174e": NVIDIA GeForce MX110  # GM108M
+
+  # ── Pascal — GTX 10 / MX150–330 — Legion Y530/Y540, IdeaPad Gaming
+  "1ba0": NVIDIA GeForce GTX 1080 Laptop GPU  # GP104M
+  "1ba1": NVIDIA GeForce GTX 1070 Laptop GPU  # GP104M
+  "1ba2": NVIDIA GeForce GTX 1070 Laptop GPU  # GP104M
+  "1bb5": NVIDIA Quadro P5200 Laptop GPU  # GP104GLM
+  "1bb6": NVIDIA Quadro P5000 Laptop GPU  # GP104GLM
+  "1bb7": NVIDIA Quadro P4000 Laptop GPU  # GP104GLM
+  "1bb8": NVIDIA Quadro P3000 Laptop GPU  # GP104GLM
+  "1bb9": NVIDIA Quadro P4200 Laptop GPU  # GP104GLM
+  "1bbb": NVIDIA Quadro P3200 Laptop GPU  # GP104GLM
+  "1be0": NVIDIA GeForce GTX 1080 Laptop GPU  # GP104BM
+  "1be1": NVIDIA GeForce GTX 1070 Laptop GPU  # GP104BM
+  "1c20": NVIDIA GeForce GTX 1060 Laptop GPU  # GP106M
+  "1c21": NVIDIA GeForce GTX 1050 Ti Laptop GPU  # GP106M
+  "1c22": NVIDIA GeForce GTX 1050 Laptop GPU  # GP106M
+  "1c23": NVIDIA GeForce GTX 1060 Laptop GPU  # GP106M
+  "1c60": NVIDIA GeForce GTX 1060 Laptop GPU 6GB  # GP106BM
+  "1c61": NVIDIA GeForce GTX 1050 Ti Laptop GPU  # GP106BM
+  "1c62": NVIDIA GeForce GTX 1050 Laptop GPU  # GP106BM
+  "1c8c": NVIDIA GeForce GTX 1050 Ti Laptop GPU  # GP107M
+  "1c8d": NVIDIA GeForce GTX 1050 Laptop GPU  # GP107M
+  "1c8f": NVIDIA GeForce GTX 1050 Ti Max-Q  # GP107M
+  "1c90": NVIDIA GeForce MX150  # GP107M
+  "1c91": NVIDIA GeForce GTX 1050 3 GB Max-Q  # GP107M
+  "1c92": NVIDIA GeForce GTX 1050 Laptop GPU  # GP107M
+  "1c94": NVIDIA GeForce MX350  # GP107M
+  "1c96": NVIDIA GeForce MX350  # GP107M
+  "1cba": NVIDIA Quadro P2000 Laptop GPU  # GP107GLM
+  "1cbb": NVIDIA Quadro P1000 Laptop GPU  # GP107GLM
+  "1cbc": NVIDIA Quadro P600 Laptop GPU  # GP107GLM
+  "1cbd": NVIDIA Quadro P620  # GP107GLM
+  "1ccc": NVIDIA GeForce GTX 1050 Ti Laptop GPU  # GP107BM
+  "1ccd": NVIDIA GeForce GTX 1050 Laptop GPU  # GP107BM
+  "1d10": NVIDIA GeForce MX150  # GP108M
+  "1d11": NVIDIA GeForce MX230  # GP108M
+  "1d12": NVIDIA GeForce MX150  # GP108M
+  "1d13": NVIDIA GeForce MX250  # GP108M
+  "1d16": NVIDIA GeForce MX330  # GP108M
+  "1d33": NVIDIA Quadro P500 Laptop GPU  # GP108GLM
+  "1d34": NVIDIA Quadro P520  # GP108GLM
+  "1d52": NVIDIA GeForce MX250  # GP108BM
+  "1d56": NVIDIA GeForce MX330  # GP108BM
+
+  # ── Turing — RTX 20 / GTX 16 / MX450–550 — Legion 5/7 2020–21
+  "1e90": NVIDIA GeForce RTX 2080 Laptop GPU  # TU104M
+  "1e91": NVIDIA GeForce RTX 2070 SUPER Laptop GPU  # TU104M
+  "1e93": NVIDIA GeForce RTX 2080 SUPER Laptop GPU  # TU104M
+  "1eb5": NVIDIA Quadro RTX 5000 Laptop GPU  # TU104GLM
+  "1eb6": NVIDIA Quadro RTX 4000 Laptop GPU  # TU104GLM
+  "1ed0": NVIDIA GeForce RTX 2080 Laptop GPU  # TU104BM
+  "1ed1": NVIDIA GeForce RTX 2070 SUPER Laptop GPU  # TU104BM
+  "1ed3": NVIDIA GeForce RTX 2080 SUPER Laptop GPU  # TU104BM
+  "1ef5": NVIDIA Quadro RTX 5000 Laptop GPU  # TU104GLM
+  "1f10": NVIDIA GeForce RTX 2070 Laptop GPU  # TU106M
+  "1f11": NVIDIA GeForce RTX 2060 Laptop GPU  # TU106M
+  "1f12": NVIDIA GeForce RTX 2060 Max-Q  # TU106M
+  "1f14": NVIDIA GeForce RTX 2070 Laptop GPU  # TU106M
+  "1f15": NVIDIA GeForce RTX 2060 Laptop GPU  # TU106M
+  "1f36": NVIDIA Quadro RTX 3000 Laptop GPU  # TU106GLM
+  "1f50": NVIDIA GeForce RTX 2070 Laptop GPU  # TU106BM
+  "1f51": NVIDIA GeForce RTX 2060 Laptop GPU  # TU106BM
+  "1f54": NVIDIA GeForce RTX 2070 Laptop GPU  # TU106BM
+  "1f55": NVIDIA GeForce RTX 2060 Laptop GPU  # TU106BM
+  "1f76": NVIDIA Quadro RTX 3000 Laptop GPU  # TU106GLM
+  "1f91": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f92": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f94": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f95": NVIDIA GeForce GTX 1650 Ti Laptop GPU  # TU117M
+  "1f96": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f97": NVIDIA GeForce MX450  # TU117M
+  "1f98": NVIDIA GeForce MX450  # TU117M
+  "1f99": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f9c": NVIDIA GeForce MX450  # TU117M
+  "1f9d": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117M
+  "1f9f": NVIDIA GeForce MX550  # TU117M
+  "1fa0": NVIDIA GeForce MX550  # TU117M
+  "1fb0": NVIDIA Quadro T1000 Laptop GPU  # TU117GLM
+  "1fb2": NVIDIA Quadro T400 Laptop GPU  # TU117GLM
+  "1fb6": NVIDIA T600 Laptop GPU  # TU117GLM
+  "1fb7": NVIDIA T550 Laptop GPU  # TU117GLM
+  "1fb8": NVIDIA Quadro T2000 Laptop GPU  # TU117GLM
+  "1fb9": NVIDIA Quadro T1000 Laptop GPU  # TU117GLM
+  "1fba": NVIDIA T600 Laptop GPU  # TU117GLM
+  "1fbb": NVIDIA Quadro T500 Laptop GPU  # TU117GLM
+  "1fbc": NVIDIA T1200 Laptop GPU  # TU117GLM
+  "1fd9": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117BM
+  "1fdd": NVIDIA GeForce GTX 1650 Laptop GPU  # TU117BM
+  "1ff9": NVIDIA Quadro T1000 Laptop GPU  # TU117GLM
+  "2191": NVIDIA GeForce GTX 1660 Ti Laptop GPU  # TU116M
+  "2192": NVIDIA GeForce GTX 1650 Ti Laptop GPU  # TU116M
+  "21d1": NVIDIA GeForce GTX 1660 Ti Laptop GPU  # TU116BM
+
+  # ── Ampere — RTX 30 / MX570 / RTX 2050 — Legion 5/7 Gen 6–7, LOQ
+  "2420": NVIDIA GeForce RTX 3080 Ti Laptop GPU  # GA103M
+  "2438": NVIDIA RTX A5500 Laptop GPU  # GA103GLM
+  "2460": NVIDIA GeForce RTX 3080 Ti Laptop GPU  # GA103M
+  "249c": NVIDIA GeForce RTX 3080 Laptop GPU  # GA104M
+  "249d": NVIDIA GeForce RTX 3070 Laptop GPU  # GA104M
+  "24a0": NVIDIA GeForce RTX 3070 Ti Laptop GPU  # GA104
+  "24b6": NVIDIA RTX A5000 Laptop GPU  # GA104GLM
+  "24b7": NVIDIA RTX A4000 Laptop GPU  # GA104GLM
+  "24b8": NVIDIA RTX A3000 Laptop GPU  # GA104GLM
+  "24b9": NVIDIA RTX A3000 12GB Laptop GPU  # GA104GLM
+  "24ba": NVIDIA RTX A4500 Laptop GPU  # GA104GLM
+  "24bb": NVIDIA RTX A3000 Laptop GPU  # GA104GLM
+  "24dc": NVIDIA GeForce RTX 3080 Laptop GPU  # GA104M
+  "24dd": NVIDIA GeForce RTX 3070 Laptop GPU  # GA104M
+  "24e0": NVIDIA GeForce RTX 3070 Ti Laptop GPU  # GA104M
+  "2520": NVIDIA GeForce RTX 3060 Laptop GPU  # GA106M
+  "2521": NVIDIA GeForce RTX 3060 Laptop GPU  # GA106M
+  "2523": NVIDIA GeForce RTX 3050 Ti Laptop GPU  # GA106M
+  "2560": NVIDIA GeForce RTX 3060 Laptop GPU  # GA106M
+  "2561": NVIDIA GeForce RTX 3060 Laptop GPU  # GA106M
+  "2563": NVIDIA GeForce RTX 3050 Ti Laptop GPU  # GA106M
+  "25a0": NVIDIA GeForce RTX 3050 Ti Laptop GPU  # GA107M
+  "25a2": NVIDIA GeForce RTX 3050 Laptop GPU  # GA107M
+  "25a5": NVIDIA GeForce RTX 3050 Laptop GPU  # GA107M
+  "25a6": NVIDIA GeForce MX570  # GA107M
+  "25a7": NVIDIA GeForce MX570  # GA107M
+  "25a9": NVIDIA GeForce RTX 2050  # GA107M
+  "25aa": NVIDIA GeForce MX570 A  # GA107M
+  "25ab": NVIDIA GeForce RTX 3050 4GB Laptop GPU  # GA107M
+  "25ac": NVIDIA GeForce RTX 3050 6GB Laptop GPU  # GA107BM / GN20-P0-R-K2
+  "25b5": NVIDIA RTX A4 Laptop GPU  # GA107GLM
+  "25b8": NVIDIA RTX A2000 Laptop GPU  # GA107GLM
+  "25b9": NVIDIA RTX A1000 Laptop GPU  # GA107GLM
+  "25ba": NVIDIA RTX A2000 8GB Laptop GPU  # GA107GLM
+  "25bb": NVIDIA RTX A500 Laptop GPU  # GA107GLM
+  "25bc": NVIDIA RTX A1000 6GB Laptop GPU  # GA107GLM
+  "25bd": NVIDIA RTX A500 Laptop GPU  # GA107GLM
+  "25e0": NVIDIA GeForce RTX 3050 Ti Laptop GPU  # GA107BM
+  "25e2": NVIDIA GeForce RTX 3050 Laptop GPU  # GA107BM
+  "25e5": NVIDIA GeForce RTX 3050 Laptop GPU  # GA107BM
+  "25ec": NVIDIA GeForce RTX 3050 6GB Laptop GPU  # GA107BM / GN20-P0-R-K2
+
+  # ── Ada Lovelace — RTX 40 — Legion/LOQ Gen 8–9
+  "2717": NVIDIA GeForce RTX 4090 Laptop GPU  # AD103M / GN21-X11
+  "2730": NVIDIA RTX 5000 Ada Generation Laptop GPU  # AD103GLM
+  "2757": NVIDIA GeForce RTX 4090 Laptop GPU  # AD103M / GN21-X11
+  "27a0": NVIDIA GeForce RTX 4080 Laptop GPU  # AD104M
+  "27ba": NVIDIA RTX 4000 Ada Generation Laptop GPU  # AD104GLM
+  "27bb": NVIDIA RTX 3500 Ada Generation Laptop GPU  # AD104GLM
+  "27e0": NVIDIA GeForce RTX 4080 Laptop GPU  # AD104M
+  "2820": NVIDIA GeForce RTX 4070 Laptop GPU  # AD106M
+  "2822": NVIDIA GeForce RTX 3050 A Laptop GPU  # AD106M
+  "2838": NVIDIA RTX 3000 Ada Generation Laptop GPU  # AD106GLM
+  "2860": NVIDIA GeForce RTX 4070 Laptop GPU  # AD106M
+  "28a0": NVIDIA GeForce RTX 4060 Laptop GPU  # AD107M
+  "28a1": NVIDIA GeForce RTX 4050 Laptop GPU  # AD107M
+  "28a3": NVIDIA GeForce RTX 3050 A Laptop GPU  # AD107M
+  "28b8": NVIDIA RTX 2000 Ada Generation Laptop GPU  # AD107GLM
+  "28b9": NVIDIA RTX 1000 Ada Generation Laptop GPU  # AD107GLM
+  "28ba": NVIDIA RTX 500 Ada Generation Laptop GPU  # AD107GLM
+  "28bb": NVIDIA RTX 500 Ada Generation Laptop GPU  # AD107GLM
+  "28e0": NVIDIA GeForce RTX 4060 Laptop GPU  # AD107M
+  "28e1": NVIDIA GeForce RTX 4050 Laptop GPU  # AD107M
+  "28e3": NVIDIA GeForce RTX 3050 A Laptop GPU  # AD107M
+
+  # ── Blackwell — RTX 50 — Legion/LOQ Gen 10
+  "2c18": NVIDIA GeForce RTX 5090 Laptop GPU  # GB203M / GN22
+  "2c19": NVIDIA GeForce RTX 5080 Laptop GPU  # GB203M / GN22
+  "2c38": NVIDIA RTX PRO 5000 Blackwell Generation Laptop GPU  # GB203GLM
+  "2c39": NVIDIA RTX PRO 4000 Blackwell Generation Laptop GPU  # GB203GLM
+  "2c58": NVIDIA GeForce RTX 5090 Laptop GPU  # GB203M / GN22-X11
+  "2c59": NVIDIA GeForce RTX 5080 Laptop GPU  # GB203M / GN22-X9
+  "2d18": NVIDIA GeForce RTX 5070 Laptop GPU  # GB206M
+  "2d19": NVIDIA GeForce RTX 5060 Laptop GPU  # GB206M
+  "2d39": NVIDIA RTX PRO 2000 Blackwell Generation Laptop GPU  # GB206GLM
+  "2d58": NVIDIA GeForce RTX 5070 Laptop GPU  # GB206M
+  "2d59": NVIDIA GeForce RTX 5060 Laptop GPU  # GB206M
+  "2d98": NVIDIA GeForce RTX 5050 Laptop GPU  # GB207M
+  "2db8": NVIDIA RTX PRO 1000 Blackwell Generation Laptop GPU  # GB207GLM
+  "2db9": NVIDIA RTX PRO 500 Blackwell Generation Laptop GPU  # GB207GLM
+  "2dd8": NVIDIA GeForce RTX 5050 Laptop GPU  # GB207M
+  "2f18": NVIDIA GeForce RTX 5070 Ti Laptop GPU  # GB205M
+  "2f38": NVIDIA RTX PRO 3000 Blackwell Generation Laptop GPU  # GB205GLM
+  "2f58": NVIDIA GeForce RTX 5070 Ti Laptop GPU  # GB205M
+
+amd:
+  # ── APUs in Lenovo (Legion/LOQ/IdeaPad/ThinkPad/Yoga). pci.ids often only
+  # has the silicon name (Phoenix1); we use the marketing iGPU Lenovo ships.
+  "15d8": AMD Radeon Vega 8  # Picasso — IdeaPad 3/5 2019–20
+  "15dd": AMD Radeon Vega 8  # Raven Ridge
+  "15e7": AMD Radeon Graphics  # Barcelo — IdeaPad 3 15ALC6
+  "1636": AMD Radeon Vega 7  # Renoir — IdeaPad 5 14ARE05, ThinkPad T14 Gen 1 AMD
+  "1638": AMD Radeon Vega 8  # Cezanne — Legion 5 15ACH6H iGPU, IdeaPad 5 15ALC6
+  "164c": AMD Radeon Graphics  # Lucienne — IdeaPad 5 15ALC7
+  "164d": AMD Radeon 680M  # Rembrandt — ThinkPad T14s/P14s Gen 3 AMD, Yoga 7
+  "1681": AMD Radeon 680M  # Rembrandt
+  "164e": AMD Radeon 610M  # Raphael — 7945HX class
+  "13c0": AMD Radeon 610M  # Granite Ridge — Legion Pro 7 16AFR10H (9955HX)
+  "1506": AMD Radeon 610M  # Mendocino — IdeaPad 1/3 15AMN7
+  "15bf": AMD Radeon 780M  # Phoenix1 — LOQ 15APH8, Legion Slim 5 16APH8 (7840HS)
+  "15c8": AMD Radeon 760M  # Phoenix2 — 7540U / 7640U class
+  "164f": AMD Radeon 780M  # Phoenix
+  "1900": AMD Radeon 780M  # Hawk Point — LOQ 15AHP9, Legion R7000 AHP9 (8845HS)
+  "1901": AMD Radeon 780M  # Hawk Point 2
+  "150e": AMD Radeon 890M  # Strix Point — ThinkPad T14s Gen 6, Yoga Slim 7
+  "1114": AMD Radeon 860M  # Krackan — Ryzen AI 7 350 class
+  "1902": AMD Radeon 860M  # Krackan 2
+  "1586": AMD Radeon 8060S  # Strix Halo — Ryzen AI Max 300 (8050S/8060S)
+
+  # ── Polaris / Vega  — IdeaPad 330/530s, ThinkPad P
+  "67ef": AMD Radeon RX 560X  # Baffin — IdeaPad 530s / 720s
+  "67ff": AMD Radeon RX 560X  # Baffin
+  "699f": AMD Radeon RX 550X  # Lexa — IdeaPad 330/330s
+  "67c0": AMD Radeon PRO WX 7100 Mobile  # Ellesmere — ThinkPad P70/P71
+  "69af": AMD Radeon PRO Vega 20  # Vega 12 — ThinkPad P1 Gen 2
+
+  # ── RDNA1 — Legion 5 15ARH05 / 7 15ARH05 (2020)
+  "7340": AMD Radeon RX 5500M  # Navi 14
+  "731f": AMD Radeon RX 5600M  # Navi 10 — also 5700M on some 15ARH05
+  "7347": AMD Radeon PRO W5500M  # Navi 14 — ThinkPad P
+  "734f": AMD Radeon PRO W5300M  # Navi 14
+  "7360": AMD Radeon PRO 5600M  # Navi 12 — ThinkPad P1 / P17
+
+  # ── RDNA2 — Legion 5/Slim 7 2021–22, IdeaPad Gaming 3 15ARH7
+  "73ff": AMD Radeon RX 6600M  # Navi 23 — also 6650M; desktop 6600 shares this ID
+  "73ef": AMD Radeon RX 6800S  # Navi 23 — 6700S/6800S (Legion Slim 7)
+  "73e0": AMD Radeon RX 6650M  # Navi 23 (pci.ids unlabeled)
+  "73e1": AMD Radeon PRO W6600M  # Navi 23 — ThinkPad P16
+  "73df": AMD Radeon RX 6800M  # Navi 22 — also 6700M / 6850M XT
+  "73c3": AMD Radeon RX 6700M  # Navi 22 (pci.ids unlabeled)
+  "743f": AMD Radeon RX 6500M  # Navi 24 — IdeaPad Gaming 3; also 6450M/6550M
+
+  # ── RDNA3 — LOQ / Legion Slim 5 AMD dGPU SKUs. Several IDs are shared with desktop.
+  "73f0": AMD Radeon RX 7600M XT  # Navi 33
+  "7483": AMD Radeon RX 7600M  # Navi 33 — also 7600M XT
+  "7480": AMD Radeon RX 7700S  # Navi 33 — also 7600S / 7600M XT / desktop 7600
+  "747e": AMD Radeon RX 7800M  # Navi 32 — also 7700M; desktop 7700 XT / 7800 XT
+  "744c": AMD Radeon RX 7900M  # Navi 31 — also desktop 7900
+  "7421": AMD Radeon PRO W6500M  # Navi 24

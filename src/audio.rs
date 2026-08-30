@@ -597,8 +597,8 @@ fn looks_like_gen10_smart_amp_model() -> bool {
         // marco-giunta/legion-pro7-gen10-audio; LOQ 15IRX10/15IAX10 match the
         // "Gen 10 IRX/IAX" naming. Checked against product_version AND
         // product_name (83JG-style DMI names differ between the two files).
-        "16AFR10H", "16IAX10H", "16IRX10", "16IAX10", "16ARP10", "ADR10", "IAX10H",
-        "83RU", "83JG", "R9000P", "Y9000P",
+        "16AFR10H", "16IAX10H", "16IRX10", "16IAX10", "16ARP10", "ADR10", "IAX10H", "83RU", "83JG",
+        "R9000P", "Y9000P",
     ];
     HINTS.iter().any(|h| ver.contains(h) || name.contains(h))
 }

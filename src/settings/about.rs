@@ -1121,12 +1121,12 @@ pub(crate) fn build_about_pages(
         (
             "Processor",
             info.cpu_model.as_str(),
-            "CPU model string from /proc/cpuinfo",
+            "CPU model from /proc/cpuinfo, mapped through data/cpu-ids.yaml",
         ),
         (
             "Graphics",
             info.gpu_model.as_str(),
-            "Discrete GPU name from nvidia-smi when available",
+            "Discrete GPU name: nvidia-smi when awake, else PCI ID map, else lspci",
         ),
     ] {
         laptop.add(&property_row(k, v, Some(tip_text)));

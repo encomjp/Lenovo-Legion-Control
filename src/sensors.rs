@@ -196,7 +196,12 @@ fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
         // /sys/class/hwmon/hwmonN/device → ../../…/0000:08:00.0
         let addr = std::fs::read_link(hw.join("device"))
             .ok()
-            .and_then(|l| l.to_string_lossy().split('/').next_back().map(str::to_string))
+            .and_then(|l| {
+                l.to_string_lossy()
+                    .split('/')
+                    .next_back()
+                    .map(str::to_string)
+            })
             .unwrap_or_default();
         slots.push((hw.clone(), addr));
     }
@@ -220,7 +225,11 @@ fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
     if temp.is_none() && power.is_none() {
         return None;
     }
-    Some((temp.unwrap_or(-1.0), power.unwrap_or(-1.0), clock.unwrap_or(-1.0)))
+    Some((
+        temp.unwrap_or(-1.0),
+        power.unwrap_or(-1.0),
+        clock.unwrap_or(-1.0),
+    ))
 }
 
 /// Read all sensors and return a snapshot.
@@ -460,7 +469,9 @@ pub fn read_all() -> SensorReadings {
     }
     if s.wifi_temp == 0.0 {
         // Last resort: walk hwmon names for anything wifi-ish not covered above.
-        for hw in find_hwmon_prefix(&["iwlwifi", "mt79", "rtw89", "rtw88", "ath11k", "ath12k", "wl"]) {
+        for hw in find_hwmon_prefix(&[
+            "iwlwifi", "mt79", "rtw89", "rtw88", "ath11k", "ath12k", "wl",
+        ]) {
             if let Some(val) = read_int(&hw.1.join("temp1_input")) {
                 s.wifi_temp = val as f64 / 1000.0;
                 log::debug!(

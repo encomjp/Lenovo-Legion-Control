@@ -23,6 +23,7 @@
   <a href="docs/USAGE.md">Usage</a> ·
   <a href="docs/HARDWARE-AND-HID.md">Hardware & HID</a> ·
   <a href="docs/TROUBLESHOOTING.md">Troubleshooting</a> ·
+  <a href="docs/changelog/CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/encomjp/Lenovo-Legion-Control/issues/new">Report an issue</a>
 </p>
 
@@ -204,6 +205,7 @@ lsusb -d 048d:c197
 - [KDE Plasma widget](docs/WIDGET.md) — install, controls, config, validation
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — evidence-first fixes for install, daemon, HID, sensors, fans, dGPU, battery, widget
 - [Development](docs/DEVELOPMENT.md) — toolchain, checks, packaging, hardware tests, contributions
+- [Changelog](docs/changelog/CHANGELOG.md) — rolling log and per-release notes
 
 ---
 

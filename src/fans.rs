@@ -102,16 +102,17 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
             PathBuf::from(format!("/tmp/ec-fallback-{name}")),
         ));
     }
-    log::warn!(
-        "fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan)"
-    );
+    log::warn!("fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan)");
     None
 }
 
 fn fan_control_path(fan: u8, suffix: &str) -> Option<PathBuf> {
     let (_, hw) = fan_control_hwmon()?;
     let path = hw.join(format!("fan{fan}_{suffix}"));
-    log::trace!("fans::fan_control_path: fan{fan}_{suffix} → {}", path.display());
+    log::trace!(
+        "fans::fan_control_path: fan{fan}_{suffix} → {}",
+        path.display()
+    );
     Some(path)
 }
 
@@ -514,10 +515,8 @@ mod tests {
 
     #[test]
     fn read_only_backend_is_not_control_capable() {
-        let dir = std::env::temp_dir().join(format!(
-            "legion-fan-backend-probe-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("legion-fan-backend-probe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("fan1_input"), "1200\n").unwrap();
         assert!(has_fan_inputs(&dir));

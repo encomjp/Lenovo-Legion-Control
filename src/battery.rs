@@ -135,7 +135,8 @@ fn bat_dir() -> std::path::PathBuf {
 /// Read one battery sysfs attribute from the probed battery dir, trimmed,
 /// with parse + trace logging.
 fn read_attr<T: std::str::FromStr + std::fmt::Debug>(attr: &str) -> Option<T> {
-    let r = read(&format!("{}/{attr}", bat_dir().display())).and_then(|s| parse_sysfs::<T>(attr, s));
+    let r =
+        read(&format!("{}/{attr}", bat_dir().display())).and_then(|s| parse_sysfs::<T>(attr, s));
     log::trace!("battery::{attr} — result={r:?}");
     r
 }
@@ -278,7 +279,10 @@ fn set_charge_type(val: &str) -> std::io::Result<()> {
     let res = std::fs::write(&path, val);
     match &res {
         Ok(()) => log::debug!("battery::set_charge_type — wrote charge_types={val}"),
-        Err(e) => log::debug!("battery::set_charge_type — write to {} failed: {e}", path.display()),
+        Err(e) => log::debug!(
+            "battery::set_charge_type — write to {} failed: {e}",
+            path.display()
+        ),
     }
     res
 }

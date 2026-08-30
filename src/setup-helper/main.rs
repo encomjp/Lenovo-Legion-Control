@@ -251,28 +251,30 @@ fn enable_daemon() -> Result<(), String> {
     // DeviceAllow section against the host's — refresh when the bundle
     // carries rules the host lacks, so service-file fixes reach existing
     // installs without manual reinstall.
-    let unit_needs_refresh = host_daemon && host_unit && bundled_usr_dir().ok().is_some_and(|usr| {
-        let bundled_unit = usr.join("lib/systemd/system/legion-control.service");
-        if !bundled_unit.is_file() {
-            return false;
-        }
-        let bundled_text = fs::read_to_string(&bundled_unit).unwrap_or_default();
-        let bundled_rules: Vec<&str> = bundled_text
-            .lines()
-            .filter(|l| l.trim_start().starts_with("DeviceAllow"))
-            .collect();
-        let host_path = if Path::new("/etc/systemd/system/legion-control.service").is_file() {
-            Path::new("/etc/systemd/system/legion-control.service")
-        } else {
-            Path::new("/usr/lib/systemd/system/legion-control.service")
-        };
-        let host_text = fs::read_to_string(host_path).unwrap_or_default();
-        let host_rules: Vec<&str> = host_text
-            .lines()
-            .filter(|l| l.trim_start().starts_with("DeviceAllow"))
-            .collect();
-        !bundled_rules.is_empty() && bundled_rules != host_rules
-    });
+    let unit_needs_refresh = host_daemon
+        && host_unit
+        && bundled_usr_dir().ok().is_some_and(|usr| {
+            let bundled_unit = usr.join("lib/systemd/system/legion-control.service");
+            if !bundled_unit.is_file() {
+                return false;
+            }
+            let bundled_text = fs::read_to_string(&bundled_unit).unwrap_or_default();
+            let bundled_rules: Vec<&str> = bundled_text
+                .lines()
+                .filter(|l| l.trim_start().starts_with("DeviceAllow"))
+                .collect();
+            let host_path = if Path::new("/etc/systemd/system/legion-control.service").is_file() {
+                Path::new("/etc/systemd/system/legion-control.service")
+            } else {
+                Path::new("/usr/lib/systemd/system/legion-control.service")
+            };
+            let host_text = fs::read_to_string(host_path).unwrap_or_default();
+            let host_rules: Vec<&str> = host_text
+                .lines()
+                .filter(|l| l.trim_start().starts_with("DeviceAllow"))
+                .collect();
+            !bundled_rules.is_empty() && bundled_rules != host_rules
+        });
     if !host_daemon || !host_unit || unit_needs_refresh {
         let usr = bundled_usr_dir()?;
         let bundled_daemon = usr.join("bin/legion-daemon");
