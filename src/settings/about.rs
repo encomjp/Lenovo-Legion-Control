@@ -435,10 +435,6 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     win.present();
 }
 
-fn begin_in_app_update(info: &legion_core::update::ReleaseInfo) {
-    begin_in_app_update_with_kind(info, None)
-}
-
 fn begin_in_app_update_with_kind(
     info: &legion_core::update::ReleaseInfo,
     forced_kind: Option<legion_core::update::InstallKind>,
