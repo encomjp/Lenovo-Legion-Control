@@ -170,6 +170,8 @@ pub fn section_tip(title: &str, blurb: Option<&str>) -> (gtk::Box, gtk::Box) {
     let label = gtk::Label::new(Some(title));
     label.add_css_class("section-label");
     label.set_halign(Align::Start);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::None);
+    label.set_wrap(true);
     head.append(&label);
     if let Some(b) = blurb {
         if !b.is_empty() {
@@ -248,6 +250,8 @@ pub fn labeled_row_tip(
     let t = gtk::Label::new(Some(title));
     t.add_css_class("row-title");
     t.set_halign(Align::Start);
+    t.set_ellipsize(gtk::pango::EllipsizeMode::None);
+    t.set_wrap(true);
     text.append(&t);
     if !subtitle.is_empty() {
         let s = gtk::Label::new(Some(subtitle));
@@ -297,10 +301,11 @@ pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::La
     let d = gtk::Label::new(Some(""));
     d.add_css_class("detail");
     d.set_halign(Align::Start);
-    // Dynamic readouts can carry long IPC error strings — without ellipsizing,
-    // a chip's text dictates the page's minimum width and the whole window
-    // stops scaling at narrow sizes ("exceeds width" warnings).
-    for label in [&l, &v, &d] {
+    // Static titles are short and must stay readable in the 3-column grid.
+    // Only dynamic value/detail lines ellipsize so long IPC errors don't
+    // dictate the window minimum width.
+    l.set_ellipsize(gtk::pango::EllipsizeMode::None);
+    for label in [&v, &d] {
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     }
     box_.append(&l);

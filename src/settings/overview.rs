@@ -413,26 +413,36 @@ pub(crate) fn build_overview(
                     None => format!("{:.0}%", poll.cpu_pct),
                 });
 
-                let g = if s.dgpu_temp < 0.0 {
+                let mut g = if s.dgpu_temp < 0.0 {
                     s.ec_gpu
                 } else {
                     s.dgpu_temp.max(s.ec_gpu)
                 };
+                let mut gpu_power = s.dgpu_power;
+                // Daemon cgroup can block NVML (nvidia-caps) even when the
+                // GPU is awake — read nvidia-smi from this user process.
+                if g <= 0.0 {
+                    let local = legion_core::dgpu::read_metrics_batch();
+                    if let Some(t) = local.temp.filter(|t| *t > 0.0) {
+                        g = t;
+                        if gpu_power < 0.0 {
+                            gpu_power = local.power.unwrap_or(gpu_power);
+                        }
+                    }
+                }
                 if g > 0.0 {
                     gpu_v.set_text(&format!("{g:.0} °C"));
                     tint_temp(&gpu_chip_c, g);
                 } else {
-                    // Lifecycle wording: the card exists but is runtime-
-                    // suspended (OFF/Inactive), vs. no discrete GPU at all.
-                    gpu_v.set_text(match legion_core::dgpu::discrete_state() {
-                        "inactive" => "Inactive",
-                        "off" => "Off",
-                        _ => "—", // absent hardware
+                    gpu_v.set_text(if legion_core::dgpu::discrete_present() {
+                        "Off"
+                    } else {
+                        "—"
                     });
                     tint_temp(&gpu_chip_c, 0.0);
                 }
-                if s.dgpu_power >= 0.0 {
-                    gpu_d.set_text(&format!("{:.0}% · {:.0} W", poll.gpu_pct, s.dgpu_power));
+                if gpu_power >= 0.0 {
+                    gpu_d.set_text(&format!("{:.0}% · {:.0} W", poll.gpu_pct, gpu_power));
                 } else {
                     gpu_d.set_text(&format!("{:.0}%", poll.gpu_pct));
                 }

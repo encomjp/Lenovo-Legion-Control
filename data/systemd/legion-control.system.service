@@ -18,7 +18,11 @@ DeviceAllow=/dev/bus/usb/* rw
 DeviceAllow=char-usb_device rw
 DeviceAllow=/dev/nvidia* rw
 DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
 DeviceAllow=char-nvidia-uvm rw
+# Driver 610+ NVML needs nvidia-caps; path globs alone are ignored by systemd.
+DeviceAllow=char-nvidia-caps rw
+DeviceAllow=/dev/nvidia-caps/* rw
 DeviceAllow=char-drm rw
 ProtectSystem=false
 ProtectHome=read-only

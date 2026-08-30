@@ -1127,10 +1127,12 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 s.cpu_temp_1,
                 s.cpu_temp_2
             );
-            println!(
-                "│  EC   {:>5.1}°C                                        │",
-                s.ec_cpu
-            );
+            let ec_cpu = if s.ec_cpu < 1.0 {
+                "    —".to_string()
+            } else {
+                format!("{:>5.1}°C", s.ec_cpu)
+            };
+            println!("│  EC   {ec_cpu}                                        │");
             log::trace!("sensors: ec cpu {:.1}°C", s.ec_cpu);
             if let Some(w) = cpu_power {
                 println!(
@@ -1145,20 +1147,34 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 s.igpu_edge, s.igpu_power
             );
             log::trace!("sensors: igpu {:.1}°C {:.2} W", s.igpu_edge, s.igpu_power);
-            println!(
-                "│  dGPU {:>5.1}°C  {:>5.1} W  {:>5.0} MHz                   │",
-                s.dgpu_temp, s.dgpu_power, s.dgpu_clock
-            );
+            let dgpu_temp = if s.dgpu_temp < 0.0 {
+                "    —".to_string()
+            } else {
+                format!("{:>5.1}°C", s.dgpu_temp)
+            };
+            let dgpu_power = if s.dgpu_power < 0.0 {
+                "    —".to_string()
+            } else {
+                format!("{:>5.1} W", s.dgpu_power)
+            };
+            let dgpu_clock = if s.dgpu_clock < 0.0 {
+                "    —".to_string()
+            } else {
+                format!("{:>5.0} MHz", s.dgpu_clock)
+            };
+            println!("│  dGPU {dgpu_temp}  {dgpu_power}  {dgpu_clock}                   │");
             log::trace!(
                 "sensors: dgpu {:.1}°C {:.1} W {} MHz",
                 s.dgpu_temp,
                 s.dgpu_power,
                 s.dgpu_clock
             );
-            println!(
-                "│  EC   {:>5.1}°C                                        │",
-                s.ec_gpu
-            );
+            let ec_gpu = if s.ec_gpu < 1.0 {
+                "    —".to_string()
+            } else {
+                format!("{:>5.1}°C", s.ec_gpu)
+            };
+            println!("│  EC   {ec_gpu}                                        │");
             log::trace!("sensors: ec gpu {:.1}°C", s.ec_gpu);
             println!("├─ Fans ───────────────────────────────────────────────┤");
             println!(

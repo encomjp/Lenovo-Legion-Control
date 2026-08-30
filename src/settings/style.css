@@ -211,6 +211,7 @@ headerbar windowtitle .subtitle {
     font-size: 0.95rem;
     font-weight: 700;
     opacity: 0.95;
+    min-width: max-content;
 }
 
 .section-sub {
@@ -268,6 +269,7 @@ headerbar windowtitle .subtitle {
     font-weight: 700;
     font-size: 0.90rem;
     letter-spacing: -0.01em;
+    min-width: max-content;
 }
 
 .row-sub {
@@ -322,6 +324,7 @@ headerbar windowtitle .subtitle {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     opacity: 0.44;
+    min-width: max-content;
 }
 
 .metric-chip .value {
