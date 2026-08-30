@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
           tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
@@ -56,12 +56,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
           tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
           docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" fedora:42 bash -lc "
-            set -e; dnf install -y -q rpm-build cargo rust gtk4-devel libadwaita-devel >/dev/null
+            set -e; dnf install -y -q rpm-build cargo rust gtk4-devel libadwaita-devel systemd-devel systemd-rpm-macros >/dev/null
             mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
             cp /input/legion-control-$VERSION.tar.gz /tmp/rpmbuild/SOURCES/; cp /input/legion-control-$VERSION.tar.gz /tmp/source.tar.gz
             tar -xzf /tmp/source.tar.gz -C /tmp; cp /tmp/legion-control-$VERSION/packaging/rpm/legion-control.spec /tmp/rpmbuild/SPECS/
@@ -78,12 +78,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          VERSION=$(sed -n 's/^version = "[^"]*"/\1/p' Cargo.toml | head -n1)
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
           tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
           docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$(pwd)/packaging/arch:/packaging:ro" -v "$OUT:/out" archlinux:latest bash -lc "
-            set -e; pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita >/dev/null
+            set -e; pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita polkit >/dev/null
             useradd -m builder; mkdir -p /build; cp /input/legion-control-$VERSION.tar.gz /build/; cp /packaging/PKGBUILD /packaging/legion-control.install /build/; chown -R builder:builder /build
             runuser -u builder -- bash -lc 'cd /build && makepkg --noconfirm --cleanbuild'; cp /build/*.pkg.tar.zst /out/
           "
