@@ -473,14 +473,18 @@ pub fn scan_faults() -> Vec<Fault> {
                     .unwrap_or(thermal::MAX_FULL);
             let cap_threshold = policy_max.saturating_sub(100_000);
             let restore_mc = (cfg.max_temp as i32 - 7) * 1000;
-            if cur < cap_threshold && temp_mc(&s) < restore_mc - 3_000 {
+            // Only flag when the CPU is genuinely cool — not when the thermal
+            // governor is holding a prior cap in the restore hysteresis band
+            // (fleet false-positive ~82°C on Legion while fans spin normally).
+            let cold_enough_mc = restore_mc - 15_000;
+            if cur < cap_threshold && temp_mc(&s) < cold_enough_mc {
                 out.push(fault(
                     "throttled_without_heat",
                     Severity::Warning,
                     format!(
-                        "capped at {cur} kHz while CPU is {:.1}°C (< max {}°C)",
+                        "capped at {cur} kHz while CPU is {:.1}°C (< restore {:.0}°C)",
                         temp_mc(&s) as f64 / 1000.0,
-                        cfg.max_temp
+                        restore_mc as f64 / 1000.0
                     ),
                 ));
             }

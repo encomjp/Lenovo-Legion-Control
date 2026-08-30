@@ -3,14 +3,16 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
 
 ## Unreleased
 
-- Pretty-print laptop GPU names from `data/gpu-ids.yaml` (PCI ID) when nvidia-smi is asleep or missing.
-- Expand the map with Lenovo AMD APUs (610M–890M, 8060S) and discrete RX 5500M–7900M / 7700S.
-- Pretty-print CPU names from `data/cpu-ids.yaml` (SKU token in `/proc/cpuinfo`).
+## 0.2.1 - 2026-08-30
+
+- Fix daemon keyboard RGB: `DeviceAllow=char-hidraw rw` in systemd unit (glob alone blocked hidraw).
+- Fix `throttled_without_heat` false positive in thermal governor hysteresis band.
+- Pretty-print CPU/GPU names from YAML ID maps (`cpu-ids.yaml`, `gpu-ids.yaml`).
 
 ## 0.2.0 - 2026-08-30
 
