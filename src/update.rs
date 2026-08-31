@@ -612,6 +612,17 @@ fn apply_package_update(
     let script = package_install_script(kind)?;
     pkexec_with_file(script, &dest)?;
     let _ = fs::remove_file(&dest);
+    // Permanent fix for v0.2.6 daemon-stale telemetry (83RU CachyOS):
+    // Package hooks (Arch post_upgrade try-restart, Debian postinst) are
+    // unreliable under pkexec's minimal env / when the service was idle.
+    // Force a daemon restart here so telemetry app_version flips immediately.
+    let _ = Command::new("pkexec")
+        .args([
+            "/bin/sh",
+            "-c",
+            "systemctl daemon-reload >/dev/null 2>&1; systemctl try-restart legion-control.service >/dev/null 2>&1 || systemctl restart legion-control.service >/dev/null 2>&1 || true",
+        ])
+        .status();
     let relaunch =
         std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/bin/legion-settings"));
     Ok(ApplyOutcome {

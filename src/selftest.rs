@@ -137,13 +137,19 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     }
     out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(" · ")));
 
-    // Temperatures.
+    // Temperatures — source-agnostic: k10temp (AMD) or coretemp/x86_pkg_temp (Intel).
     let s = sensors::read_all();
     let t_ok = plaus(s.cpu_temp, 0.0, 125.0);
+    let cpu_detail = if s.cpu_temp == 0.0 {
+        // Keep failure visible; Intel path should never leave 0 if coretemp exists.
+        "0.0°C — no hwmon (k10temp/coretemp/thermal) reading".into()
+    } else {
+        format!("{:.1}°C", s.cpu_temp)
+    };
     out.push(check(
         "k10temp_cpu_temp",
         t_ok,
-        format!("{:.1}°C", s.cpu_temp),
+        cpu_detail,
     ));
     out.push(check(
         "dgpu_probe",

@@ -355,7 +355,9 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
         return Ok(resp);
     }
 
-    let msg = format!("{last_err}. Start the daemon: sudo systemctl enable --now legion-control");
+    let msg = format!(
+        "{last_err}. Start the daemon: sudo systemctl enable --now legion-control  (AppImage: open Settings → Fix → Enable daemon, or run: pkexec /usr/local/libexec/legion-control-setup enable-daemon)"
+    );
     log::warn!("ipc ✗ {label} after {:?}: {msg}", started.elapsed());
     Err(msg)
 }

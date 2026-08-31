@@ -17,7 +17,9 @@ post_install() {
 post_upgrade() {
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
-    systemctl try-restart legion-control.service >/dev/null 2>&1 || true
+    systemctl try-restart legion-control.service >/dev/null 2>&1 || systemctl restart legion-control.service >/dev/null 2>&1 || true
+    # Self-heal for in-app pacman -U under pkexec (minimal env): ensure active.
+    systemctl is-active --quiet legion-control.service || systemctl start legion-control.service >/dev/null 2>&1 || true
   fi
   reload_udev
 }

@@ -236,7 +236,7 @@ fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
 pub fn read_all() -> SensorReadings {
     let mut s = SensorReadings::default();
 
-    // ─── CPU (k10temp) ───
+    // ─── CPU (k10temp AMD + coretemp Intel) ───
     if let Some(hw) = hwmon_by_name("k10temp") {
         let mut labels_seen: Vec<(String, &str)> = Vec::new();
         for entry in read_dir_entries(&hw) {
@@ -277,6 +277,74 @@ pub fn read_all() -> SensorReadings {
             }
         }
         log::debug!("sensors::read_all — k10temp labels encountered: {labels_seen:?}");
+    } else if let Some(hw) = hwmon_by_name("coretemp") {
+        // Intel Raptor Lake / Alder Lake: Package id 0 is the CPU package temp,
+        // Core N are per-core. Take hottest package as cpu_temp.
+        let mut labels_seen: Vec<(String, f64)> = Vec::new();
+        let mut max_pkg: Option<f64> = None;
+        let mut max_core: Option<f64> = None;
+        for entry in read_dir_entries(&hw) {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            if fname.ends_with("_label") {
+                if let Some(label) = read_file(&entry.path()) {
+                    let input_path = hw.join(fname.replace("_label", "_input"));
+                    if let Some(val) = read_int(&input_path) {
+                        let temp = val as f64 / 1000.0;
+                        labels_seen.push((label.clone(), temp));
+                        if label.contains("Package id") {
+                            max_pkg = Some(max_pkg.map_or(temp, |v| v.max(temp)));
+                        } else if label.starts_with("Core ") {
+                            max_core = Some(max_core.map_or(temp, |v| v.max(temp)));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(pkg) = max_pkg {
+            s.cpu_temp = pkg;
+            log::debug!("sensors::read_all: coretemp Package → cpu_temp={pkg} (labels={labels_seen:?})");
+        }
+        if let Some(core_max) = max_core {
+            // Expose hottest core as cpu_temp_1 for Intel; keeps cpu_temp_1 non-zero in fleet.
+            s.cpu_temp_1 = core_max;
+            log::debug!("sensors::read_all: coretemp hottest core → cpu_temp_1={core_max}");
+        }
+        // Thermal zone fallback if coretemp had no Package label (some BIOS hide it)
+        if s.cpu_temp == 0.0 {
+            for zone in read_dir_entries(Path::new("/sys/class/thermal")) {
+                let type_path = zone.path().join("type");
+                if let Some(t) = read_file(&type_path) {
+                    if t == "x86_pkg_temp" || t == "acpitz" && s.cpu_temp == 0.0 {
+                        if let Some(v) = read_int(&zone.path().join("temp")) {
+                            let temp = v as f64 / 1000.0;
+                            if temp > 0.0 {
+                                s.cpu_temp = temp;
+                                log::debug!("sensors::read_all: thermal {t} → cpu_temp={temp}");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        log::debug!("sensors::read_all — coretemp labels encountered: {labels_seen:?}");
+    } else {
+        // Last resort: thermal zone x86_pkg_temp (works on both Intel/AMD when hwmon missing)
+        for zone in read_dir_entries(Path::new("/sys/class/thermal")) {
+            let type_path = zone.path().join("type");
+            if let Some(t) = read_file(&type_path) {
+                if t == "x86_pkg_temp" {
+                    if let Some(v) = read_int(&zone.path().join("temp")) {
+                        let temp = v as f64 / 1000.0;
+                        if temp > 0.0 {
+                            s.cpu_temp = temp;
+                            log::debug!("sensors::read_all: thermal {t} fallback → cpu_temp={temp}");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ─── EC (legion_hwmon) ───

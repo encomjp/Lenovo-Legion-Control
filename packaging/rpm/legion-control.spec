@@ -1,5 +1,5 @@
 Name:           legion-control
-Version:        0.2.6
+Version:        0.2.7
 Release:        1%{?dist}
 Summary:        Lenovo Legion hardware control suite
 License:        GPL-2.0-only
@@ -53,7 +53,13 @@ install -Dm644 data/icons/tray.svg \
 %post
 %systemd_post legion-control.service
 if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || :
     systemctl enable --now legion-control.service >/dev/null 2>&1 || :
+    # Permanent fix: on upgrade the daemon binary is new but old process
+    # stays alive if %postun_with_restart races. Force restart here.
+    if [ "$1" -gt 1 ]; then
+        systemctl try-restart legion-control.service >/dev/null 2>&1 || systemctl restart legion-control.service >/dev/null 2>&1 || :
+    fi
 fi
 # The daemon socket is 0660 root:legion — CLI/GUI need group membership.
 getent group legion >/dev/null 2>&1 || groupadd -r legion >/dev/null 2>&1 || :
