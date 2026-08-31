@@ -41,12 +41,71 @@ const EFFECT_LABELS: &[&str] = &[
     "Off",
 ];
 
+/// Hardware lighting capability — `device::probe_lighting()`.
+/// `"None detected"` = white-only keyboard (fn+Q brightness), no Spectrum/
+/// Lighting/4-zone HID. Used to collapse the Lighting hub to a notice page.
+fn rgb_available() -> bool {
+    !matches!(
+        legion_core::device::detect().capabilities.lighting.as_str(),
+        "" | "None detected"
+    )
+}
+
 pub fn build_lighting(
     toast_overlay: &adw::ToastOverlay,
     app: &adw::Application,
 ) -> (gtk::Box, adw::ViewStack) {
     let cfg = legion_core::config::get();
     let page = page_lede("");
+
+    // White-only boards (e.g. Y7000P IRX9 83DG): no RGB HID → the zone tabs
+    // would write to nothing and trigger Fix-page scares ("RGB panic").
+    // Collapse to a single notice + the brightness control the EC already owns.
+    if !rgb_available() {
+        let (sec, card) = section_tip(
+            "Keyboard backlight",
+            Some("This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off."),
+        );
+        let note = gtk::Label::new(Some(
+            "This keyboard has white backlight only — no RGB zones or effects.\n\
+             Adjust brightness with fn+Q (50% → 100% → Off), or with the slider here:",
+        ));
+        note.set_wrap(true);
+        note.set_xalign(0.0);
+        note.set_margin_start(12);
+        note.set_margin_end(12);
+        note.set_margin_top(4);
+        note.add_css_class("dim-label");
+        card.append(&note);
+
+        // Native brightness slider bound to /sys/class/leds/*::kbd_backlight
+        let level = crate::keyboard::brightness().unwrap_or(0);
+        let max = crate::keyboard::max_brightness().unwrap_or(2);
+        let row = adw::ActionRow::builder()
+            .title("Backlight brightness")
+            .subtitle(format!("{} %", if max > 0 { level * 100 / max } else { 0 }))
+            .activatable(false)
+            .build();
+        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, max as f64, 1.0);
+        scale.set_value(level as f64);
+        scale.set_hexpand(true);
+        scale.set_valign(Align::Center);
+        let scale_c = scale.clone();
+        let row_c = row.clone();
+        scale.connect_value_changed(move |s| {
+            let v = s.value() as u8;
+            let _ = crate::keyboard::set_brightness(v);
+            let maxv = crate::keyboard::max_brightness().unwrap_or(2).max(1);
+            row_c.set_subtitle(&format!("{} %", v * 100 / maxv));
+        });
+        row.add_suffix(&scale);
+        card.append(&row);
+        sec.append(&card);
+        page.append(&sec);
+
+        let tabs = adw::ViewStack::new(); // empty — no zone tabs on white-only boards
+        return (page, tabs);
+    }
 
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
 
