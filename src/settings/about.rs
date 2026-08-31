@@ -1399,16 +1399,31 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             Health::Ok => "Refresh and re-check",
             Health::SoftIssue => "Repair speakers",
             Health::HardwareBroken => "Try soft fix anyway",
-            Health::NotApplicable => "Check speakers",
+            Health::NotApplicable => "Not applicable",
         },
         Some(amp_action_tooltip(diag0.health)),
     );
+    // Gen10-only feature: grey out on hardware without AW88399 (all 83JG/83DG in fleet).
+    // Fleet 83RU is the only AWDZ8399 host; kernel 7.3 ships the driver, so this
+    // section will be removed entirely once 7.3 is stable.
+    if diag0.health == Health::NotApplicable {
+        btn.set_sensitive(false);
+        btn.set_tooltip_text(Some(
+            "No AW88399 smart-amp on this model — speaker fix is Gen10 Pro 7 only and will be removed once kernel 7.3 ships",
+        ));
+    }
     let action = adw::ActionRow::builder()
         .title("Repair")
+        .subtitle(if diag0.health == Health::NotApplicable {
+            "Not applicable on this hardware"
+        } else {
+            ""
+        })
         .activatable(false)
         .build();
     tip(&action, amp_action_tooltip(diag0.health));
     action.add_suffix(&btn);
+    action.set_sensitive(diag0.health != Health::NotApplicable);
     group.add(&action);
 
     let overlay = toast_overlay.clone();
@@ -1521,7 +1536,9 @@ pub(crate) fn amp_action_tooltip(health: legion_core::audio::Health) -> &'static
         Health::HardwareBroken => {
             "Still tries unmute/PipeWire — will not pretend the amp driver is fixed if it is missing"
         }
-        Health::NotApplicable => "Runs a speaker health check and soft recovery if possible",
+        Health::NotApplicable => {
+            "Gen10 Pro 7 only (AW88399) — no action on this hardware; will be removed once kernel 7.3 ships"
+        }
     }
 }
 
@@ -1535,6 +1552,8 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
         Health::HardwareBroken => {
             "The woofer amp isn’t loaded. Soft fixes help mute/sink issues only — you may need a patched kernel."
         }
-        Health::NotApplicable => "No AW88399 smart amp found on this machine.",
+        Health::NotApplicable => {
+            "No AW88399 smart amp on this model — Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."
+        }
     }
 }
