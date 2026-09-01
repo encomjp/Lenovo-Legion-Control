@@ -13,6 +13,24 @@
       "contradictory"
     ]
   },
+  "schema": {
+    "field_types": {
+      "machine_types": "string[] — DMI machine types (8xx pattern)",
+      "aliases": "string[] — marketing names",
+      "bios_prefixes": "string[] — first 4 chars of the Lenovo BIOS id (e.g. Q6CN); [] means not yet verified, never guess",
+      "family": "enum: legion-5 | legion-5-pro | legion-5p | legion-pro-5 | legion-7 | legion-pro-7 | legion-9 | legion-s7 | legion-slim-5 | loq-15 | ideapad-gaming-3",
+      "generation": "int (5..10); string \"N_or_M\" marks families spanning generations — disambiguate by machine type",
+      "capabilities.keyboard_backlight": "enum: white_only | 24_zone_rgb | four_zone_rgb | per_key_rgb | spectrum_rgb | white_or_24_zone_rgb | white_or_four_zone_rgb | sku_variant | unknown — original free-text observation preserved in keyboard_backlight_note",
+      "capabilities.rgb_zones": "int; string (e.g. \"24_zone_optional\", \"unknown_per_sku\") = SKU-dependent — treat as unknown",
+      "capabilities.rgb_protocol": "enum: none | unknown | legacy_4zone | wmi_backlight | spectrum | per_sku — original free-text observation (incl. HID ids) preserved in rgb_protocol_note",
+      "capabilities.fan_count": "int 1..4; string = model-dependent",
+      "capabilities.fan_rpm_backend": "descriptive slug (legion_laptop_ec | lenovo_wmi_other | wmi3_expected | yogafan_read_only | ec_fallback | unknown*); an expected_* suffix means inferred, not live-verified",
+      "capabilities.fan_control": "bool where live-verified; descriptive slug where inferred/unknown",
+      "capabilities.smart_amp_aw88399": "bool",
+      "capabilities.platform_profiles": "string[] — only where evidenced"
+    },
+    "normalization": "2026-09-01: rgb_protocol and keyboard_backlight were normalized from free text to enums; every original value is preserved verbatim in the matching *_note field."
+  },
   "sources": [
     {
       "id": "psref-loq-15ahp10",
@@ -41,8 +59,8 @@
     {
       "id": "local-telemetry",
       "class": "telemetry_observed",
-      "path": "telemetry-triage/",
-      "notes": "Observed reports and deep samples from the IONOS fleet."
+      "path": "telemetry-triage/ (developer monorepo-local working directory; NOT present in the public repo)",
+      "notes": "Observed reports and deep samples from the IONOS fleet. Raw data lives in the developer's local monorepo only — evidence claims below stand on their own."
     },
     {
       "id": "psref-legion-5-15ach6",
@@ -385,6 +403,48 @@
       "class": "linux_implementation",
       "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
       "notes": "H3CN Linux model lineage supplies family-level EC/fan context; it does not establish an exact per-host controller or full-speed/WMI behavior."
+    },
+    {
+      "id": "lenovo-bios-ds575556",
+      "class": "official",
+      "url": "https://support.lenovo.com/us/en/downloads/ds575556",
+      "notes": "Lenovo BIOS Update page covering Legion 5 16IAX10 (83NX), Legion Pro 5 16IAX10 (83F3) and Legion Pro 5 16IAX10H (83LU) — one shared BIOS package (Q6CN family)."
+    },
+    {
+      "id": "lenovo-bios-ds577727",
+      "class": "official",
+      "url": "https://support.lenovo.com/us/en/downloads/ds577727",
+      "notes": "Lenovo BIOS Update page for Legion Pro 5 16AFR10 (83F2) — RECN BIOS family."
+    },
+    {
+      "id": "firmwatch-legion-5-15irx9",
+      "class": "official",
+      "url": "https://firmwatch.io/laptops/lenovo/lenovo-legion-5-15irx9",
+      "notes": "Firmware tracker for Legion 5 15IRX9 (83JJ) — PTCN BIOS family (PTCN21WW, 2026-07-20); download links bound to pcsupport.lenovo.com/.../legion-5-15irx9/83jj/."
+    },
+    {
+      "id": "firmwatch-legion-pro-5-16afr10",
+      "class": "official",
+      "url": "https://firmwatch.io/laptops/lenovo/lenovo-legion-pro-5-16afr10",
+      "notes": "Firmware tracker for Legion Pro 5 16AFR10 (83F2) — RECN BIOS family (RECN23WW, 2026-08-10); download links bound to pcsupport.lenovo.com/.../legion-pro-5-16afr10/83f2/."
+    },
+    {
+      "id": "lenovolegionlinux-471",
+      "class": "linux_implementation",
+      "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/471",
+      "notes": "Live dmidecode from Legion Pro 5 16IAX10 (83F3): BIOS Q6CN78WW, SKU LENOVO_MT_83F3; 4-zone RGB effects confirmed working; EC numeric reads garbage with force=1."
+    },
+    {
+      "id": "lenovolegionlinux-337",
+      "class": "linux_implementation",
+      "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/337",
+      "notes": "Live dmidecode from Legion Pro 5 16IAX10H (83LU): BIOS Q6CN26WW, SKU LENOVO_MT_83LU; white-backlight unit."
+    },
+    {
+      "id": "lenovolegionlinux-373-387",
+      "class": "linux_implementation",
+      "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/387",
+      "notes": "Legion 5 15AHP10 (83M0) BIOS reports: RGCN27WW (#373) and RGCN32WW (#387)."
     }
   ],
   "models": [
@@ -559,9 +619,9 @@
         "hid_controller": "probe 048d:c197; absence is observed, not family-wide proof"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_sku_variant",
+        "keyboard_backlight": "sku_variant",
         "rgb_zones": "unknown",
-        "rgb_protocol": "none_observed",
+        "rgb_protocol": "none",
         "fan_count": 2,
         "fan_rpm_backend": "ec_fallback",
         "fan_control": false,
@@ -573,7 +633,9 @@
           "custom"
         ],
         "ppt": "observed",
-        "smart_amp_aw88399": false
+        "smart_amp_aw88399": false,
+        "rgb_protocol_note": "original: none_observed",
+        "keyboard_backlight_note": "original: white_or_sku_variant"
       },
       "evidence": [
         {
@@ -616,9 +678,9 @@
         "hid_controller": "probe 048d:c197; 24-zone RGB controller remains unknown"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "not_spectrum_observed",
+        "rgb_protocol": "none",
         "fan_count": 2,
         "fan_rpm_backend": "yogafan_read_only",
         "fan_control": "unknown_or_wmi_separate",
@@ -630,7 +692,9 @@
           "custom"
         ],
         "ppt": "cpu_limits_observed",
-        "smart_amp_aw88399": false
+        "smart_amp_aw88399": false,
+        "rgb_protocol_note": "original: not_spectrum_observed",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -675,7 +739,7 @@
       "capabilities": {
         "keyboard_backlight": "spectrum_rgb",
         "rgb_zones": "per_key_and_chassis_zones",
-        "rgb_protocol": "048d:c197",
+        "rgb_protocol": "spectrum",
         "fan_count": 3,
         "fan_rpm_backend": "lenovo_wmi_other",
         "fan_control": true,
@@ -687,7 +751,8 @@
           "custom"
         ],
         "ppt": "observed",
-        "smart_amp_aw88399": true
+        "smart_amp_aw88399": true,
+        "rgb_protocol_note": "original: 048d:c197"
       },
       "evidence": [
         {
@@ -730,14 +795,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "spectrum_rgb_expected",
+        "keyboard_backlight": "spectrum_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "048d:c197_expected",
+        "rgb_protocol": "spectrum",
         "fan_count": 3,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: 048d:c197_expected",
+        "keyboard_backlight_note": "original: spectrum_rgb_expected"
       },
       "evidence": [
         {
@@ -774,14 +841,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "spectrum_rgb_expected",
+        "keyboard_backlight": "spectrum_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "048d:c197_expected",
+        "rgb_protocol": "spectrum",
         "fan_count": 3,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: 048d:c197_expected",
+        "keyboard_backlight_note": "original: spectrum_rgb_expected"
       },
       "evidence": [
         {
@@ -818,14 +887,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_or_none_observed",
+        "rgb_protocol": "none",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_or_none_observed",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -862,14 +933,15 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
         "rgb_protocol": "unknown",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -907,14 +979,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "four_zone_rgb_or_sku_variant",
+        "keyboard_backlight": "four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": "unknown_per_sku",
         "fan_rpm_backend": "legion_laptop_or_lenovo_wmi_other",
         "fan_control": "unknown",
         "ppt": "unknown",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: four_zone_rgb_or_sku_variant"
       },
       "evidence": [
         {
@@ -952,9 +1026,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -965,7 +1039,9 @@
           "custom"
         ],
         "ppt": "unknown_not_wmi3",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1012,9 +1088,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1025,7 +1101,9 @@
           "custom"
         ],
         "ppt": "unknown_not_wmi3",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1067,9 +1145,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1080,7 +1158,9 @@
           "custom"
         ],
         "ppt": "godmode_v1_gated",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1122,9 +1202,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1135,7 +1215,9 @@
           "custom"
         ],
         "ppt": "godmode_v1_gated",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1172,9 +1254,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "keyboard_backlight": "sku_variant",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_varies_by_sku",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1185,7 +1267,9 @@
           "custom"
         ],
         "ppt": "godmode_v1_gated",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_varies_by_sku",
+        "keyboard_backlight_note": "original: per_key_or_four_zone_sku_variant"
       },
       "evidence": [
         {
@@ -1222,9 +1306,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1235,7 +1319,9 @@
           "custom"
         ],
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1272,9 +1358,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1285,7 +1371,9 @@
           "custom"
         ],
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1321,9 +1409,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1334,7 +1422,9 @@
           "custom"
         ],
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1371,9 +1461,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1384,7 +1474,9 @@
           "custom"
         ],
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1405,7 +1497,7 @@
       "bios_prefixes": [
         "FSCN"
       ],
-      "family": "legion-5P",
+      "family": "legion-5p",
       "generation": 5,
       "detection_method": {
         "machine_type": "DMI product name before BIOS-family fallback",
@@ -1415,14 +1507,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1443,7 +1537,7 @@
       "bios_prefixes": [
         "EFCN"
       ],
-      "family": "legion-5P",
+      "family": "legion-5p",
       "generation": 5,
       "detection_method": {
         "machine_type": "DMI product name before BIOS-family fallback",
@@ -1453,14 +1547,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1491,14 +1587,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "keyboard_backlight": "sku_variant",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected_048d_c955_contradictory",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected_048d_c955_contradictory",
+        "keyboard_backlight_note": "original: per_key_or_four_zone_sku_variant"
       },
       "evidence": [
         {
@@ -1529,14 +1627,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "keyboard_backlight": "sku_variant",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "godmode_v0_expected",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: per_key_or_four_zone_sku_variant"
       },
       "evidence": [
         {
@@ -1567,9 +1667,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1580,7 +1680,9 @@
           "custom"
         ],
         "ppt": "godmode_v1_gated",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1616,9 +1718,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1629,7 +1731,9 @@
           "custom"
         ],
         "ppt": "godmode_v1_gated",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1665,14 +1769,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1708,14 +1814,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1746,14 +1854,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1784,14 +1894,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1822,9 +1934,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1835,7 +1947,9 @@
           "custom"
         ],
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1872,14 +1986,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1910,14 +2026,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -1950,12 +2068,13 @@
       "capabilities": {
         "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_and_chassis_4_lights_fixed",
-        "rgb_protocol": "unknown_legacy_per_key_not_spectrum",
+        "rgb_protocol": "unknown",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: unknown_legacy_per_key_not_spectrum"
       },
       "evidence": [
         {
@@ -1994,12 +2113,13 @@
       "capabilities": {
         "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_and_chassis_unknown",
-        "rgb_protocol": "unknown_legacy_per_key_not_spectrum",
+        "rgb_protocol": "unknown",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: unknown_legacy_per_key_not_spectrum"
       },
       "evidence": [
         {
@@ -2035,14 +2155,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_wmi3",
         "fan_control": "unknown_minifancurve_no_effect_reported",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: white_or_blue_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -2078,14 +2200,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 3,
         "fan_rpm_backend": "legion_laptop_wmi3",
         "fan_control": "has_fan_unlock_expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: per_key_rgb_or_white_sku_variant"
       },
       "evidence": [
         {
@@ -2121,14 +2245,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 3,
         "fan_rpm_backend": "legion_laptop_wmi3",
         "fan_control": "has_fan_unlock_expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: per_key_rgb_or_white_sku_variant"
       },
       "evidence": [
         {
@@ -2159,14 +2285,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku_four_when_rgb",
-        "rgb_protocol": "wmi2_not_hid_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "wmi3_expected",
         "fan_control": "minifancurve_expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_not_hid_spectrum",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -2190,7 +2318,9 @@
       "aliases": [
         "Legion 5 15IRX9"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "PTCN"
+      ],
       "family": "legion-5",
       "generation": 9,
       "detection_method": {
@@ -2201,19 +2331,26 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_only_observed_38_skus",
+        "keyboard_backlight": "white_only",
         "rgb_zones": "0_white_only",
-        "rgb_protocol": "not_observed_white_only",
+        "rgb_protocol": "none",
         "fan_count": 2,
         "fan_rpm_backend": "unknown_probe_live",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: not_observed_white_only",
+        "keyboard_backlight_note": "original: white_only_observed_38_skus"
       },
       "evidence": [
         {
           "source": "psref-legion-5-15irx9",
           "claim": "PSREF 38 rows MT 83JJ 38/38 White Backlit only no RGB official high",
+          "confidence": "high"
+        },
+        {
+          "source": "firmwatch-legion-5-15irx9",
+          "claim": "BIOS prefix PTCN web-verified: BIOS prefix PTCN verified: PTCN21WW latest, Lenovo download URL bound to /legion-5-15irx9/83jj/.",
           "confidence": "high"
         }
       ],
@@ -2239,9 +2376,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_when_rgb_sku",
-        "rgb_protocol": "legacy_not_spectrum_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected",
@@ -2253,7 +2390,9 @@
           "custom"
         ],
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
+        "keyboard_backlight_note": "original: per_key_rgb_or_white_sku_variant"
       },
       "evidence": [
         {
@@ -2293,12 +2432,13 @@
       "capabilities": {
         "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_and_chassis_4_lights",
-        "rgb_protocol": "unknown_alternative_full_spectrum",
+        "rgb_protocol": "unknown",
         "fan_count": 3,
         "fan_rpm_backend": "wmi3_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: unknown_alternative_full_spectrum"
       },
       "evidence": [
         {
@@ -2337,12 +2477,13 @@
       "capabilities": {
         "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_and_chassis_4_lights",
-        "rgb_protocol": "unknown_alternative_full_spectrum",
+        "rgb_protocol": "unknown",
         "fan_count": 3,
         "fan_rpm_backend": "wmi3_expected_contradictory_0rpm",
         "fan_control": "contradictory_no_PWM_at_82C",
         "ppt": "WMI_platform_profile_works",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: unknown_alternative_full_spectrum"
       },
       "evidence": [
         {
@@ -2382,12 +2523,13 @@
       "capabilities": {
         "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "per_key_plus_logo_and_U_strip_no_hinge_cap",
-        "rgb_protocol": "unknown_skip_ylogo_skip_ioport",
+        "rgb_protocol": "unknown",
         "fan_count": 4,
         "fan_rpm_backend": "ACPI_FA1S_FA2S_FA3S_FA4S_duty_at_0xC5A0",
         "fan_control": "no_fancurve_no_fullspeed_ACPI_duty_only",
         "ppt": "skip_oc_controls_hide_powerlimit",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: unknown_skip_ylogo_skip_ioport"
       },
       "evidence": [
         {
@@ -2411,7 +2553,9 @@
       "aliases": [
         "Legion 5 15AHP10"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "RGCN"
+      ],
       "family": "legion-5",
       "generation": 10,
       "detection_method": {
@@ -2422,19 +2566,26 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
           "source": "psref-legion-5-15ahp10",
           "claim": "PSREF 355 rows MT 83M0 355/355 White or 24-Zone RGB official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovolegionlinux-373-387",
+          "claim": "BIOS prefix RGCN web-verified: BIOS prefix RGCN verified: RGCN27WW (#373) and RGCN32WW (#387) reported against this exact model.",
           "confidence": "high"
         }
       ],
@@ -2460,14 +2611,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_wmi3",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -2505,14 +2658,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -2536,7 +2691,9 @@
       "aliases": [
         "Legion 5 16IAX10"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "Q6CN"
+      ],
       "family": "legion-5",
       "generation": 10,
       "detection_method": {
@@ -2547,20 +2704,27 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "24_zone_rgb_only",
+        "keyboard_backlight": "24_zone_rgb",
         "rgb_zones": "24_zone_fixed",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "unknown",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: 24_zone_rgb_only"
       },
       "evidence": [
         {
           "source": "psref-legion-5-16iax10",
           "claim": "PSREF 2 rows MT 83NX 2/2 24-Zone RGB only no White variant official high but low sample",
           "confidence": "high"
+        },
+        {
+          "source": "lenovo-bios-ds575556",
+          "claim": "BIOS prefix Q6CN web-verified: BIOS prefix Q6CN: shared Lenovo BIOS package (ds575556) covers 16IAX10 trio; Q6CN confirmed live on 83F3/83LU.",
+          "confidence": "medium"
         }
       ],
       "notes": "Extremely small sample 2 US NA models niche; do not claim 83NX is exclusive MT for worldwide 16IAX10; BIOS unknown."
@@ -2572,7 +2736,9 @@
       "aliases": [
         "Legion Pro 5 16AFR10"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "RECN"
+      ],
       "family": "legion-pro-5",
       "generation": 10,
       "detection_method": {
@@ -2583,19 +2749,26 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
           "source": "psref-legion-pro-5-16afr10",
           "claim": "PSREF 217 rows MT 83F2 217/217 White or 24-Zone RGB official high Fire Range 9955HX",
+          "confidence": "high"
+        },
+        {
+          "source": "firmwatch-legion-pro-5-16afr10",
+          "claim": "BIOS prefix RECN web-verified: BIOS prefix RECN verified: RECN23WW latest, Lenovo download URL bound to /legion-pro-5-16afr10/83f2/.",
           "confidence": "high"
         }
       ],
@@ -2619,20 +2792,27 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
           "source": "psref-legion-pro-5-16irx10",
           "claim": "PSREF 334 rows MT 83NN 334/334 White or 24-Zone RGB 14700HX official high",
           "confidence": "high"
+        },
+        {
+          "source": "psref-legion-pro-5-16irx10",
+          "claim": "BIOS prefix NOT verified via web (Lenovo download pages/advisories/firmware DBs do not enumerate 16IRX10 BIOS id as of 2026-09-01); bios_prefixes intentionally left empty — do not infer from family.",
+          "confidence": "medium"
         }
       ],
       "notes": "BIOS unverified; no live telemetry."
@@ -2644,7 +2824,9 @@
       "aliases": [
         "Legion Pro 5 16IAX10"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "Q6CN"
+      ],
       "family": "legion-pro-5",
       "generation": 10,
       "detection_method": {
@@ -2655,19 +2837,31 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant (PSREF 485/485 White or 24-Zone RGB); LenovoLegionLinux #471 live report confirms a 4-zone RGB SKU working via WMI effects — zone-count varies by SKU.",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum"
       },
       "evidence": [
         {
           "source": "psref-legion-pro-5-16iax10",
           "claim": "PSREF 485 rows MT 83F3 485/485 White or 24-Zone RGB 255HX/275HX official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovolegionlinux-471",
+          "claim": "BIOS prefix Q6CN web-verified: BIOS prefix Q6CN verified: dmidecode BIOS Version Q6CN78WW, SKU LENOVO_MT_83F3_BU_idea_FM_Legion Pro 5 16IAX10.",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovolegionlinux-471",
+          "claim": "Live unit: 4-zone RGB keyboard effects (on/off, rainbow, single-color, wave) confirmed working.",
           "confidence": "high"
         }
       ],
@@ -2680,7 +2874,9 @@
       "aliases": [
         "Legion Pro 5 16IAX10H"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "Q6CN"
+      ],
       "family": "legion-pro-5",
       "generation": 10,
       "detection_method": {
@@ -2691,19 +2887,26 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
-        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
         "fan_rpm_backend": "lenovo_wmi_other_expected",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
       },
       "evidence": [
         {
           "source": "psref-legion-pro-5-16iax10h",
           "claim": "PSREF 257 rows MT 83LU 257/257 White or 24-Zone RGB 251HX 5070Ti 140W official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovolegionlinux-337",
+          "claim": "BIOS prefix Q6CN web-verified: BIOS prefix Q6CN verified: dmidecode BIOS Version Q6CN26WW, SKU LENOVO_MT_83LU_BU_idea_FM_Legion Pro 5 16IAX10H.",
           "confidence": "high"
         }
       ],
@@ -2730,16 +2933,18 @@
         "hid_controller": "probe legacy 048d:c963; do not reuse Spectrum 048d:c197"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku (4 when RGB SKU)",
-        "rgb_protocol": "legacy_048d_c963_expected",
+        "rgb_protocol": "legacy_4zone",
         "fan_count": 2,
         "fan_rpm_backend": "unknown_or_unavailable_h3cn",
         "fan_control": "unknown_or_wmi_fullspeed_only",
         "ppt": "unknown",
         "tgp": "sku_dependent 85W RTX3050/3050Ti 90W RTX3060 N/A others",
         "battery": "45Wh_or_60Wh_sku_variant",
-        "smart_amp_aw88399": "unknown"
+        "smart_amp_aw88399": "unknown",
+        "rgb_protocol_note": "original: legacy_048d_c963_expected",
+        "keyboard_backlight_note": "original: white_or_four_zone_rgb_sku_variant"
       },
       "evidence": [
         {
@@ -2971,6 +3176,9 @@
     "Family-level BIOS prefixes GKCN/H1CN/FSCN/EFCN/BHCN/JUCN/KFCN/QNCN/S2CN/NZCN etc. are DMI allowlist medium not per-MTM verified; per-MTM BIOS remains unknown until live dmidecode telemetry confirms exact prefix-version; machine_type_precedes_bios_prefix policy enforced.",
     "Legacy four-zone controller IDs vary by model year; 048d:c965 33-byte is verified for 2021 Gen6 class only; 2022 c975 2023 c984/c985 etc. vary; do not reuse c965 blindly for Gen7-10; gate HID UI on live lsusb + report descriptor.",
     "Spectrum 048d:c197 960-byte report is Gen10 Pro7/Pro7i/7i only (83RU/83F5 live 2327 reports); do not reuse Spectrum protocol for LOQ white/24-zone or Gen5/7/8 legacy 4-zone or Legion 9 alternative layout; 24-zone WMI2 remains unknown.",
-    "Gen10 Pro 5 MTs 83M0/83F2/83NN/83F3/83LU BIOS unverified after PSREF enumeration; EC offsets vary (FE0B0F00 vs FE00D400); do not copy offset to unverified MTs; fan max RPM and PPT ranges must be calibrated from live hwmon/EC."
+    "Gen10 Pro 5 MTs 83M0/83F2/83NN/83F3/83LU BIOS unverified after PSREF enumeration; EC offsets vary (FE0B0F00 vs FE00D400); do not copy offset to unverified MTs; fan max RPM and PPT ranges must be calibrated from live hwmon/EC.",
+    "capabilities.platform_profiles is populated only for models with PSREF-verified profile lists (19/53); absence means not-yet-researched, not absence of profiles.",
+    "capabilities.tgp and capabilities.battery are populated only where PSREF enumerates values (1 model each); do not infer for others.",
+    "83NN (Legion Pro 5 16IRX10) BIOS prefix unverified as of 2026-09-01; bios_prefixes intentionally empty."
   ]
 }
