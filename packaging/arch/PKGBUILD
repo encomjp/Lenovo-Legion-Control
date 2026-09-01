@@ -28,10 +28,10 @@ check() {
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  install -Dm755 target/release/legion-cli "${pkgdir}/usr/bin/legion-cli"
-  install -Dm755 target/release/legion-daemon "${pkgdir}/usr/bin/legion-daemon"
-  install -Dm755 target/release/legion-settings "${pkgdir}/usr/bin/legion-settings"
-  install -Dm755 target/release/legion-control-setup "${pkgdir}/usr/libexec/legion-control-setup"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-cli" "${pkgdir}/usr/bin/legion-cli"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-daemon" "${pkgdir}/usr/bin/legion-daemon"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-settings" "${pkgdir}/usr/bin/legion-settings"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-control-setup" "${pkgdir}/usr/libexec/legion-control-setup"
   install -Dm644 data/polkit/com.encomjp.legion-control.policy \
     "${pkgdir}/usr/share/polkit-1/actions/com.encomjp.legion-control.policy"
   mkdir -p "${pkgdir}/usr/lib/legion-control/ryzen_smu"

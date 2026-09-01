@@ -8,14 +8,24 @@ on:
 permissions:
   contents: write
 
+# Re-pushing a tag / re-dispatching while a run is active supersedes it —
+# don't burn 4 parallel runners on a dead run.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   appimage:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       RUSTFLAGS: "-C target-cpu=x86-64-v3"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + target cache — cold gtk4-rs build is ~2m10s,
+      # warm rebuild of the 4 workspace crates is ~40-60s.
+      - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
       - run: cargo build --release --locked
       - run: |
@@ -31,20 +41,42 @@ jobs:
 
   deb:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # Cargo registry + build target, bind-mounted into the container.
+      # Registry contents only change with Cargo.lock, hence the lock hash key.
+      - name: Restore cargo cache (rustup + registry + target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-cache/deb/cargo
+            .ci-cache/deb/rustup
+            .ci-cache/deb/target
+          key: deb-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: deb-${{ runner.os }}-
       - run: |
           VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
-          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
-          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" ubuntu:24.04 bash -lc "
-            set -e; export DEBIAN_FRONTEND=noninteractive
-            apt-get update -qq; apt-get install -y -qq build-essential curl pkg-config dpkg-dev libgtk-4-dev libadwaita-1-dev >/dev/null
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable >/dev/null; . /root/.cargo/env
-            tar -xzf /input/legion-control-$VERSION.tar.gz -C /tmp; cd /tmp/legion-control-$VERSION
-            cargo build --release --locked; chmod +x packaging/debian/build.sh; OUT_DIR=/out packaging/debian/build.sh
-          "
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --exclude='./.ci-cache' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          # The target dir is mounted at the extracted tree's ./target so
+          # packaging/debian/build.sh keeps finding target/release/*.
+          docker run --rm \
+            -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" \
+            -v "$(pwd)/.ci-cache/deb/cargo:/root/.cargo" \
+            -v "$(pwd)/.ci-cache/deb/rustup:/root/.rustup" \
+            -v "$(pwd)/.ci-cache/deb/target:/tmp/legion-control-$VERSION/target" \
+            ubuntu:24.04 bash -lc "
+              set -e; export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq; apt-get install -y -qq build-essential curl pkg-config dpkg-dev libgtk-4-dev libadwaita-1-dev >/dev/null
+              export RUSTUP_HOME=/root/.rustup CARGO_HOME=/root/.cargo
+              # --profile minimal skips the ~500MB rust-docs component;
+              # with the cached RUSTUP_HOME this is a fast no-op on hits.
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null; . /root/.cargo/env
+              tar -xzf /input/legion-control-$VERSION.tar.gz -C /tmp; cd /tmp/legion-control-$VERSION
+              cargo build --release --locked; chmod +x packaging/debian/build.sh; OUT_DIR=/out packaging/debian/build.sh
+            "
           ls -lh packaging/out/
       - uses: actions/upload-artifact@v4
         with:
@@ -53,20 +85,37 @@ jobs:
 
   rpm:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Restore cargo cache (registry + target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-cache/rpm/cargo
+            .ci-cache/rpm/target
+          key: rpm-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: rpm-${{ runner.os }}-
       - run: |
           VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
-          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
-          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" fedora:42 bash -lc "
-            set -e; dnf install -y -q rpm-build cargo rust gtk4-devel libadwaita-devel systemd-devel systemd-rpm-macros >/dev/null
-            mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-            cp /input/legion-control-$VERSION.tar.gz /tmp/rpmbuild/SOURCES/; cp /input/legion-control-$VERSION.tar.gz /tmp/source.tar.gz
-            tar -xzf /tmp/source.tar.gz -C /tmp; cp /tmp/legion-control-$VERSION/packaging/rpm/legion-control.spec /tmp/rpmbuild/SPECS/
-            rpmbuild -bb /tmp/rpmbuild/SPECS/legion-control.spec --define '_topdir /tmp/rpmbuild'; cp /tmp/rpmbuild/RPMS/*/*.rpm /out/
-          "
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --exclude='./.ci-cache' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          # CARGO_TARGET_DIR keeps the cache outside the rpmbuild tree —
+          # %autosetup rm -rf's the BUILD dir, which would kill a mount there.
+          # The spec's %install honors CARGO_TARGET_DIR (see legion-control.spec).
+          docker run --rm \
+            -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" \
+            -v "$(pwd)/.ci-cache/rpm/cargo:/root/.cargo" \
+            -v "$(pwd)/.ci-cache/rpm/target:/tmp/target" \
+            fedora:42 bash -lc "
+              set -e; export CARGO_TARGET_DIR=/tmp/target
+              dnf install -y -q --setopt=install_weak_deps=False rpm-build cargo rust gtk4-devel libadwaita-devel systemd-devel systemd-rpm-macros >/dev/null
+              mkdir -p /tmp/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+              cp /input/legion-control-$VERSION.tar.gz /tmp/rpmbuild/SOURCES/; cp /input/legion-control-$VERSION.tar.gz /tmp/source.tar.gz
+              tar -xzf /tmp/source.tar.gz -C /tmp; cp /tmp/legion-control-$VERSION/packaging/rpm/legion-control.spec /tmp/rpmbuild/SPECS/
+              rpmbuild -bb /tmp/rpmbuild/SPECS/legion-control.spec --define '_topdir /tmp/rpmbuild'; cp /tmp/rpmbuild/RPMS/*/*.rpm /out/
+            "
           ls -lh packaging/out/
       - uses: actions/upload-artifact@v4
         with:
@@ -75,18 +124,37 @@ jobs:
 
   arch:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Restore cargo cache (registry + target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-cache/arch/cargo
+            .ci-cache/arch/target
+          key: arch-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: arch-${{ runner.os }}-
       - run: |
           VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)
           OUT=$(pwd)/packaging/out; mkdir -p $OUT; WORK=$(mktemp -d); trap "rm -rf $WORK" EXIT
           SOURCE="$WORK/legion-control-$VERSION.tar.gz"
-          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
-          docker run --rm -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$(pwd)/packaging/arch:/packaging:ro" -v "$OUT:/out" archlinux:latest bash -lc "
-            set -e; pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita polkit >/dev/null
-            useradd -m builder; mkdir -p /build; cp /input/legion-control-$VERSION.tar.gz /build/; cp /packaging/PKGBUILD /packaging/legion-control.install /build/; chown -R builder:builder /build
-            runuser -u builder -- bash -lc 'cd /build && makepkg --noconfirm --cleanbuild --nocheck'; cp /build/*.pkg.tar.zst /out/
-          "
+          tar --exclude='./target' --exclude='./packaging/out' --exclude='./.git' --exclude='./.ci-cache' --transform="s,^\.,legion-control-$VERSION," -czf "$SOURCE" -C . .
+          # Cache lives outside the makepkg srcdir (--cleanbuild wipes it);
+          # PKGBUILD honors CARGO_TARGET_DIR in build()/package().
+          docker run --rm \
+            -v "$SOURCE:/input/legion-control-$VERSION.tar.gz:ro" -v "$OUT:/out" \
+            -v "$(pwd)/packaging/arch:/packaging:ro" \
+            -v "$(pwd)/.ci-cache/arch/cargo:/home/builder/.cargo" \
+            -v "$(pwd)/.ci-cache/arch/target:/build/cargo-target" \
+            archlinux:latest bash -lc "
+              set -e
+              pacman -Syu --needed --noconfirm base-devel rust gtk4 libadwaita polkit >/dev/null
+              useradd -m builder; mkdir -p /build; cp /input/legion-control-$VERSION.tar.gz /build/; cp /packaging/PKGBUILD /packaging/legion-control.install /build/
+              chown -R builder:builder /build /home/builder/.cargo /build/cargo-target
+              cd /build && runuser -u builder -- env CARGO_TARGET_DIR=/build/cargo-target makepkg --noconfirm --cleanbuild --nocheck
+              cp /build/*.pkg.tar.zst /out/
+            "
           ls -lh packaging/out/
       - uses: actions/upload-artifact@v4
         with:
@@ -95,7 +163,11 @@ jobs:
 
   release:
     needs: [appimage, deb, rpm, arch]
+    # Only publish on tag pushes — a workflow_dispatch from master must not
+    # create a stray "master" release.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

@@ -29,10 +29,10 @@ RGB lighting, telemetry, diagnostics, and an embedded KDE Plasma 6 widget.
 cargo build --release --locked
 
 %install
-install -Dm755 target/release/legion-cli %{buildroot}%{_bindir}/legion-cli
-install -Dm755 target/release/legion-daemon %{buildroot}%{_bindir}/legion-daemon
-install -Dm755 target/release/legion-settings %{buildroot}%{_bindir}/legion-settings
-install -Dm755 target/release/legion-control-setup %{buildroot}%{_libexecdir}/legion-control-setup
+install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-cli" %{buildroot}%{_bindir}/legion-cli
+install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-daemon" %{buildroot}%{_bindir}/legion-daemon
+install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-settings" %{buildroot}%{_bindir}/legion-settings
+install -Dm755 "${CARGO_TARGET_DIR:-target}/release/legion-control-setup" %{buildroot}%{_libexecdir}/legion-control-setup
 install -Dm644 data/polkit/com.encomjp.legion-control.policy \
     %{buildroot}%{_datadir}/polkit-1/actions/com.encomjp.legion-control.policy
 mkdir -p %{buildroot}%{_prefix}/lib/legion-control/ryzen_smu
