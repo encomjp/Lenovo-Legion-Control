@@ -106,4 +106,4 @@ jobs:
         with:
           files: artifacts/**/*
           fail_on_unmatched_files: false
-          body_path: docs/changelog/v${{ github.ref_name }}.md
+          body_path: docs/changelog/${{ github.ref_name }}.md
