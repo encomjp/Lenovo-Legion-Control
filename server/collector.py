@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 
-MAX_BODY_BYTES = 256 * 1024
+MAX_BODY_BYTES = 512 * 1024
 DB_PATH = os.environ.get("LEGION_TELEMETRY_DB", "./diagnostics.db")
 
 SCHEMA = (
@@ -40,8 +40,18 @@ app = FastAPI(docs_url=None, redoc_url=None)
 
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
-    conn.execute(SCHEMA)
     return conn
+
+
+@app.on_event("startup")
+def init_db() -> None:
+    """Create the table once at startup instead of on every request."""
+    conn = connect()
+    try:
+        conn.execute(SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @app.post("/v1/diagnostics")
@@ -59,14 +69,18 @@ async def submit_report(request: Request) -> dict:
         doc = json.loads(body)
     except ValueError as exc:  # JSONDecodeError / undecodable bytes
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
-    if not isinstance(doc, dict) or doc.get("schema_version") != 1:
-        raise HTTPException(status_code=400, detail="schema_version must equal 1")
+    if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="schema_version must be 1, 2, or 3")
+    try:
+        payload = body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="payload must be UTF-8") from None
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect()
     try:
         conn.execute(
             "INSERT INTO reports (ts, payload) VALUES (?, ?)",
-            (ts, body.decode("utf-8", errors="replace")),
+            (ts, payload),
         )
         conn.commit()
     finally:

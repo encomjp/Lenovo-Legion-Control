@@ -40,3 +40,16 @@ lenovo-legion-tool/
 # Agent scratch / internal notes — never publish
 AGENTS.md
 docs/superpowers/
+
+# Local vendored / working trees — never publish
+telemetry-triage/
+squashfs-root/
+razer-control-revived/
+research/audit/
+.hypothesis/
+.pytest_cache/
+
+# Local scratch artifacts (cookie jars, server patches)
+cookies.txt
+PORTAL-LEGACY-FILTER-*.patch
+
