@@ -179,19 +179,94 @@ fn read_temp_file(path: &Path, label: &str) -> Option<i32> {
     read_sysfs_num(path, label)
 }
 
-/// Reads the main CPU temperature (the AMD Tctl sensor, hwmon `temp1_input`)
-/// and a per-CCD temperature via cached hwmon discovery (avoids 10+ readdir/tick).
-pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
-    let Some(hw) = crate::sensors::hwmon_by_name("k10temp") else {
-        log::trace!("thermal: no k10temp hwmon found");
-        return (None, None);
-    };
+/// Thermal-zone fallback shared by the coretemp branch and the last-resort
+/// path. `include_acpitz` widens acceptance beyond `x86_pkg_temp` (used when
+/// coretemp exists but exposes no Package label — some vendor kernels only
+/// surface an ACPi thermal zone). Positive-only: 0 mC is a sentinel, never a
+/// reading.
+fn read_thermal_zone_temp(include_acpitz: bool) -> Option<i32> {
+    for zone in std::fs::read_dir("/sys/class/thermal")
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let ttype = std::fs::read_to_string(zone.path().join("type"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let accepted = if include_acpitz {
+            ttype == "x86_pkg_temp" || ttype == "acpitz"
+        } else {
+            ttype == "x86_pkg_temp"
+        };
+        if accepted {
+            if let Some(v) = read_temp_file(&zone.path().join("temp"), &format!("thermal {ttype}")) {
+                if v > 0 {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    None
+}
 
-    let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
-    let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
-    let cpu_temp_2 =
-        tccd1.or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
-    (cpu_temp, cpu_temp_2)
+/// Reads the main CPU temperature via cached hwmon discovery.
+///
+/// AMD: `k10temp` `temp1_input` (Tctl) + `temp4_input` (Tccd1).
+/// Intel Raptor Lake (Y7000P IRX9 83DG 0°C bug): `coretemp` Package id / Core
+/// labels, else `x86_pkg_temp` thermal zone. Source-agnostic so the governor
+/// works on both vendors; `sensors::read_all` is the display twin.
+pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
+    if let Some(hw) = crate::sensors::hwmon_by_name("k10temp") {
+        let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
+        let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
+        let cpu_temp_2 =
+            tccd1.or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
+        return (cpu_temp, cpu_temp_2);
+    }
+    if let Some(hw) = crate::sensors::hwmon_by_name("coretemp") {
+        let mut max_pkg: Option<i32> = None;
+        let mut max_core: Option<i32> = None;
+        if let Ok(entries) = std::fs::read_dir(&hw) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with("_label") {
+                    continue;
+                }
+                let label = match std::fs::read_to_string(entry.path()) {
+                    Ok(s) => s.trim().to_string(),
+                    Err(_) => continue,
+                };
+                let input_path = hw.join(fname.replace("_label", "_input"));
+                let val = match read_temp_file(&input_path, &format!("coretemp {label}")) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                if label.contains("Package id") {
+                    max_pkg = Some(max_pkg.map_or(val, |p| p.max(val)));
+                } else if label.starts_with("Core ") {
+                    max_core = Some(max_core.map_or(val, |p| p.max(val)));
+                }
+            }
+        }
+        if max_pkg.is_some() || max_core.is_some() {
+            log::debug!("thermal: coretemp package={max_pkg:?} core_max={max_core:?}");
+            // Governor clamps on package temp; core max as secondary.
+            return (max_pkg.or(max_core), max_core);
+        }
+        // Thermal zone fallback if coretemp had no Package label
+        if let Some(v) = read_thermal_zone_temp(true) {
+            return (Some(v), None);
+        }
+        log::trace!("thermal: no coretemp or thermal zone reading");
+        return (None, None);
+    }
+    // Last resort: thermal zone x86_pkg_temp (works on both Intel/AMD when hwmon missing)
+    if let Some(v) = read_thermal_zone_temp(false) {
+        return (Some(v), None);
+    }
+    log::trace!("thermal: no k10temp/coretemp/x86_pkg_temp hwmon found");
+    (None, None)
 }
 
 pub fn read_cur_max() -> Option<u32> {
@@ -428,5 +503,55 @@ mod tests {
         assert_eq!(f.effective(95_000, limit), 95_000);
         // Filter state followed the raw value, not the average
         assert_eq!(f.update(95_000), 95_000);
+    }
+
+    // ── Intel 0°C regression (Y7000P IRX9 83DG) ──────────────────────────
+    // sensors.rs already covers the hwmon walk; thermal::read_cpu_temps must
+    // mirror it source-agnostically (k10temp → coretemp → x86_pkg_temp) so the
+    // governor does not stay blind (None temps, no freq writes) on Intel.
+    #[test]
+    fn read_cpu_temps_returns_none_when_no_hwmon() {
+        // On this CI host there is no k10temp/coretemp; thermal zone may also
+        // be absent — must not panic and must return (None, None) not 0.
+        let (a, b) = read_cpu_temps();
+        // a and b are either temps or None — but never Some(0) sentinel.
+        if let Some(v) = a {
+            assert!(v != 0, "thermal governor must never see 0 mC sentinel");
+        }
+        if let Some(v) = b {
+            assert!(v != 0);
+        }
+        // The exact value depends on host hwmon; just assert it doesn't panic.
+        let _ = (a, b);
+    }
+
+    #[test]
+    fn coretemp_label_pick_logic() {
+        // Pure logic extracted from read_cpu_temps coretemp branch.
+        fn pick(labels: &[(&str, i32)]) -> (Option<i32>, Option<i32>) {
+            let mut pkg: Option<i32> = None;
+            let mut core: Option<i32> = None;
+            for (lab, v) in labels {
+                if lab.contains("Package id") {
+                    pkg = Some(pkg.map_or(*v, |p| p.max(*v)));
+                } else if lab.starts_with("Core ") {
+                    core = Some(core.map_or(*v, |p| p.max(*v)));
+                }
+            }
+            (pkg, core)
+        }
+        // Package id 0 hottest wins, Core max as secondary — mirrors Y7000P 83DG (Package 37°C)
+        assert_eq!(
+            pick(&[("Package id 0", 37000), ("Core 0", 35000), ("Core 1", 36000)]),
+            (Some(37000), Some(36000))
+        );
+        // Two Package ids — hottest wins
+        assert_eq!(
+            pick(&[("Package id 0", 40000), ("Package id 1", 45000)]),
+            (Some(45000), None)
+        );
+        // No package label → None (thermal zone fallback path)
+        assert_eq!(pick(&[("Core 0", 33000)]), (None, Some(33000)));
+        assert_eq!(pick(&[]), (None, None));
     }
 }

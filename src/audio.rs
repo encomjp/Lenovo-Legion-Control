@@ -329,12 +329,12 @@ pub fn troubleshoot() -> FixReport {
         before.wrong_default_sink
     );
 
-    if before.health == Health::NotApplicable && before.hda_card.is_none() {
+    if before.health == Health::NotApplicable {
         log::info!(
-            "audio: troubleshoot: nothing to do — no onboard HDA card and amp not applicable"
+            "audio: troubleshoot: no AW88399 smart amp on this model (health NotApplicable) — speaker fix is Gen10-only, will be removed once kernel 7.3 ships"
         );
         return FixReport {
-            steps: vec!["Nothing to do — no onboard HDA card".into()],
+            steps: vec!["No AW88399 smart amp on this model — speaker fix is Gen10-only".into()],
             errors,
             after: before,
         };
@@ -887,5 +887,62 @@ malformed-line-without-tabs\n\
     fn sink_selection_empty_is_none() {
         assert!(select_internal_sink("").is_none());
         assert!(select_internal_sink("\n\n").is_none());
+    }
+
+    // ── Gen10-only gating (83JG LOQ, 83DG Y7000P fleet) ─────────────────
+    #[test]
+    fn classify_not_applicable_when_no_aw88399() {
+        // Fleet 83DG Y7000P IRX9 + 83JG LOQ: no AWDZ8399 ACPI device, onboard
+        // HDA card present (hw:0), soft flags from mute/volume/sink. On most
+        // models this is NotApplicable; on Gen10 DMI (83RU etc.) the same
+        // inputs surface as HardwareBroken (expected amp missing) — either way
+        // the speaker fix must stay disabled (UI grey, daemon early-exit).
+        let (health, summary, details, fixable) = classify(
+            false, true, true, true, Some(0), true, true, false, true, false, &None, &None,
+        );
+        assert!(
+            matches!(health, Health::NotApplicable | Health::HardwareBroken),
+            "health={health:?}"
+        );
+        assert!(details.iter().any(|d| d.contains("No AWDZ8399")));
+        if health == Health::NotApplicable {
+            assert!(summary.contains("No AW88399"));
+            // fixable mirrors soft even for N/A (UI shows N/A pill muted) — daemon
+            // troubleshoot() must early-exit regardless.
+            assert!(fixable);
+        } else {
+            // HardwareBroken path for Gen10 DMI with missing ACPI: expected amp not detected
+            assert!(summary.contains("Expected") || summary.contains("Smart amp"));
+            assert!(!fixable);
+        }
+    }
+
+    #[test]
+    fn classify_hardware_broken_when_amp_acpi_without_modules() {
+        let (health, summary, _, fixable) = classify(
+            true, false, false, false, Some(0), false, false, false, false, false, &None, &None,
+        );
+        assert_eq!(health, Health::HardwareBroken);
+        assert!(summary.contains("Smart amp not working"));
+        assert!(!fixable);
+    }
+
+    #[test]
+    fn classify_soft_issue_when_amp_ok_but_muted() {
+        let (health, summary, _, fixable) = classify(
+            true, true, true, true, Some(0), true, true, false, false, false, &None, &None,
+        );
+        assert_eq!(health, Health::SoftIssue);
+        assert!(fixable);
+        assert!(summary.contains("Amp connected"));
+    }
+
+    #[test]
+    fn classify_ok_when_amp_and_no_soft() {
+        let (health, _, _, fixable) = classify(
+            true, true, true, true, Some(0), false, false, false, false, false, &None, &None,
+        );
+        assert_eq!(health, Health::Ok);
+        assert!(fixable);
     }
 }

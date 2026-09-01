@@ -705,8 +705,10 @@ pub fn capability_digest() -> String {
 /// `collect()` (subprocess + sysfs walk) — only called at launch / hourly /
 /// capability change / explicit send.
 fn collect_deep(reason: &str) -> DeepReport {
-    let mut deep = DeepReport::default();
-    deep.reason = reason.to_string();
+    let mut deep = DeepReport {
+        reason: reason.to_string(),
+        ..Default::default()
+    };
 
     // ─── GPU detailed: nvidia-smi -q, else amdgpu sysfs walk ───
     deep.gpu_detailed = crate::dgpu::detailed_query();
@@ -782,9 +784,9 @@ fn collect_deep(reason: &str) -> DeepReport {
         .into_iter()
         .map(|l| PptSnapshot {
             id: l.id.to_string(),
-            current_w: l.current as u32,
-            min_w: l.min as u32,
-            max_w: l.max as u32,
+            current_w: l.current,
+            min_w: l.min,
+            max_w: l.max,
         })
         .collect();
 
@@ -903,18 +905,21 @@ fn collect_deep(reason: &str) -> DeepReport {
 }
 
 fn probe_acpi() -> AcpiProbe {
-    let mut p = AcpiProbe::default();
-    p.wmi3_available = Path::new("/sys/bus/wmi/devices/887B54E3-DDDC-4B2C-8B88-68A26A8835D0").exists()
-        || std::fs::read_dir("/sys/bus/wmi/devices")
-            .into_iter()
-            .flatten()
-            .flatten()
-            .any(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .to_ascii_uppercase()
-                    .contains("887B54E3")
-            });
+    let mut p = AcpiProbe {
+        wmi3_available: Path::new("/sys/bus/wmi/devices/887B54E3-DDDC-4B2C-8B88-68A26A8835D0")
+            .exists()
+            || std::fs::read_dir("/sys/bus/wmi/devices")
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .to_ascii_uppercase()
+                        .contains("887B54E3")
+                }),
+        ..Default::default()
+    };
     let mut details: Vec<String> = Vec::new();
     let mut any_ok = false;
     if let Ok(zones) = std::fs::read_dir("/sys/class/thermal") {

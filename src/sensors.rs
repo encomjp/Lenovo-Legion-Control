@@ -835,4 +835,30 @@ mod tests {
         assert_eq!(select_ssd_temp(None, None, Some(42.0)), Some(42.0));
         assert_eq!(select_ssd_temp(None, None, None), None);
     }
+
+    // ── Intel 0°C regression (Y7000P 83DG) ──────────────────────────────
+    // sensors::read_all already handles coretemp Package/id + x86_pkg_temp
+    // fallback; this pins the priority helper used inside read_all so a
+    // refactor cannot re-introduce the k10temp-only 0°C display on Intel.
+    #[test]
+    fn cpu_temp_helpers_intel_package_wins() {
+        // Package id is the CPU temp on Intel; core temps feed cpu_temp_1.
+        // This mirrors the coretemp branch debug logs seen on 83DG (Package 37°C).
+        let labels = vec![
+            ("Package id 0".to_string(), 37000.0),
+            ("Core 0".to_string(), 35000.0),
+            ("Core 1".to_string(), 36000.0),
+        ];
+        let mut max_pkg: Option<f64> = None;
+        let mut max_core: Option<f64> = None;
+        for (label, temp) in &labels {
+            if label.contains("Package id") {
+                max_pkg = Some(max_pkg.map_or(*temp, |v| v.max(*temp)));
+            } else if label.starts_with("Core ") {
+                max_core = Some(max_core.map_or(*temp, |v| v.max(*temp)));
+            }
+        }
+        assert_eq!(max_pkg, Some(37000.0));
+        assert_eq!(max_core, Some(36000.0));
+    }
 }

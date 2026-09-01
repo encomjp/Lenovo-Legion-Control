@@ -28,6 +28,10 @@
 </p>
 
 <p align="center">
+  <a href="docs/HARDWARE-AND-HID.md"><b>View the officially tested laptops &amp; functionality chart →</b></a>
+</p>
+
+<p align="center">
   <img src="docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="320">
 </p>
 
@@ -186,13 +190,27 @@ One anonymized JSON per minute — model/type/BIOS/CPU/GPU/EC, distro+kernel, se
 
 ---
 
-## Hardware support
+## Hardware support / Officially tested
 
-Verified on **Lenovo Legion Pro 7 16AFR10H (83RU)** with Gen 10 Spectrum `048d:c197` (check with `lsusb -d 048d:c197`). `048d:c193` is a separate Lenovo controller covered by the udev rule. Other Gen 10 Legion likely compatible; older gens use different protocols. See [Hardware and HID](docs/HARDWARE-AND-HID.md).
+[**View the officially tested laptops and functionality chart →**](docs/HARDWARE-AND-HID.md)
+
+The following models are officially supported/tested by this project. Support is model-, SKU-, firmware-, and kernel-dependent; an “officially tested” entry does not make every configuration identical.
+
+| Laptop | Machine type / firmware | Evidence and tested scope |
+|---|---|---|
+| **Lenovo Legion Pro 7 16AFR10H** | `83RU` · `SMCN` · Ryzen 9 `9955HX3D` | Owner validation; Gen 10 Spectrum RGB `048d:c197`, including the hero workflow. |
+| **Legion Y7000P IRX9 / Legion 5 16IRX9** | `83DG` · Intel Core i7-`14700HX` | Officially supported/tested via fleet telemetry and user **Konnor**; observed functionality is tied to the reported configuration. |
+| **IdeaPad Gaming 3 15ACH6** | `82K2` / `82MJ` · `H3CN` | Officially supported/tested via fleet telemetry; telemetry is degraded, but the model was validated in **0.2.8**. |
+
+All other models in the [full `model-capabilities.json` catalog](data/model-capabilities.json) are **untested/unsupported atm**. Do not infer support from a family name or PSREF entry. To help validate another model, enable `Setup → Alpha diagnostics`, let it collect an anonymized report, then submit the model type, BIOS, version, and sanitized telemetry through a [new issue](https://github.com/encomjp/Lenovo-Legion-Control/issues/new). Never include serial numbers, hostnames, usernames, MAC/IP addresses, or other personal data.
+
+Before expecting Spectrum support, inspect the controller:
 
 ```bash
-lsusb -d 048d:c197
+lsusb | grep 048d
 ```
+
+See [Hardware and HID](docs/HARDWARE-AND-HID.md) for Linux interfaces, HID details, support boundaries, and debugging guidance.
 
 ---
 

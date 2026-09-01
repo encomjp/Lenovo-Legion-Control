@@ -1645,7 +1645,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
-        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp CPU/CCD2 temps).",
+        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp/coretemp/x86_pkg_temp).",
     );
 
     // Bare switch in the group header — the slider below explains itself,
@@ -1742,10 +1742,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .build();
     chips.add_css_class("metric-grid");
     let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) =
-        metric_chip_tip("CPU temp", Some("Main CPU temperature (k10temp Tctl)"));
+        metric_chip_tip("CPU temp", Some("Main CPU temperature (k10temp/coretemp/x86_pkg_temp)"));
     let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) = metric_chip_tip(
         "CPU CCD 2",
-        Some("Second CPU CCD temperature (k10temp Tccd2)"),
+        Some("Second CPU CCD/core temperature"),
     );
     let (freq_chip, freq_v, freq_d) = metric_chip_tip(
         "Max freq",

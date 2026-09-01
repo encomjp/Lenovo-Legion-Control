@@ -97,6 +97,7 @@ jobs:
     needs: [appimage, deb, rpm, arch]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -105,3 +106,4 @@ jobs:
         with:
           files: artifacts/**/*
           fail_on_unmatched_files: false
+          body_path: docs/changelog/v${{ github.ref_name }}.md

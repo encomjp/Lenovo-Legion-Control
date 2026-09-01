@@ -1,5 +1,5 @@
 Name:           legion-control
-Version:        0.2.9
+Version:        0.2.10
 Release:        1%{?dist}
 Summary:        Lenovo Legion hardware control suite
 License:        GPL-2.0-only

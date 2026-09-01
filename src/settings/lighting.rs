@@ -79,8 +79,8 @@ pub fn build_lighting(
         card.append(&note);
 
         // Native brightness slider bound to /sys/class/leds/*::kbd_backlight
-        let level = crate::keyboard::brightness().unwrap_or(0);
-        let max = crate::keyboard::max_brightness().unwrap_or(2);
+        let level = legion_core::keyboard::brightness().unwrap_or(0);
+        let max = legion_core::keyboard::max_brightness().unwrap_or(2);
         let row = adw::ActionRow::builder()
             .title("Backlight brightness")
             .subtitle(format!("{} %", if max > 0 { level * 100 / max } else { 0 }))
@@ -90,12 +90,11 @@ pub fn build_lighting(
         scale.set_value(level as f64);
         scale.set_hexpand(true);
         scale.set_valign(Align::Center);
-        let scale_c = scale.clone();
         let row_c = row.clone();
         scale.connect_value_changed(move |s| {
             let v = s.value() as u8;
-            let _ = crate::keyboard::set_brightness(v);
-            let maxv = crate::keyboard::max_brightness().unwrap_or(2).max(1);
+            let _ = legion_core::keyboard::set_brightness(v);
+            let maxv = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
             row_c.set_subtitle(&format!("{} %", v * 100 / maxv));
         });
         row.add_suffix(&scale);

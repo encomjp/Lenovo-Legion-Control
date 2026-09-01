@@ -637,7 +637,7 @@ fn thermal_governor(
 
         if cpu_temp.is_none() && cpu_temp_2.is_none() && !warned_missing {
             log::warn!(
-                "thermal governor: k10temp not found — status will show None temps, no freq writes"
+                "thermal governor: no CPU temp source (k10temp/coretemp/x86_pkg_temp) — status will show None temps, no freq writes"
             );
             warned_missing = true;
         } else if cpu_temp.is_some() || cpu_temp_2.is_some() {

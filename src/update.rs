@@ -824,7 +824,7 @@ fn run_cargo_build_streaming(
         .map_err(|e| format!("Release build failed: {e}"))?;
     let stderr = child.stderr.take();
     if let Some(pipe) = stderr {
-        for line in BufReader::new(pipe).lines().flatten() {
+        for line in BufReader::new(pipe).lines().map_while(Result::ok) {
             let t = line.trim().to_string();
             if t.is_empty() {
                 continue;
@@ -1031,10 +1031,10 @@ fn download_file(
                     let err = child
                         .stderr
                         .take()
-                        .and_then(|mut s| {
+                        .map(|mut s| {
                             let mut buf = String::new();
                             let _ = s.read_to_string(&mut buf);
-                            Some(buf)
+                            buf
                         })
                         .unwrap_or_default();
                     let _ = fs::remove_file(dest);
@@ -1127,7 +1127,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
         .find(|tok| tok.len() == 64 && tok.bytes().all(|b| b.is_ascii_hexdigit()))
         .or_else(|| {
             text.split('=')
-                .last()
+                .next_back()
                 .map(str::trim)
                 .filter(|tok| tok.len() == 64)
         })

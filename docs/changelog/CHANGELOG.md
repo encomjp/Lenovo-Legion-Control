@@ -8,6 +8,13 @@ The app does not read this folder; in-app update text comes from the GitHub rele
 
 ## Unreleased
 
+## 0.2.10 - 2026-09-01
+
+- Fix Intel `coretemp` CPU temperature handling, including Package/Core readings and thermal-zone fallback.
+- Gate speaker troubleshooting on `NotApplicable` for models without the AW88399 smart amp.
+- Collapse lighting controls to white-only mode on hardware that exposes only white backlighting.
+- Add catalog coverage for Legion 82GN/81Y8/82B3 and 82K2/82MJ, plus broader Legion hardware research.
+
 ## 0.2.4 - 2026-08-30
 
 - Source `/usr/local` installs can use **Update now** (git tag + rebuild, or the portable tarball).

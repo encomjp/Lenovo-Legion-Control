@@ -1,0 +1,2976 @@
+{
+  "schema_version": 1,
+  "purpose": "Evidence-backed capability notes for model detection and safe UI/backend gating. This is research data, not yet runtime-integrated.",
+  "evidence_policy": {
+    "unknown_is_not_false": true,
+    "machine_type_precedes_bios_prefix": true,
+    "sku_variation_warning": "A marketing family may contain white, 4-zone RGB, or 24-zone RGB variants. Do not infer a capability for an unobserved SKU.",
+    "classes": [
+      "official",
+      "linux_implementation",
+      "telemetry_observed",
+      "inferred",
+      "contradictory"
+    ]
+  },
+  "sources": [
+    {
+      "id": "psref-loq-15ahp10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/LOQ/LOQ_15AHP10/LOQ_15AHP10_Spec.pdf",
+      "notes": "PSREF lists white backlight and optional 24-zone RGB; RTX 5050/5060 options at 100 W."
+    },
+    {
+      "id": "psref-legion-5-16irx9",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_16IRX9/Legion_5_16IRX9_Spec.pdf",
+      "notes": "Global PSREF used to cross-check the Y7000P IRX9 alias."
+    },
+    {
+      "id": "lenovo-legion-linux",
+      "class": "linux_implementation",
+      "url": "https://github.com/johnfanv2/LenovoLegionLinux",
+      "notes": "DMI/BIOS support, EC/WMI and device-specific Linux behavior."
+    },
+    {
+      "id": "lenovo-legion-toolkit-compatibility",
+      "class": "linux_implementation",
+      "url": "https://raw.githubusercontent.com/LenovoLegionToolkit-Team/LenovoLegionToolkit/master/LenovoLegionToolkit.Lib/Utils/Compatibility.cs",
+      "notes": "Cross-check for machine-type families and Windows lighting exclusions; not proof of Linux hardware presence."
+    },
+    {
+      "id": "local-telemetry",
+      "class": "telemetry_observed",
+      "path": "telemetry-triage/",
+      "notes": "Observed reports and deep samples from the IONOS fleet."
+    },
+    {
+      "id": "psref-legion-5-15ach6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15ACH6/Legion_5_15ACH6_Spec.pdf",
+      "notes": "15ACH6 (Ryzen 5600H/5800H, GTX1650/RTX3050/Ti 95W) lists White/Blue/4-Zone RGB SKU variant; No system lighting; 60/80Wh. PSREF ShowModel lists 761 rows, MT 82JW (760/761 high confidence)."
+    },
+    {
+      "id": "psref-legion-5-15ith6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15ITH6/Legion_5_15ITH6_Spec.pdf",
+      "notes": "15ITH6 (Intel 11th H, HM570, RTX3050/Ti 95W) lists White/Blue/4-Zone RGB variant; No system lighting. PSREF ShowModel 646 rows, MT 82JK (646/646 high confidence)."
+    },
+    {
+      "id": "psref-legion-5-pro-16ach6h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ACH6H/Legion_5_Pro_16ACH6H_Spec.pdf",
+      "notes": "16ACH6H (R5 5600H/R7 5800H, RTX3060 130W/3070 140W) lists White/Blue/4-Zone RGB plus Y-logo lighting. Distinct from 16ACH6 (3050/Ti only)."
+    },
+    {
+      "id": "psref-legion-5-pro-16ach6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ACH6/Legion_5_Pro_16ACH6_Spec.pdf",
+      "notes": "16ACH6 (Ryzen 5000-H, RTX3050/Ti 90-95W) base SKU; do not infer 3060/3070 TGP for this product key."
+    },
+    {
+      "id": "psref-legion-5-pro-16ith6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ITH6/Legion_5_Pro_16ITH6_Spec.pdf",
+      "notes": "16ITH6 (i5-11400H/i7-11800H, RTX3050/Ti 95W) with Advanced Optimus; White/Blue/4-Zone RGB SKU variant."
+    },
+    {
+      "id": "psref-legion-5-pro-16ith6h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ITH6H/Legion_5_Pro_16ITH6H_Spec.pdf",
+      "notes": "16ITH6H (i7-11800H, RTX3060 130W/3070 140W) Advanced Optimus; higher TGP than non-H."
+    },
+    {
+      "id": "psref-legion-7-16achg6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_7_16ACHg6/Legion_7_16ACHg6_Spec.pdf",
+      "notes": "16ACHg6 (Ryzen 5800H/5900HX, RTX3060 130W/3070 140W/3080 165W) Gen6 AMD flagship; RTX3080 TGP verified."
+    },
+    {
+      "id": "psref-legion-7-16ithg6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_7_16ITHg6/Legion_7_16ITHg6_Spec.pdf",
+      "notes": "16ITHg6 (i7-11800H/i9-11980HK, RTX3060/3070/3080 same TGPs) Gen6 Intel; PSREF verified."
+    },
+    {
+      "id": "psref-legion-5-15arh7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15ARH7/Legion_5_15ARH7_Spec.pdf",
+      "notes": "15ARH7 (Ryzen 7 7735HS/6800H class, RTX3050Ti 95W) Gen7; keyboard Backlight White or 4-Zone RGB SKU variant."
+    },
+    {
+      "id": "psref-legion-5-pro-16arh7h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ARH7H/Legion_5_Pro_16ARH7H_Spec.pdf",
+      "notes": "16ARH7H (6800H/6900HX, RTX3060 140W/3070-3070Ti 150W) Gen7 Pro AMD H variant; System Lighting Y-logo."
+    },
+    {
+      "id": "psref-legion-pro-5-16arx8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16ARX8/Legion_Pro_5_16ARX8_Spec.pdf",
+      "notes": "Pro 5 16ARX8 (Ryzen 7000, RTX4050-4070) Gen8; verified PDF via ShowModel MT columns."
+    },
+    {
+      "id": "psref-loq-15irh8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/LOQ/LOQ_15IRH8/LOQ_15IRH8_Spec.pdf",
+      "notes": "LOQ 15IRH8 (13th Gen Intel, RTX4050/4060) Gen8; PSREF lists White/Blue/4-Zone RGB SKU variant; MT via ShowModel but Akamai-gated."
+    },
+    {
+      "id": "l5p-keyboard-rgb",
+      "class": "linux_implementation",
+      "url": "https://github.com/4JX/L5P-Keyboard-RGB",
+      "notes": "Compatibility table maps 2021 Gen6 4-zone RGB to controller 048d:c965, usage_page 0xff89 usage 0x00cc 33-byte report; Spectrum c197 is Gen10 only."
+    },
+    {
+      "id": "psref-legion-slim-5-16aph8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Slim_5_16APH8/Legion_Slim_5_16APH8_Spec.pdf",
+      "notes": "Slim 5 16APH8 (Ryzen 7000, RTX4050-4060) Gen8 slim; PSREF lists chassis variant."
+    },
+    {
+      "id": "psref-legion-5-15arh05",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_15ARH05/Lenovo_Legion_5_15ARH05_Spec.pdf",
+      "notes": "Lenovo Legion 5 15ARH05 2020 Renoir 4600H/4800H GTX1650/Ti only White or 4-Zone RGB SKU variant No system lighting 60/80Wh 135W/170W."
+    },
+    {
+      "id": "psref-legion-5-15arh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_15ARH05H/Lenovo_Legion_5_15ARH05H_Spec.pdf",
+      "notes": "Lenovo Legion 5 15ARH05H H-variant GTX1660Ti/RTX2060 230W same White/4-Zone RGB No system lighting. Distinct from 15ARH05."
+    },
+    {
+      "id": "psref-legion-5-15imh05",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_15IMH05/Lenovo_Legion_5_15IMH05_Spec.pdf",
+      "notes": "Lenovo Legion 5 15IMH05 2020 Comet Lake-H HM470 GTX1650/Ti White or 4-Zone RGB No system lighting."
+    },
+    {
+      "id": "psref-legion-5-15imh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_15IMH05H/Lenovo_Legion_5_15IMH05H_Spec.pdf",
+      "notes": "Lenovo Legion 5 15IMH05H 81Y6 99% +82CF 1% BR total 892 White or 4-Zone RGB GTX1660Ti/RTX2060."
+    },
+    {
+      "id": "psref-legion-5p-15arh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5P_15ARH05H/Lenovo_Legion_5P_15ARH05H_Spec.pdf",
+      "notes": "Legion 5P 15ARH05H 82GU 31 rows White or 4-Zone RGB No system lighting."
+    },
+    {
+      "id": "psref-legion-5p-15imh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5P_15IMH05H/Lenovo_Legion_5P_15IMH05H_Spec.pdf",
+      "notes": "Legion 5P 15IMH05H 82AW 188 rows White or 4-Zone RGB No system lighting."
+    },
+    {
+      "id": "psref-legion-7-15imh05",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_7_15IMH05/Lenovo_Legion_7_15IMH05_Spec.pdf",
+      "notes": "Legion 7 15IMH05 81YT 345 rows HM470 per-key vs 4-zone contradictory L5P table 048d:c955 not Spectrum."
+    },
+    {
+      "id": "psref-legion-7-15imhg05",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_7_15IMHg05/Lenovo_Legion_7_15IMHg05_Spec.pdf",
+      "notes": "Legion 7 15IMHg05 81YU 312 rows HM470 G-variant."
+    },
+    {
+      "id": "psref-legion-s7-15ach6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_S7_15ACH6/Legion_S7_15ACH6_Spec.pdf",
+      "notes": "Legion S7 15ACH6 82K8 466 rows exact key not Slim 7 White/Blue/4-Zone RGB SKU variant No system lighting."
+    },
+    {
+      "id": "psref-legion-5-15iah7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15IAH7/Legion_5_15IAH7_Spec.pdf",
+      "notes": "Legion 5 15IAH7 82RC 435 rows White or 4-Zone RGB SKU variant ADL 12th Gen."
+    },
+    {
+      "id": "psref-legion-5-15iah7h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15IAH7H/Legion_5_15IAH7H_Spec.pdf",
+      "notes": "Legion 5 15IAH7H 82RB 904 rows H-variant White or 4-Zone RGB."
+    },
+    {
+      "id": "psref-legion-5-15arh7h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15ARH7H/Legion_5_15ARH7H_Spec.pdf",
+      "notes": "Legion 5 15ARH7H 82RD 419 rows 3060 140W variant of 15ARH7 230 MTM total 230 for 15ARH7."
+    },
+    {
+      "id": "psref-legion-5-pro-16arh7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16ARH7/Legion_5_Pro_16ARH7_Spec.pdf",
+      "notes": "Legion 5 Pro 16ARH7 6800H 3050Ti 95W 16GB 230W White/Blue/4-Zone RGB No system lighting both 16ARH7/H share No system lighting."
+    },
+    {
+      "id": "psref-legion-5-pro-16iah7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16IAH7/Legion_5_Pro_16IAH7_Spec.pdf",
+      "notes": "Legion 5 Pro 16IAH7 82S0 73 rows White/Blue/4-Zone RGB 3050/Ti 230W."
+    },
+    {
+      "id": "psref-legion-5-pro-16iah7h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_Pro_16IAH7H/Legion_5_Pro_16IAH7H_Spec.pdf",
+      "notes": "Legion 5 Pro 16IAH7H 82RF 949 rows 3060 140W/3070/3070Ti 150W White/Blue/4-Zone RGB."
+    },
+    {
+      "id": "psref-legion-7-16arha7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_7_16ARHA7/Legion_7_16ARHA7_Spec.pdf",
+      "notes": "Legion 7 16ARHA7 82UH 192 rows per-key RGB 4-light system lighting logo/U-strip/power/vents RX6700M/6850M XT."
+    },
+    {
+      "id": "psref-legion-7-16iax7",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_7_16IAX7/Legion_7_16IAX7_Spec.pdf",
+      "notes": "Legion 7 16IAX7 82TD 286 rows per-key RGB No system lighting K1CN family."
+    },
+    {
+      "id": "psref-legion-pro-5-16irx8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16IRX8/Legion_Pro_5_16IRX8_Spec.pdf",
+      "notes": "Legion Pro 5 16IRX8 82WK 764 rows 4050/4060/4070 140W White/Blue/4-Zone RGB No system lighting LPCN WMI3 fans."
+    },
+    {
+      "id": "psref-legion-pro-7-16irx8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16IRX8/Legion_Pro_7_16IRX8_Spec.pdf",
+      "notes": "Legion Pro 7 16IRX8 82WR 76 rows RTX4070 140W per-key RGB KWCN family."
+    },
+    {
+      "id": "psref-legion-pro-7-16irx8h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16IRX8H/Legion_Pro_7_16IRX8H_Spec.pdf",
+      "notes": "Legion Pro 7 16IRX8H 82WQ 376 rows RTX4080/4090 175W per-key RGB KWCN."
+    },
+    {
+      "id": "psref-legion-pro-7-16arx8h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16ARX8H/Legion_Pro_7_16ARX8H_Spec.pdf",
+      "notes": "Legion Pro 7 16ARX8H flagship 7945HX 4080/4090 175W per-key RGB. Note Pro5 16ARX8 is 82WM/4050-4070 distinct product."
+    },
+    {
+      "id": "psref-loq-15ahp9",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/LOQ/LOQ_15AHP9/LOQ_15AHP9_Spec.pdf",
+      "notes": "LOQ 15AHP9 83DX 649 rows White vs 4-Zone RGB 390/259 60Wh Luna Grey Hawk Point 8040 NZCN EC 0x8227. Task mislabel Legion 5 15AHP9 does not exist."
+    },
+    {
+      "id": "psref-legion-5-15irx9",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15IRX9/Legion_5_15IRX9_Spec.pdf",
+      "notes": "Legion 5 15IRX9 83JJ 38 rows White only no RGB 4060 140W 300nits 144Hz i7-13650HX HM770."
+    },
+    {
+      "id": "psref-legion-pro-7-16irx9h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16IRX9H/Legion_Pro_7_16IRX9H_Spec.pdf",
+      "notes": "Legion Pro 7 16IRX9H 83DE N2CN Per-key RGB or White variant No system lighting 4080/4090 175W 80/99.9Wh IT5508."
+    },
+    {
+      "id": "psref-legion-9-16irx8",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_9_16IRX8/Legion_9_16IRX8_Spec.pdf",
+      "notes": "Legion 9 16IRX8 83AG MHCN Hybrid liquid cooling LA2 per-key RGB 4 lights 13980HX 4080/4090 175W."
+    },
+    {
+      "id": "psref-legion-9-16irx9",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_9_16IRX9/Legion_9_16IRX9_Spec.pdf",
+      "notes": "Legion 9 16IRX9 83G0 NXCN Hybrid liquid LA3-P per-key RGB alternative full spectrum layout."
+    },
+    {
+      "id": "psref-legion-9-18iax10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_9_18IAX10/Legion_9_18IAX10_Spec.pdf",
+      "notes": "Legion 9 18IAX10 83EY RZCN no hybrid bullet LA3-P 4 fans 275HX/290HX 5080/5090 175W per-key RGB EC 0x5263."
+    },
+    {
+      "id": "psref-legion-5-15ahp10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15AHP10/Legion_5_15AHP10_Spec.pdf",
+      "notes": "Legion 5 15AHP10 83M0 355 rows White or 24-Zone RGB Ryzen 8040 Gen10."
+    },
+    {
+      "id": "psref-legion-5-15irx10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15IRX10/Legion_5_15IRX10_Spec.pdf",
+      "notes": "Legion 5 15IRX10 83LY 1184 rows White or 24-Zone RGB QNCN 13/14HX."
+    },
+    {
+      "id": "psref-legion-5-15iax10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15IAX10/Legion_5_15IAX10_Spec.pdf",
+      "notes": "Legion 5 15IAX10 83F0 398 +83N2 7 White or 24-Zone RGB S2CN Ultra 200HX WMI2."
+    },
+    {
+      "id": "psref-legion-5-16iax10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_16IAX10/Legion_5_16IAX10_Spec.pdf",
+      "notes": "Legion 5 16IAX10 83NX 2 rows 24-Zone RGB only niche."
+    },
+    {
+      "id": "psref-legion-pro-5-16afr10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16AFR10/Legion_Pro_5_16AFR10_Spec.pdf",
+      "notes": "Legion Pro 5 16AFR10 83F2 217 rows White or 24-Zone RGB Fire Range 9955HX."
+    },
+    {
+      "id": "psref-legion-pro-5-16irx10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16IRX10/Legion_Pro_5_16IRX10_Spec.pdf",
+      "notes": "Legion Pro 5 16IRX10 83NN 334 rows White or 24-Zone RGB 14700HX."
+    },
+    {
+      "id": "psref-legion-pro-5-16iax10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16IAX10/Legion_Pro_5_16IAX10_Spec.pdf",
+      "notes": "Legion Pro 5 16IAX10 83F3 485 rows White or 24-Zone RGB 255HX/275HX."
+    },
+    {
+      "id": "psref-legion-pro-5-16iax10h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_5_16IAX10H/Legion_Pro_5_16IAX10H_Spec.pdf",
+      "notes": "Legion Pro 5 16IAX10H 83LU 257 rows White or 24-Zone RGB 251HX 5070Ti 140W."
+    },
+    {
+      "id": "psref-legion-pro-7-16iax10h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16IAX10H/Legion_Pro_7_16IAX10H_Spec.pdf",
+      "notes": "Legion Pro 7 16IAX10H 83F5 Q7CN Per-key RGB logo+front+rear RGB 5090 175W LA3."
+    },
+    {
+      "id": "psref-legion-pro-7-16afr10h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_Pro_7_16AFR10H/Legion_Pro_7_16AFR10H_Spec.pdf",
+      "notes": "Legion Pro 7 16AFR10H 83RU SMCN Per-key RGB LA3 front+rear+logo."
+    },
+    {
+      "id": "psref-legion-7-16iax10",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_7_16IAX10/Legion_7_16IAX10_Spec.pdf",
+      "notes": "Legion 7 16IAX10 83KY Per-key RGB No system lighting 115W."
+    },
+    {
+      "id": "psref-legion-5-17arh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_17ARH05H/Lenovo_Legion_5_17ARH05H_Spec.pdf",
+      "notes": "PSREF ShowModel verifies MT 82GN for Lenovo Legion 5 17ARH05H (160/160 rows); white backlight only and no system lighting."
+    },
+    {
+      "id": "psref-legion-5-17imh05h",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_17IMH05H/Lenovo_Legion_5_17IMH05H_Spec.pdf",
+      "notes": "PSREF ShowModel verifies MT 81Y8 for Lenovo Legion 5 17IMH05H (297/297 rows); white backlight only and no system lighting."
+    },
+    {
+      "id": "psref-legion-5-17imh05",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Lenovo_Legion_5_17IMH05/Lenovo_Legion_5_17IMH05_Spec.pdf",
+      "notes": "PSREF ShowModel verifies MT 82B3 for Lenovo Legion 5 17IMH05 (409/409 rows); white backlight only and no system lighting."
+    },
+    {
+      "id": "psref-ideapad-gaming-3-15ach6",
+      "class": "official",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/IdeaPad/IdeaPad_Gaming_3_15ACH6/IdeaPad_Gaming_3_15ACH6_Spec.pdf",
+      "notes": "PSREF ShowModel enumerates 2626 rows across MT 82K2 and 82MJ; keyboard, battery, and GPU power vary by SKU."
+    },
+    {
+      "id": "linux-h3cn-lineage",
+      "class": "linux_implementation",
+      "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+      "notes": "H3CN Linux model lineage supplies family-level EC/fan context; it does not establish an exact per-host controller or full-speed/WMI behavior."
+    }
+  ],
+  "models": [
+    {
+      "machine_types": [
+        "82GN"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 17ARH05H"
+      ],
+      "bios_prefixes": [
+        "FSCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name 82GN before BIOS-family fallback",
+        "bios_prefix": "FSCN",
+        "ec_window": "probe Legion EC window only after DMI/BIOS match",
+        "wmi_variant": "use model-specific WMI/EC probe",
+        "hid_controller": "probe live HID descriptor; no controller inferred here"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_only",
+        "system_lighting": false,
+        "rgb_zones": 0,
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "unknown",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-17arh05h",
+          "claim": "PSREF ShowModel enumerates MT 82GN for Lenovo Legion 5 17ARH05H in all 160 rows; white backlight only and no system lighting.",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "FSCN is the Gen5 AMD BIOS family; exact 82GN BIOS version is not verified.",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Official PSREF-verified Gen5 17-inch MT. FSCN is family-level, not an exact per-MTM BIOS claim; keyboard controller, PPT, and smart amp remain unknown."
+    },
+    {
+      "machine_types": [
+        "81Y8"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 17IMH05H"
+      ],
+      "bios_prefixes": [
+        "EFCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_only",
+        "system_lighting": false,
+        "rgb_zones": 0,
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "unknown",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-17imh05h",
+          "claim": "PSREF ShowModel enumerates MT 81Y8 for Lenovo Legion 5 17IMH05H in all 297 rows; white backlight only and no system lighting.",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "EFCN is the Gen5 Intel BIOS family; exact 81Y8 BIOS version is not verified.",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Official PSREF-verified Gen5 17-inch MT. EFCN is family-level, not an exact per-MTM BIOS claim; keyboard controller, PPT, and smart amp remain unknown."
+    },
+    {
+      "machine_types": [
+        "82B3"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 17IMH05"
+      ],
+      "bios_prefixes": [
+        "EFCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_only",
+        "system_lighting": false,
+        "rgb_zones": 0,
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "unknown",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-17imh05",
+          "claim": "PSREF ShowModel enumerates MT 82B3 for Lenovo Legion 5 17IMH05 in all 409 rows; white backlight only and no system lighting.",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "EFCN is the Gen5 Intel BIOS family; exact 82B3 BIOS version is not verified.",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Official PSREF-verified Gen5 17-inch MT. EFCN is family-level, not an exact per-MTM BIOS claim; keyboard controller, PPT, and smart amp remain unknown."
+    },
+    {
+      "machine_types": [
+        "83DG"
+      ],
+      "aliases": [
+        "Legion Y7000P IRX9",
+        "Legion 5 16IRX9"
+      ],
+      "bios_prefixes": [
+        "NMCN"
+      ],
+      "family": "legion-5",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name 83DG before BIOS-family fallback",
+        "bios_prefix": "NMCN",
+        "ec_window": "EC fallback is observed; verify the EC window live",
+        "wmi_variant": "no fan control observed; do not infer a WMI fan path",
+        "hid_controller": "probe 048d:c197; absence is observed, not family-wide proof"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_sku_variant",
+        "rgb_zones": "unknown",
+        "rgb_protocol": "none_observed",
+        "fan_count": 2,
+        "fan_rpm_backend": "ec_fallback",
+        "fan_control": false,
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "observed",
+        "smart_amp_aw88399": false
+      },
+      "evidence": [
+        {
+          "source": "local-telemetry",
+          "path": "telemetry-triage/y7000p-0.2.7-latest.json",
+          "claim": "NMCN34WW; no 048d:c197; ec-fallback RPM around 4010; no fan control",
+          "confidence": "high"
+        },
+        {
+          "source": "local-telemetry",
+          "path": "IONOS telemetry.reports, 2026-08-31",
+          "claim": "0.2.8 reports have CPU temperatures around 48-53 C; previous 0 C was fixed",
+          "confidence": "high"
+        },
+        {
+          "source": "psref-legion-5-16irx9",
+          "claim": "Y7000P IRX9 is the Chinese-market alias of the Legion 5 16IRX9 chassis",
+          "confidence": "high"
+        }
+      ],
+      "notes": "The observed host has white-only behavior, but the catalog deliberately does not claim every 83DG configuration is white-only."
+    },
+    {
+      "machine_types": [
+        "83JG"
+      ],
+      "aliases": [
+        "LOQ 15AHP10"
+      ],
+      "bios_prefixes": [
+        "R8CN"
+      ],
+      "family": "loq-15",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name 83JG before BIOS-family fallback",
+        "bios_prefix": "R8CN",
+        "ec_window": "ITE IT5508 fan tach via yogafan EC 0xFE/0xFF; WMI fan input is locked at 0 RPM",
+        "wmi_variant": "lenovo_wmi_other for control path; WMI3 temperature methods may fail; full-speed-only behavior remains possible",
+        "hid_controller": "probe 048d:c197; 24-zone RGB controller remains unknown"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "not_spectrum_observed",
+        "fan_count": 2,
+        "fan_rpm_backend": "yogafan_read_only",
+        "fan_control": "unknown_or_wmi_separate",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "cpu_limits_observed",
+        "smart_amp_aw88399": false
+      },
+      "evidence": [
+        {
+          "source": "psref-loq-15ahp10",
+          "claim": "white backlight and optional 24-zone RGB; RTX 5050/5060 at 100 W",
+          "confidence": "high"
+        },
+        {
+          "source": "local-telemetry",
+          "path": "telemetry-triage/loq-0.2.6-deep.json",
+          "claim": "R8CN23WW; no Spectrum HID observed; WMI fan input remained zero; CPU PPT attributes observed",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/467",
+          "claim": "83JG/IT5508 device-specific support context",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "R8CN may cover sibling SKUs. Do not apply exact 83JG keyboard or fan claims to every R8CN machine without telemetry."
+    },
+    {
+      "machine_types": [
+        "83RU"
+      ],
+      "aliases": [
+        "Legion Pro 7 16AFR10H"
+      ],
+      "bios_prefixes": [
+        "SMCN"
+      ],
+      "family": "legion-pro-7",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name 83RU before BIOS-family fallback",
+        "bios_prefix": "SMCN",
+        "ec_window": "probe the model-specific EC window after DMI/BIOS match",
+        "wmi_variant": "lenovo_wmi_other fan/RPM and control path",
+        "hid_controller": "048d:c197 Spectrum HID controller"
+      },
+      "capabilities": {
+        "keyboard_backlight": "spectrum_rgb",
+        "rgb_zones": "per_key_and_chassis_zones",
+        "rgb_protocol": "048d:c197",
+        "fan_count": 3,
+        "fan_rpm_backend": "lenovo_wmi_other",
+        "fan_control": true,
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "observed",
+        "smart_amp_aw88399": true
+      },
+      "evidence": [
+        {
+          "source": "local-telemetry",
+          "path": "research/SPECTRUM-ZONES.md",
+          "claim": "048d:c197 Spectrum controller and zone layout observed",
+          "confidence": "high"
+        },
+        {
+          "source": "local-telemetry",
+          "path": "IONOS telemetry.reports, 2026-08-31",
+          "claim": "Spectrum RGB and lenovo_wmi_other observed",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "Gen10 WMI/EC support family",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "This is the user's 83RU reference host. TGP must come from live nvidia-smi when available; name-based values are fallback heuristics."
+    },
+    {
+      "machine_types": [
+        "83F5"
+      ],
+      "aliases": [
+        "Legion Pro 7 16IAX10H"
+      ],
+      "bios_prefixes": [
+        "Q7CN"
+      ],
+      "family": "legion-pro-7",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "spectrum_rgb_expected",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "048d:c197_expected",
+        "fan_count": 3,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/385",
+          "claim": "83F5/Q7CN Gen10 support context",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "family grouping cross-check",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Expected capabilities require live probing; no matching fleet report was available in the current evidence set."
+    },
+    {
+      "machine_types": [
+        "83KY"
+      ],
+      "aliases": [
+        "Legion 7i 16IAX10"
+      ],
+      "bios_prefixes": [
+        "Q7CN"
+      ],
+      "family": "legion-7",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "spectrum_rgb_expected",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "048d:c197_expected",
+        "fan_count": 3,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/409",
+          "claim": "83KY/Q7CN EC dump and support context",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "family grouping cross-check",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Expected capabilities require live probing; no matching fleet report was available in the current evidence set."
+    },
+    {
+      "machine_types": [
+        "83DF"
+      ],
+      "aliases": [
+        "Legion Pro 5 16IRX9"
+      ],
+      "bios_prefixes": [
+        "N0CN"
+      ],
+      "family": "legion-pro-5",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_or_none_observed",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux",
+          "claim": "83DF/N0CN DMI support context",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83DF is grouped as Legion Pro 5",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "PSREF keyboard options vary by SKU; this row must not force RGB or white on an unseen unit."
+    },
+    {
+      "machine_types": [
+        "83DH"
+      ],
+      "aliases": [
+        "Legion Slim 5 16AHP9"
+      ],
+      "bios_prefixes": [
+        "NRCN"
+      ],
+      "family": "legion-slim-5",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux",
+          "claim": "83DH/NRCN DMI support context",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83DH is grouped as Legion Slim 5",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Exact keyboard, GPU and PPT capabilities remain SKU-dependent and require live probing."
+    },
+    {
+      "machine_types": [
+        "82WS"
+      ],
+      "aliases": [
+        "Legion Pro 7 Gen 8/9 variants"
+      ],
+      "bios_prefixes": [
+        "KWCN",
+        "LPCN"
+      ],
+      "family": "legion-pro-7",
+      "generation": "8_or_9",
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "four_zone_rgb_or_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": "unknown_per_sku",
+        "fan_rpm_backend": "legion_laptop_or_lenovo_wmi_other",
+        "fan_control": "unknown",
+        "ppt": "unknown",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "url": "https://raw.githubusercontent.com/LenovoLegionToolkit-Team/LenovoLegionToolkit/master/LenovoLegionToolkit.Lib/Utils/Compatibility.cs",
+          "claim": "machine types grouped under Legion Pro 7",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux",
+          "claim": "KWCN/LPCN Linux support context",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Grouped family row trimmed 2026-09-01: exact rows now exist for 82WR (Pro7 16IRX8), 82WQ (Pro7 16IRX8H), 83DE (Pro7 16IRX9H); remaining 82WS is family guess low confidence; use live DMI/HID probe."
+    },
+    {
+      "machine_types": [
+        "82JW"
+      ],
+      "aliases": [
+        "Legion 5 15ACH6"
+      ],
+      "bios_prefixes": [
+        "GKCN"
+      ],
+      "family": "legion-5",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "unknown_not_wmi3",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15ach6",
+          "claim": "PSREF 15ACH6: White/Blue/4-Zone RGB SKU variant; No system lighting; ShowModel 761 rows MT 82JW 760/761",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1522",
+          "claim": "GKCN DMI allowlist family Legion 5 15ACH6H Gen6 model_v0 EC 0x8227",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "Compatibility.cs MT 82JW grouped as Legion 5 15ACH6 (MachineTypeMap, GetIsExcludedFromPanelLenovoLighting)",
+          "confidence": "medium"
+        },
+        {
+          "source": "l5p-keyboard-rgb",
+          "claim": "2021 4-zone RGB maps to 048d:c965 33-byte HID; not Spectrum c197",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "PSREF proves three backlight SKUs under same MT; do not infer RGB from family. BIOS GKCN is family-level, not per-MTM verified; fan PPT not WMI3 on Gen6."
+    },
+    {
+      "machine_types": [
+        "82JK"
+      ],
+      "aliases": [
+        "Legion 5 15ITH6"
+      ],
+      "bios_prefixes": [
+        "H1CN"
+      ],
+      "family": "legion-5",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "unknown_not_wmi3",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15ith6",
+          "claim": "PSREF 15ITH6: White/Blue/4-Zone RGB variant; No system lighting; ShowModel 646 rows MT 82JK 646/646",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1585",
+          "claim": "H1CN DMI allowlist Gen6 Intel HM570 model_v0",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "Toolkit groups 82JK under Legion 5 15ITH6; panel lighting excluded (no chassis bar)",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Intel counterpart to 82JW. Same BIOS-family caveat; do not copy GKCN EC offsets without live probe."
+    },
+    {
+      "machine_types": [
+        "82JQ"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16ACH6H"
+      ],
+      "bios_prefixes": [
+        "GKCN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v1_gated",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16ach6h",
+          "claim": "PSREF 16ACH6H: 3060 130W/3070 140W, White/Blue/4-Zone RGB plus Y-logo lighting; 80Wh 230W/300W",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/152",
+          "claim": "dmidecode 82JQ Version Legion 5 Pro 16ACH6H BIOS GKCN58WW EC 0x8227; 4-zone and white SKUs both observed on same MT",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "Compatibility.cs GodMode V1 gating GKCN>=46 before powerlimits exposed",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "High confidence MT↔name↔BIOS via 4 live owner reports. Do not apply 16ACH6 TGP (3050/Ti) to H variant; keyboard remains SKU variant within MT."
+    },
+    {
+      "machine_types": [
+        "82JF"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16ITH6"
+      ],
+      "bios_prefixes": [
+        "H1CN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v1_gated",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16ith6",
+          "claim": "PSREF 16ITH6: 3050/Ti 95W Advanced Optimus, White/Blue/4-Zone RGB",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/88",
+          "claim": "dmidecode 82JF Legion 5 Pro 16ITH6 H1CN53WW EC 0x8227 4-zone observed; keyboard/Y-logo via WMI, I/O LED failed",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Intel 16Pro counterpart to 82JQ. Same sku_variant warning; Spectrum c197 not present on Gen6."
+    },
+    {
+      "machine_types": [
+        "82K6"
+      ],
+      "aliases": [
+        "Legion 7 16ITHg6"
+      ],
+      "bios_prefixes": [
+        "H1CN"
+      ],
+      "family": "legion-7",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_varies_by_sku",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v1_gated",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-7-16ithg6",
+          "claim": "PSREF 16ITHg6: i7-11800H/i9-11980HK RTX3060 130W/3070 140W/3080 165W; PSREF ShowModel exposes MT column 82K6 (447 rows sample, high)",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1550",
+          "claim": "H1CN overlaps Gen6 Legion 7 families; per-key vs 4-zone varies",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "PSREF ShowModel provides high confidence MT 82K6 for Legion 7 16ITHg6; PSREF PDF verified via pdftotext. Per-key RGB is SKU-dependent; L5P table shows Legion 7 Gen6 per-key uses different comms than c965."
+    },
+    {
+      "machine_types": [
+        "82B5"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 15ARH05"
+      ],
+      "bios_prefixes": [
+        "FSCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15arh05",
+          "claim": "PSREF 7p 4600H/4800H GTX1650/Ti White or 4-Zone RGB No system lighting ShowModel 757 rows MT 82B5 100%",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+          "claim": "FSCN family DMI allowlist model_fscn EC 0x8227 2020",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "BIOS FSCN is family-level; per-MTM BIOS remains unverified until live dmidecode on 82B5; keyboard remains SKU variant within MT; fan PPT not WMI3 on Gen5."
+    },
+    {
+      "machine_types": [
+        "82B1"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 15ARH05H"
+      ],
+      "bios_prefixes": [
+        "FSCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15arh05h",
+          "claim": "PSREF H-variant GTX1660Ti/RTX2060 230W White/4-Zone RGB No system lighting ShowModel 480 rows MT 82B1 100%",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "FSCN family EC 0x8227",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Distinct product from 82B5; do not merge TGP/adapter/weight; BIOS family-level."
+    },
+    {
+      "machine_types": [
+        "82AU"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 15IMH05"
+      ],
+      "bios_prefixes": [
+        "EFCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15imh05",
+          "claim": "PSREF 779 rows MT 82AU 779/779 White or 4-Zone RGB No system lighting HM470",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "EFCN family EC 0x8227 model_efcn",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "BIOS EFCN family-level; fan_count expected 2 via model_efcn; PPT WMI3 not on Gen5."
+    },
+    {
+      "machine_types": [
+        "81Y6",
+        "82CF"
+      ],
+      "aliases": [
+        "Lenovo Legion 5 15IMH05H"
+      ],
+      "bios_prefixes": [
+        "EFCN"
+      ],
+      "family": "legion-5",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15imh05h",
+          "claim": "PSREF total 892 81Y6 883 +82CF 9 BR Portuguese; both HM470 White/4-Zone RGB No system lighting",
+          "confidence": "high"
+        }
+      ],
+      "notes": "82CF is 1% BR-only sub-MT under same product key; BIOS EFCN family-level; do not infer RGB from family."
+    },
+    {
+      "machine_types": [
+        "82GU"
+      ],
+      "aliases": [
+        "Lenovo Legion 5P 15ARH05H"
+      ],
+      "bios_prefixes": [
+        "FSCN"
+      ],
+      "family": "legion-5P",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5p-15arh05h",
+          "claim": "ShowModel 31 rows MT 82GU 31/31 official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "No fleet telemetry for 82GU; BIOS family-level FSCN; keep sku_variant."
+    },
+    {
+      "machine_types": [
+        "82AW"
+      ],
+      "aliases": [
+        "Lenovo Legion 5P 15IMH05H"
+      ],
+      "bios_prefixes": [
+        "EFCN"
+      ],
+      "family": "legion-5P",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5p-15imh05h",
+          "claim": "ShowModel 188 rows MT 82AW 188/188 official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "EFCN family-level; no live dmidecode telemetry."
+    },
+    {
+      "machine_types": [
+        "81YT"
+      ],
+      "aliases": [
+        "Lenovo Legion 7 15IMH05"
+      ],
+      "bios_prefixes": [
+        "BHCN"
+      ],
+      "family": "legion-7",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected_048d_c955_contradictory",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-7-15imh05",
+          "claim": "ShowModel 345 rows MT 81YT 345/345 HM470 per-key RGB contradictory via L5P c955",
+          "confidence": "high"
+        }
+      ],
+      "notes": "BIOS BHCN family-level only; L5P table says Legion 7 per-key uses different comms than c965; do not assert c965."
+    },
+    {
+      "machine_types": [
+        "81YU"
+      ],
+      "aliases": [
+        "Lenovo Legion 7 15IMHg05"
+      ],
+      "bios_prefixes": [
+        "BHCN"
+      ],
+      "family": "legion-7",
+      "generation": 5,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_or_four_zone_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "godmode_v0_expected",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-7-15imhg05",
+          "claim": "ShowModel 312 rows MT 81YU 312/312 HM470 G-variant official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "G-variant distinction; BIOS family-level."
+    },
+    {
+      "machine_types": [
+        "82JS"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16ACH6"
+      ],
+      "bios_prefixes": [
+        "GKCN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v1_gated",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16ach6",
+          "claim": "PSREF 5p 131197B RTX3050/Ti 90/95W 16GB 230W ShowModel 218 rows MT 82JS only official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "GKCN family model_v0 EC 0x8227",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Distinct from 82JQ H-variant (3060/3070 130/140W 32GB 300W); do not apply H TGP to non-H; 82JS BIOS inferred family-level GKCN until live dmidecode."
+    },
+    {
+      "machine_types": [
+        "82K8"
+      ],
+      "aliases": [
+        "Legion S7 15ACH6"
+      ],
+      "bios_prefixes": [
+        "GKCN"
+      ],
+      "family": "legion-s7",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "godmode_v1_gated",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-s7-15ach6",
+          "claim": "PSREF official key Legion_S7_15ACH6 not Slim 7 ShowModel 466 rows MT 82K8 466/466 official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "GKCN family EC 0x8227",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Marketing alias Legion Slim 7 15ACH6 is contradictory; correct key is Legion S7 15ACH6; BIOS family-level GKCN."
+    },
+    {
+      "machine_types": [
+        "82RC"
+      ],
+      "aliases": [
+        "Legion 5 15IAH7"
+      ],
+      "bios_prefixes": [
+        "J2CN"
+      ],
+      "family": "legion-5",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15iah7",
+          "claim": "ShowModel 435 rows MT 82RC 435/435 White 289 vs 4-Zone 146 official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "J2CN family per legion-laptop.c? Actually JUCN family for AMD but 15IAH7 Intel family inferred J2CN medium",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "BIOS prefix unverified per-MTM; J2CN is family-level Intel 12th Gen; Slim 7 15IAH7 alias contradictory — not a separate product."
+    },
+    {
+      "machine_types": [
+        "82RB"
+      ],
+      "aliases": [
+        "Legion 5 15IAH7H"
+      ],
+      "bios_prefixes": [
+        "J2CN"
+      ],
+      "family": "legion-5",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15iah7h",
+          "claim": "ShowModel 904 rows sampled 904 82RB total White/4-Zone RGB official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "H-variant higher TGP 3050/3060; BIOS family-level."
+    },
+    {
+      "machine_types": [
+        "82RE"
+      ],
+      "aliases": [
+        "Legion 5 15ARH7"
+      ],
+      "bios_prefixes": [
+        "JUCN"
+      ],
+      "family": "legion-5",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15arh7",
+          "claim": "PSREF 2022-12-25 230 rows 100/100 sampled MT 82RE no 82RD; 3050/3050Ti 95W White/4-Zone RGB No system lighting official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Single-MT product 82RE; BIOS JUCN family-level AMD."
+    },
+    {
+      "machine_types": [
+        "82RD"
+      ],
+      "aliases": [
+        "Legion 5 15ARH7H"
+      ],
+      "bios_prefixes": [
+        "JUCN"
+      ],
+      "family": "legion-5",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15arh7h",
+          "claim": "PSREF 419 rows 82RD 3060 140W variant official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Do not conflate 95W vs 140W TGP with 82RE."
+    },
+    {
+      "machine_types": [
+        "82RG"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16ARH7H"
+      ],
+      "bios_prefixes": [
+        "JUCN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "platform_profiles": [
+          "quiet",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16arh7h",
+          "claim": "PSREF 2023-12-25 6800H/6900HX 3060 140W/3070-3070Ti 150W 32GB 230/300W White/Blue/4-Zone RGB No system lighting official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/188",
+          "claim": "dmidecode 82RG JUCN63WW 6800H+3070Ti + JUCN58WW 6800H+3070 both verified high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Correction: PSREF both 16ARH7 and 16ARH7H state No system lighting — previous catalog Y-logo note was erroneous; 16ARH7 non-H MT unknown requires dmidecode."
+    },
+    {
+      "machine_types": [
+        "82RF"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16IAH7H"
+      ],
+      "bios_prefixes": [
+        "J2CN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16iah7h",
+          "claim": "PSREF total 949 rows MT 82RF 949/949 official high White/Blue/4-Zone RGB 300W",
+          "confidence": "high"
+        }
+      ],
+      "notes": "H-variant 300W adapter; non-H 82S0 is 230W."
+    },
+    {
+      "machine_types": [
+        "82S0"
+      ],
+      "aliases": [
+        "Legion 5 Pro 16IAH7"
+      ],
+      "bios_prefixes": [
+        "J2CN"
+      ],
+      "family": "legion-5-pro",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-pro-16iah7",
+          "claim": "PSREF total 73 rows MT 82S0 73/73 official high 3050/Ti 95W",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Non-H 230W only; do not apply 82RF TGP."
+    },
+    {
+      "machine_types": [
+        "82UH"
+      ],
+      "aliases": [
+        "Legion 7 16ARHA7"
+      ],
+      "bios_prefixes": [
+        "KFCN"
+      ],
+      "family": "legion-7",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb",
+        "rgb_zones": "per_key_and_chassis_4_lights_fixed",
+        "rgb_protocol": "unknown_legacy_per_key_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-7-16arha7",
+          "claim": "PSREF total 192 rows MT 82UH 192/192 per-key RGB 4-light system lighting official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "KFCN family EC 0x8227 model_kfcn per LLL",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "BIOS KFCN family-level, not per-MTM verified live; rgb_protocol unknown_not_spectrum do not reuse c965/c197; controller unknown until HID probe."
+    },
+    {
+      "machine_types": [
+        "82TD"
+      ],
+      "aliases": [
+        "Legion 7 16IAX7",
+        "Lenovo Legion 7i (16\", 7)"
+      ],
+      "bios_prefixes": [
+        "K1CN"
+      ],
+      "family": "legion-7",
+      "generation": 7,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb",
+        "rgb_zones": "per_key_and_chassis_unknown",
+        "rgb_protocol": "unknown_legacy_per_key_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected_via_ec_curve",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-7-16iax7",
+          "claim": "PSREF total 286 rows MT 82TD 286/286 per-key RGB No system lighting official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "K1CN family EC 0x8227",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "No fleet telemetry for 82TD; rgb not Spectrum c197 nor 4-zone c965; PPT must be probed live; K1CN family-level."
+    },
+    {
+      "machine_types": [
+        "82WK"
+      ],
+      "aliases": [
+        "Legion Pro 5 16IRX8"
+      ],
+      "bios_prefixes": [
+        "LPCN"
+      ],
+      "family": "legion-pro-5",
+      "generation": 8,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_blue_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_wmi3",
+        "fan_control": "unknown_minifancurve_no_effect_reported",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-5-16irx8",
+          "claim": "PSREF 764 rows MT 82WK 764/764 White/Blue/4-Zone RGB No system lighting official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "LPCN model_lpcn EC 0x5508? Actually 5508 via Q? But fancurve has_minifancurve false for LPCN",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "LPCN has_minifancurve false; fancurve writes no effect reported for 82WM sibling; PPT ranges probe live; BIOS LPCN family-level."
+    },
+    {
+      "machine_types": [
+        "82WR"
+      ],
+      "aliases": [
+        "Legion Pro 7 16IRX8"
+      ],
+      "bios_prefixes": [
+        "KWCN"
+      ],
+      "family": "legion-pro-7",
+      "generation": 8,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 3,
+        "fan_rpm_backend": "legion_laptop_wmi3",
+        "fan_control": "has_fan_unlock_expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-7-16irx8",
+          "claim": "PSREF 76 rows MT 82WR 76/76 RTX4070 140W per-key official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "KWCN model_kwcn EC 0x5508 has_fan_unlock",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "BIOS KWCN family-level not per-MTM verified live for 82WR; prior catalog lumped 82WR/82WQ together erroneously."
+    },
+    {
+      "machine_types": [
+        "82WQ"
+      ],
+      "aliases": [
+        "Legion Pro 7 16IRX8H"
+      ],
+      "bios_prefixes": [
+        "KWCN"
+      ],
+      "family": "legion-pro-7",
+      "generation": 8,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 3,
+        "fan_rpm_backend": "legion_laptop_wmi3",
+        "fan_control": "has_fan_unlock_expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-7-16irx8h",
+          "claim": "PSREF 376 rows MT 82WQ 376/376 RTX4080/4090 175W per-key official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Split from previous lumped entry; KWCN family-level; do not reuse 83DE N2CN BIOS."
+    },
+    {
+      "machine_types": [
+        "83DX"
+      ],
+      "aliases": [
+        "LOQ 15AHP9"
+      ],
+      "bios_prefixes": [
+        "NZCN"
+      ],
+      "family": "loq-15",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku_four_when_rgb",
+        "rgb_protocol": "wmi2_not_hid_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "wmi3_expected",
+        "fan_control": "minifancurve_expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-loq-15ahp9",
+          "claim": "PSREF 649 rows MT 83DX 649/649 White 390 vs 4-Zone RGB 259 Luna Grey official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+          "claim": "DMI ident NZCN -> model_nzcn LOQ 15AHP9 EC 0x8227 WMI3 fans WMI2 keyboard",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Task mislabel 'Legion 5 15AHP9' does not exist PSREF 404; official is LOQ 15AHP9. BIOS NZCN family-level; HID not Spectrum not c965."
+    },
+    {
+      "machine_types": [
+        "83JJ"
+      ],
+      "aliases": [
+        "Legion 5 15IRX9"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-5",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_only_observed_38_skus",
+        "rgb_zones": "0_white_only",
+        "rgb_protocol": "not_observed_white_only",
+        "fan_count": 2,
+        "fan_rpm_backend": "unknown_probe_live",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15irx9",
+          "claim": "PSREF 38 rows MT 83JJ 38/38 White Backlit only no RGB official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "All 38 official SKUs are White only; PSREF does not list RGB variant for this product key; BIOS unknown no DMI allowlist entry for 83JJ; family inference not promoted."
+    },
+    {
+      "machine_types": [
+        "83DE"
+      ],
+      "aliases": [
+        "Legion Pro 7 16IRX9H"
+      ],
+      "bios_prefixes": [
+        "N2CN"
+      ],
+      "family": "legion-pro-7",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb_or_white_sku_variant",
+        "rgb_zones": "per_key_when_rgb_sku",
+        "rgb_protocol": "legacy_not_spectrum_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "expected",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-7-16irx9h",
+          "claim": "PSREF 14900HX 4080/4090 175W Per-key RGB or White No system lighting 80/99.9Wh official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1938",
+          "claim": "DMI 83DE N2CN Legion Pro 7 16IRX9H high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "PSREF product key is 16IRX9H not 16IRX9 (404); prior catalog lumped 82WR/82WQ/82WS/83DE as KWCN/LPCN family is outdated — now exact N2CN; hybrid liquid-metal in PSREF, EC IT5508 inferred."
+    },
+    {
+      "machine_types": [
+        "83AG"
+      ],
+      "aliases": [
+        "Legion 9 16IRX8"
+      ],
+      "bios_prefixes": [
+        "MHCN"
+      ],
+      "family": "legion-9",
+      "generation": 8,
+      "detection_method": {
+        "machine_type": "DMI product name 83AG before BIOS-family fallback",
+        "bios_prefix": "MHCN",
+        "ec_window": "EC window/controller unverified; do not infer Legion-9 offsets",
+        "wmi_variant": "WMI3 fan path is contradictory and requires live validation",
+        "hid_controller": "alternative full-spectrum controller; not 048d:c197",
+        "pump_telemetry": "unverified"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb",
+        "rgb_zones": "per_key_and_chassis_4_lights",
+        "rgb_protocol": "unknown_alternative_full_spectrum",
+        "fan_count": 3,
+        "fan_rpm_backend": "wmi3_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-9-16irx8",
+          "claim": "PSREF Hybrid liquid cooling LA2 per-key RGB 13980HX 4080/4090 175W official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "Toolkit 83AG Gen8 alternative full spectrum layout + GH #170 dmidecode MHCN40WW",
+          "confidence": "high"
+        }
+      ],
+      "notes": "MHCN lacks kernel model_config in LLL; fan WMI3 but live shows 0RPM before fix contradictory; alternative spectrum layout not c197."
+    },
+    {
+      "machine_types": [
+        "83G0"
+      ],
+      "aliases": [
+        "Legion 9 16IRX9"
+      ],
+      "bios_prefixes": [
+        "NXCN"
+      ],
+      "family": "legion-9",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name 83G0 before BIOS-family fallback",
+        "bios_prefix": "NXCN",
+        "ec_window": "EC 0x5263 via model_nxcn; validate live before relying on offsets",
+        "wmi_variant": "WMI3 fans; 0 RPM/PWM behavior is contradictory and requires live validation",
+        "hid_controller": "alternative full-spectrum controller; not 048d:c197",
+        "pump_telemetry": "unverified"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb",
+        "rgb_zones": "per_key_and_chassis_4_lights",
+        "rgb_protocol": "unknown_alternative_full_spectrum",
+        "fan_count": 3,
+        "fan_rpm_backend": "wmi3_expected_contradictory_0rpm",
+        "fan_control": "contradictory_no_PWM_at_82C",
+        "ppt": "WMI_platform_profile_works",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-9-16irx9",
+          "claim": "PSREF Hybrid liquid LA3-P per-key RGB 14900HX 4080/4090 175W official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1946",
+          "claim": "model_nxcn EC 0x5263 WMI3 fans high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "GH #342/371/479 require force=1; sensors 0C/0RPM before fix contradictory; WMI3 fan path needs validation; alternative spectrum."
+    },
+    {
+      "machine_types": [
+        "83EY"
+      ],
+      "aliases": [
+        "Legion 9 18IAX10"
+      ],
+      "bios_prefixes": [
+        "RZCN"
+      ],
+      "family": "legion-9",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name 83EY before BIOS-family fallback",
+        "bios_prefix": "RZCN",
+        "ec_window": "EC 0x5263; ACPI fan duty registers at 0xC5A0 require live validation",
+        "wmi_variant": "ACPI FA1S/FA2S/FA3S/FA4S duty path; no fan curve/full-speed control",
+        "hid_controller": "alternative controller; not 048d:c197",
+        "pump_telemetry": "unverified"
+      },
+      "capabilities": {
+        "keyboard_backlight": "per_key_rgb",
+        "rgb_zones": "per_key_plus_logo_and_U_strip_no_hinge_cap",
+        "rgb_protocol": "unknown_skip_ylogo_skip_ioport",
+        "fan_count": 4,
+        "fan_rpm_backend": "ACPI_FA1S_FA2S_FA3S_FA4S_duty_at_0xC5A0",
+        "fan_control": "no_fancurve_no_fullspeed_ACPI_duty_only",
+        "ppt": "skip_oc_controls_hide_powerlimit",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-9-18iax10",
+          "claim": "PSREF 9p HM870 275HX/290HX 5080/5090 175W no hybrid bullet LA3-P 4 fans 77C threshold official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/pull/417",
+          "claim": "PR 417 RZCN32WW EC 0x5263 duty fans 4 stress 5.8k RPM high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Do NOT claim liquid cooling for 83EY — PSREF does not list hybrid thermal; skip_ylogo/skip_ioport flags distinct from 83AG/83G0."
+    },
+    {
+      "machine_types": [
+        "83M0"
+      ],
+      "aliases": [
+        "Legion 5 15AHP10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15ahp10",
+          "claim": "PSREF 355 rows MT 83M0 355/355 White or 24-Zone RGB official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Distinct from LOQ 15AHP10 83JG; BIOS unverified — do not infer; 24-Zone WMI2 not Spectrum c197; no live telemetry in fleet."
+    },
+    {
+      "machine_types": [
+        "83LY"
+      ],
+      "aliases": [
+        "Legion 5 15IRX10"
+      ],
+      "bios_prefixes": [
+        "QNCN"
+      ],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_wmi3",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15irx10",
+          "claim": "PSREF 1184 rows MT 83LY 1184/1184 White or 24-Zone RGB official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1910",
+          "claim": "ident QNCN EC 0x5508 model_qncn high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "BIOS QNCN verified via LLL model_qncn EC 0x5508."
+    },
+    {
+      "machine_types": [
+        "83F0",
+        "83N2"
+      ],
+      "aliases": [
+        "Legion 5 15IAX10"
+      ],
+      "bios_prefixes": [
+        "S2CN"
+      ],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-15iax10",
+          "claim": "PSREF 405 rows 83F0 398 +83N2 7 BR variant White or 24-Zone RGB official high",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1983",
+          "claim": "ident S2CN EC 0x5508 model_s2cn high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "83N2 is 7 BR-PT sub-variant under same product key; BIOS S2CN EC 0x5508 loq_v1 offsets distinct from 0x8227."
+    },
+    {
+      "machine_types": [
+        "83NX"
+      ],
+      "aliases": [
+        "Legion 5 16IAX10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "24_zone_rgb_only",
+        "rgb_zones": "24_zone_fixed",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "unknown",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-5-16iax10",
+          "claim": "PSREF 2 rows MT 83NX 2/2 24-Zone RGB only no White variant official high but low sample",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Extremely small sample 2 US NA models niche; do not claim 83NX is exclusive MT for worldwide 16IAX10; BIOS unknown."
+    },
+    {
+      "machine_types": [
+        "83F2"
+      ],
+      "aliases": [
+        "Legion Pro 5 16AFR10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-5-16afr10",
+          "claim": "PSREF 217 rows MT 83F2 217/217 White or 24-Zone RGB official high Fire Range 9955HX",
+          "confidence": "high"
+        }
+      ],
+      "notes": "BIOS unverified for 83F2; distinct from Pro5 16ARX8 82WM/4070 tier."
+    },
+    {
+      "machine_types": [
+        "83NN"
+      ],
+      "aliases": [
+        "Legion Pro 5 16IRX10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-5-16irx10",
+          "claim": "PSREF 334 rows MT 83NN 334/334 White or 24-Zone RGB 14700HX official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "BIOS unverified; no live telemetry."
+    },
+    {
+      "machine_types": [
+        "83F3"
+      ],
+      "aliases": [
+        "Legion Pro 5 16IAX10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-5-16iax10",
+          "claim": "PSREF 485 rows MT 83F3 485/485 White or 24-Zone RGB 255HX/275HX official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "BIOS unverified."
+    },
+    {
+      "machine_types": [
+        "83LU"
+      ],
+      "aliases": [
+        "Legion Pro 5 16IAX10H"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_24_zone_rgb_sku_variant",
+        "rgb_zones": "24_zone_optional",
+        "rgb_protocol": "wmi2_expected_not_spectrum",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_control": "expected",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-legion-pro-5-16iax10h",
+          "claim": "PSREF 257 rows MT 83LU 257/257 White or 24-Zone RGB 251HX 5070Ti 140W official high",
+          "confidence": "high"
+        }
+      ],
+      "notes": "H-variant distinguishes 5070Ti 140W vs non-H higher tier; BIOS unknown."
+    },
+    {
+      "machine_types": [
+        "82K2",
+        "82MJ"
+      ],
+      "aliases": [
+        "IdeaPad Gaming 3 15ACH6"
+      ],
+      "bios_prefixes": [
+        "H3CN"
+      ],
+      "family": "ideapad-gaming-3",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name 82K2 or 82MJ before BIOS-family fallback",
+        "bios_prefix": "H3CN",
+        "ec_window": "EC 0x8227; fan tachometer is unavailable on the observed H3CN host",
+        "wmi_variant": "WMI fan control is limited/possibly full-speed-only; probe live per host",
+        "hid_controller": "probe legacy 048d:c963; do not reuse Spectrum 048d:c197"
+      },
+      "capabilities": {
+        "keyboard_backlight": "white_or_four_zone_rgb_sku_variant",
+        "rgb_zones": "unknown_per_sku (4 when RGB SKU)",
+        "rgb_protocol": "legacy_048d_c963_expected",
+        "fan_count": 2,
+        "fan_rpm_backend": "unknown_or_unavailable_h3cn",
+        "fan_control": "unknown_or_wmi_fullspeed_only",
+        "ppt": "unknown",
+        "tgp": "sku_dependent 85W RTX3050/3050Ti 90W RTX3060 N/A others",
+        "battery": "45Wh_or_60Wh_sku_variant",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "psref-ideapad-gaming-3-15ach6",
+          "claim": "PSREF ShowModel lists 2626 rows: MT 82K2 has 2615 rows and MT 82MJ has 11 rows; the product includes white and four-zone RGB, 45Wh/60Wh batteries, and SKU-dependent GPU power.",
+          "confidence": "high"
+        },
+        {
+          "source": "local-telemetry",
+          "path": "telemetry-triage/idea-sample.json",
+          "claim": "Observed 82K2/H3CN host is telemetry-degraded: both fan RPMs are unavailable, PPT attributes are empty, and no 048d:c197 Spectrum controller is detected.",
+          "confidence": "high"
+        },
+        {
+          "source": "linux-h3cn-lineage",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+          "claim": "H3CN model lineage supports the IdeaPad Gaming 3 family context, but the H3CN fan/EC limits do not establish an exact per-host controller; fan control may be unavailable or WMI full-speed-only.",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Keep keyboard, RGB zones, TGP, and battery SKU-dependent. The degraded 82K2 telemetry supports unavailable fan RPM/PPT and absence of Spectrum, not an exact controller claim; H3CN fan/EC behavior requires live per-host probing."
+    }
+  ],
+  "family_patterns_not_machine_exact": [
+    {
+      "bios_prefixes": [
+        "GKCN",
+        "EFCN",
+        "FSCN",
+        "HHCN",
+        "H1CN",
+        "G9CN",
+        "G8CN"
+      ],
+      "family": "legion-gen-6",
+      "confidence": "medium",
+      "notes": "Linux BIOS-family evidence; keyboard and exact fan behavior vary by SKU."
+    },
+    {
+      "bios_prefixes": [
+        "JUCN",
+        "J2CN",
+        "J1CN",
+        "KFCN",
+        "HACN",
+        "K9CN",
+        "K1CN",
+        "NSCN"
+      ],
+      "family": "legion-gen-7",
+      "confidence": "medium",
+      "notes": "BIOS-family evidence only; do not use as a precise MTM capability claim."
+    },
+    {
+      "bios_prefixes": [
+        "LZCN",
+        "NECN",
+        "NZCN",
+        "R3CN"
+      ],
+      "family": "loq-gen-8-to-10",
+      "confidence": "low",
+      "notes": "Family placeholders from Linux/model maps; exact 15/16-inch and keyboard variants remain unresolved."
+    }
+  ],
+  "feature_sets": [
+    {
+      "id": "white-backlight",
+      "keyboard_backlight": "white",
+      "rgb_zones": 0,
+      "controller": "platform::kbd_backlight",
+      "linux_control": "brightness_levels_if_sysfs_present",
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "single white backlight is exposed through the platform LED interface",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "legacy-four-zone",
+      "keyboard_backlight": "four_zone_rgb",
+      "rgb_zones": 4,
+      "zone_names": [
+        "zone_0",
+        "zone_1",
+        "zone_2",
+        "zone_3"
+      ],
+      "controller": "048d:c965",
+      "hid": {
+        "usage_page": "0xff89",
+        "usage": "0x00cc",
+        "report_size_bytes": 33
+      },
+      "linux_control": "userspace_hid_if_device_and_udev_access_present",
+      "evidence": [
+        {
+          "source": "https://github.com/4JX/L5P-Keyboard-RGB",
+          "claim": "2021 Legion controller and four zone payload",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux",
+          "claim": "legacy 4-zone protocol is distinct from Spectrum",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "spectrum-gen10",
+      "keyboard_backlight": "spectrum_rgb",
+      "rgb_zones": "per_key_and_chassis_groups",
+      "zone_names": [
+        "keyboard",
+        "front_bar",
+        "rear_bar",
+        "logo",
+        "perimeter",
+        "all"
+      ],
+      "controller": "048d:c197",
+      "hid": {
+        "feature_report_id": "0x07",
+        "report_size_bytes": 960
+      },
+      "linux_control": "userspace_hid_if_device_and_udev_access_present",
+      "evidence": [
+        {
+          "source": "local-telemetry",
+          "path": "research/SPECTRUM-ZONES.md",
+          "claim": "83RU live zone IDs: keyboard, front 0x01f5-0x01fe, rear 0x03e9-0x03fa, logo 0x05dd and all 0x0065",
+          "confidence": "high"
+        },
+        {
+          "source": "local-telemetry",
+          "path": "src/keyboard.rs",
+          "claim": "960-byte Spectrum feature-report implementation",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "id": "optional-24-zone",
+      "keyboard_backlight": "white_or_24_zone_rgb",
+      "rgb_zones": 24,
+      "controller": "unknown",
+      "linux_control": "unknown",
+      "evidence": [
+        {
+          "source": "psref-loq-15ahp10",
+          "claim": "LOQ 15AHP10 PSREF lists white backlight and optional 24-zone RGB",
+          "confidence": "high"
+        }
+      ],
+      "notes": "PSREF establishes the hardware option, not the Linux HID protocol or the option installed in every 83JG unit."
+    }
+  ],
+  "regional_aliases": [
+    {
+      "alias": "Y7000P IRX9",
+      "global_family": "Legion 5 16IRX9",
+      "machine_types": [
+        "83DG"
+      ],
+      "region": "China",
+      "confidence": "high",
+      "source": "psref-legion-5-16irx9"
+    },
+    {
+      "alias": "R9000P",
+      "global_family": "Legion Pro 5/7 AMD family",
+      "machine_types": [],
+      "region": "China",
+      "confidence": "low",
+      "source": "lenovo-legion-linux",
+      "notes": "Marketing alias only; exact MT mapping is not verified."
+    },
+    {
+      "alias": "R7000/R7000P",
+      "global_family": "Legion 5 AMD family",
+      "machine_types": [],
+      "region": "China",
+      "confidence": "low",
+      "source": "lenovo-legion-linux",
+      "notes": "Marketing alias only; exact MT mapping is not verified."
+    }
+  ],
+  "review_corroboration": {
+    "status": "partial",
+    "notes": "Reviews corroborate product naming and visible keyboard/cooling variants, but do not replace PSREF or live HID/hwmon evidence for exact MT capability claims.",
+    "source_classes_used": [
+      "official",
+      "linux_implementation",
+      "telemetry_observed"
+    ],
+    "remaining": "No review URL is promoted to primary evidence unless it identifies the exact SKU and agrees with official or live evidence."
+  },
+  "known_gaps": [
+    "Legion 9 exact machine types, BIOS prefixes, liquid-cooling controls and pump telemetry remain unverified.",
+    "83DG exact keyboard option is confirmed only for the observed host as no Spectrum HID; the wider 16IRX9 family has PSREF SKU variation.",
+    "83JG PSREF proves an optional 24-zone RGB SKU exists; current fleet sample is not evidence that every 83JG is white-only.",
+    "The Linux controller/protocol for Lenovo 24-zone RGB remains unknown; do not reuse the 960-byte Spectrum protocol.",
+    "Legacy four-zone controller IDs vary by model year; 048d:c965 is verified for the 2021 class, not all generations.",
+    "Fan RPM maximums are not PSREF capabilities and must be calibrated from live hwmon/EC data.",
+    "TGP is SKU- and firmware-dependent; prefer live nvidia-smi over name heuristics.",
+    "The catalog is intentionally not exhaustive; unknown models must use live probing and an unknown capability state.",
+    "82JW/82JK/82JQ/82JF/82K6 additions are PSREF ShowModel + PSREF PDF official high confidence; per-MTM BIOS remains family-level until live dmidecode telemetry confirms exact prefix.",
+    "Gen6 PPT is GodMode V1 gated (GKCN>=46/H1CN>=39), not WMI3_clamped as on LOQ Gen8; do not probe WMI3 on GKCN/H1CN below gate.",
+    "16ACH6 vs 16ACH6H TGP distinction is intentional (3050/Ti only vs 3060/3070); do not apply H-variant TGP to non-H product key.",
+    "LOQ 15IRH8/16APH8 PSREF lists White/Blue/4-Zone RGB SKU variant; live MT table 403 Akamai-gated so per-MTM enumeration remains unverified; treat as family pattern low confidence.",
+    "Gen5 17-inch verification closed for exact MTs 82GN (17ARH05H, 160/160 PSREF rows), 81Y8 (17IMH05H, 297/297), and 82B3 (17IMH05, 409/409); all are official white-backlight-only, no-system-lighting products. FSCN/EFCN remain family-level BIOS prefixes; exact BIOS versions, keyboard controllers, PPT, and smart amp remain unknown.",
+    "Gen5 Slim 7 exact MTMs: no downloadable PSREF Spec PDF or ShowModel for a Slim 7 Gen5 product key; brand first appears Gen8 (16APH8/16IRH8 82Y4/82Y3 exact). Gen5 Slim 7 remains unknown/contradictory.",
+    "Gen6 16ACHg6 MT 82N6 remains toolkit-only medium (Compatibility.cs alternative spectrum), PSREF ShowModel gated 403; official enumeration required before promoting to high-confidence MT row.",
+    "Gen6 16ITH6H MT unknown — no ShowModel enumeration for 16ITH6H product key; PSREF PDF omits MT column; fleet has no H sample. Do not assign 82JH guess; keep unknown until dmidecode+HID probe.",
+    "Gen7 Slim 5 16APH7 PSREF product key does not exist under Lenovo canonical PDF path 404; identifier likely marketplace typo; treat as unverified contradictory.",
+    "Gen7 Slim 7/7i no exact MTM verified; J2CN/KFCN etc. are BIOS-family placeholders medium→low for per-MTM lighting inference; official PSREF PDFs for Slim 7 Gen7 not recovered (JS shell gated).",
+    "Gen8 Legion 5 15APH8 and 15IRX8 product keys return code 0 no corresponding product and PDF 404; no MT table; family prefixes LPCN/KWCN/M3CN are not exact machine-type proof.",
+    "Gen8 Legion Pro 5 16ARX8 MT for Pro5 exact product binding remains Akamai-gated 403; family candidates 82WM/82WK seen in Toolkit but no PSREF ShowModel 100% enumeration; treated as family pattern low confidence until hardware probe.",
+    "Gen8 Legion Slim 5 14APH8/16APH8 ShowModel MT table gated 403; cannot claim 82Y9=100% per-MTM enumeration; treat as family pattern low confidence.",
+    "Gen8 Legion Slim 7/7i zero exact Gen8 Slim rows in evidence-backed catalog; zero Gen8 Slim telemetry in fleet; remains family pattern.",
+    "Gen9 Legion Pro 7 16AHP9 product key Legion_Pro_7_16AHP9 does not exist HEAD 404; PSREF shows only Slim 5 16AHP9 83DH/NRCN; no official spec for Pro7 16AHP9; do not create MT 83DM/83DN without dmidecode+PDF.",
+    "Gen9 Legion 5 15AHP9 mislabel: search total 0 and PDF 404; official Gen9 15AHP9 is LOQ 15AHP9 83DX/NZCN non-Legion; LOQ row added but Legion 5 15AHP9 remains contradictory.",
+    "Gen9 Legion Slim 5/Slim 7: only one Gen9 Slim row exists 83DH/NRCN Legion Slim 5 16AHP9 verified; 16ARP9 refresh MT/BIOS remain unknown; do not merge 83DH caps to 83DM/83DN.",
+    "Gen10 Legion 5 16IAX10 83NX 2-row niche: 83NX confidence low due to 2 US NA samples; worldwide 16IAX10 may have additional MTs not yet announced; BIOS unverified.",
+    "Gen10 Legion Pro 7 and 7i: PSREF Pro_7_16AFR10 404 (must include H), Legion_7i_16IAX10 404 (canonical omits i); 83KY BIOS prefix contradictory Q7CN catalog vs RXCN27WW live #409; keep contradictory not Spectrum.",
+    "Legion 9 MHCN lacks kernel model_config; NXCN WMI3 fan path contradictory 0 RPM at 82C; 18IAX10 hybrid absence unresolved; alternative full spectrum controller unknown not c197 nor c965; pump telemetry unverified.",
+    "Family-level BIOS prefixes GKCN/H1CN/FSCN/EFCN/BHCN/JUCN/KFCN/QNCN/S2CN/NZCN etc. are DMI allowlist medium not per-MTM verified; per-MTM BIOS remains unknown until live dmidecode telemetry confirms exact prefix-version; machine_type_precedes_bios_prefix policy enforced.",
+    "Legacy four-zone controller IDs vary by model year; 048d:c965 33-byte is verified for 2021 Gen6 class only; 2022 c975 2023 c984/c985 etc. vary; do not reuse c965 blindly for Gen7-10; gate HID UI on live lsusb + report descriptor.",
+    "Spectrum 048d:c197 960-byte report is Gen10 Pro7/Pro7i/7i only (83RU/83F5 live 2327 reports); do not reuse Spectrum protocol for LOQ white/24-zone or Gen5/7/8 legacy 4-zone or Legion 9 alternative layout; 24-zone WMI2 remains unknown.",
+    "Gen10 Pro 5 MTs 83M0/83F2/83NN/83F3/83LU BIOS unverified after PSREF enumeration; EC offsets vary (FE0B0F00 vs FE00D400); do not copy offset to unverified MTs; fan max RPM and PPT ranges must be calibrated from live hwmon/EC."
+  ]
+}
