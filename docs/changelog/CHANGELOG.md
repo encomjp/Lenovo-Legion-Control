@@ -8,6 +8,8 @@ The app does not read this folder; in-app update text comes from the GitHub rele
 
 ## Unreleased
 
+- Catalog: promoted the 7 stub MTs into 9 real product rows (83EW/EG/EF split) with PSREF names + lighting enums; BIOS prefixes filled only from live/firmware-tracker sources (RYCN, NSCN, RLCN, NMCN, M3CN, MACN, M2CN); 83EF/83EG/83EX stay empty until live dmidecode; 83Q7 lighting set to sku_variant (1-zone RGB or 24-zone per Spec PDF).
+
 - Lighting: structured `LightingKind` capability probe (`Spectrum` / `FourZone` / `White`) replaces the string-only `lighting` check.
 - Lighting: capability-gated UI — Spectrum keeps all tabs; 4-zone and white-only boards collapse to a notice page with the backlight slider, instead of exposing tabs that write to nothing.
 - Lighting: Lighting nav tooltip and startup Spectrum restore are now capability-driven; add `LEGION_LIGHTING_OVERRIDE=spectrum|fourzone|white` debug env to preview each branch.
