@@ -20,7 +20,7 @@
       "bios_prefixes": "string[] — first 4 chars of the Lenovo BIOS id (e.g. Q6CN); [] means not yet verified, never guess",
       "family": "enum: legion-5 | legion-5-pro | legion-5p | legion-pro-5 | legion-7 | legion-pro-7 | legion-9 | legion-s7 | legion-slim-5 | loq-15 | ideapad-gaming-3",
       "generation": "int (5..10); string \"N_or_M\" marks families spanning generations — disambiguate by machine type",
-      "capabilities.keyboard_backlight": "enum: white_only | 24_zone_rgb | four_zone_rgb | per_key_rgb | spectrum_rgb | white_or_24_zone_rgb | white_or_four_zone_rgb | sku_variant | unknown — original free-text observation preserved in keyboard_backlight_note",
+      "capabilities.keyboard_backlight": "enum: white_only | 24_zone_rgb | four_zone_rgb | per_key_rgb | spectrum_rgb | per_key_or_white | white_or_24_zone_rgb | white_or_four_zone_rgb | sku_variant | unknown — original free-text observation preserved in keyboard_backlight_note",
       "capabilities.rgb_zones": "int; string (e.g. \"24_zone_optional\", \"unknown_per_sku\") = SKU-dependent — treat as unknown",
       "capabilities.rgb_protocol": "enum: none | unknown | legacy_4zone | wmi_backlight | spectrum | per_sku — original free-text observation (incl. HID ids) preserved in rgb_protocol_note",
       "capabilities.fan_count": "int 1..4; string = model-dependent",
@@ -862,8 +862,8 @@
         {
           "source": "lenovo-legion-linux",
           "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/355",
-          "claim": "83KY live dmidecode BIOS RXCN21WW",
-          "confidence": "high"
+          "claim": "83KY live dmidecode BIOS RXCN21WW (second live report; not independently re-verified)",
+          "confidence": "medium"
         },
         {
           "source": "lenovo-legion-linux-kernel-module",
@@ -970,14 +970,14 @@
         "82WS"
       ],
       "aliases": [
-        "Legion Pro 7 Gen 8/9 variants"
+        "Legion Pro 7 16ARX8H"
       ],
       "bios_prefixes": [
         "KWCN",
         "LPCN"
       ],
       "family": "legion-pro-7",
-      "generation": "8_or_9",
+      "generation": 8,
       "detection_method": {
         "machine_type": "DMI product name before BIOS-family fallback",
         "bios_prefix": "match the listed BIOS prefix",
@@ -986,16 +986,16 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "four_zone_rgb",
+        "keyboard_backlight": "per_key_or_white",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_4zone",
+        "rgb_protocol": "unknown",
         "fan_count": "unknown_per_sku",
         "fan_rpm_backend": "legion_laptop_or_lenovo_wmi_other",
         "fan_control": "unknown",
         "ppt": "unknown",
         "smart_amp_aw88399": "unknown",
-        "rgb_protocol_note": "original: legacy_not_spectrum_expected",
-        "keyboard_backlight_note": "original: four_zone_rgb_or_sku_variant"
+        "rgb_protocol_note": "original: legacy_not_spectrum_expected — dropped; PSREF pass shows per-key or white SKUs, no 4-zone bucket",
+        "keyboard_backlight_note": "original: four_zone_rgb_or_sku_variant — dropped; PSREF: Pro 7 16ARX8H per-key or white, never 4-zone"
       },
       "evidence": [
         {
@@ -1011,7 +1011,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Grouped family row trimmed 2026-09-01: exact rows now exist for 82WR (Pro7 16IRX8), 82WQ (Pro7 16IRX8H), 83DE (Pro7 16IRX9H); remaining 82WS is family guess low confidence; use live DMI/HID probe."
+      "notes": "2026-09-02 PSREF pass: 82WS = Legion Pro 7 16ARX8H (AMD, Gen 8). Backlight is per-key or white by SKU — not a 4-zone Gen 8/9 family bucket. Per-key SKUs likely Spectrum-class (048d:c197) but requires live HID probe."
     },
     {
       "machine_types": [
@@ -1261,9 +1261,9 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "sku_variant",
+        "keyboard_backlight": "per_key_rgb",
         "rgb_zones": "unknown_per_sku",
-        "rgb_protocol": "legacy_4zone",
+        "rgb_protocol": "unknown",
         "fan_count": 2,
         "fan_rpm_backend": "legion_laptop_ec",
         "fan_control": "expected_via_ec_curve",
@@ -1275,8 +1275,8 @@
         ],
         "ppt": "godmode_v1_gated",
         "smart_amp_aw88399": "unknown",
-        "rgb_protocol_note": "original: legacy_not_spectrum_varies_by_sku",
-        "keyboard_backlight_note": "original: per_key_or_four_zone_sku_variant"
+        "rgb_protocol_note": "original: legacy_not_spectrum_varies_by_sku — dropped; per-key comms differ from c965 (kernel H1CN context)",
+        "keyboard_backlight_note": "original: per_key_or_four_zone_sku_variant — 4-zone SKU claim dropped per PSREF pass; per-key only"
       },
       "evidence": [
         {
@@ -1291,7 +1291,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "PSREF ShowModel provides high confidence MT 82K6 for Legion 7 16ITHg6; PSREF PDF verified via pdftotext. Per-key RGB is SKU-dependent; L5P table shows Legion 7 Gen6 per-key uses different comms than c965."
+      "notes": "PSREF ShowModel provides high confidence MT 82K6 for Legion 7 16ITHg6; PSREF PDF verified via pdftotext. 2026-09-02 PSREF pass: backlight is per-key only — earlier 4-zone SKU variant claim dropped. Gen6 per-key uses different comms than c965 (LLL H1CN context)."
     },
     {
       "machine_types": [
@@ -2844,7 +2844,7 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "white_or_four_zone_rgb",
+        "keyboard_backlight": "white_or_24_zone_rgb",
         "rgb_zones": "24_zone_optional",
         "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
@@ -2852,7 +2852,7 @@
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
         "smart_amp_aw88399": "unknown",
-        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant (PSREF 485/485 White or 24-Zone RGB); LenovoLegionLinux #471 live report confirms a 4-zone RGB SKU working via WMI effects — zone-count varies by SKU.",
+        "keyboard_backlight_note": "PSREF Spec + MTM 83F3000HUS: 485/485 White or 24-Zone RGB. LLL #471 live 4-zone RGB report is telemetry from one SKU (WMI effects) — zone count varies by SKU; not a separate backlight class.",
         "rgb_protocol_note": "original: wmi2_expected_not_spectrum"
       },
       "evidence": [
@@ -3013,6 +3013,11 @@
         {
           "source": "lenovo-legion-toolkit-compatibility",
           "claim": "83Q7 mapped to LegionSeries.Legion_5 in Compatibility.cs MachineTypeMap (added ~v2.34.0.0)",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-catalog-xml",
+          "claim": "Lenovo download catalog XML for 83Q7 lists BIOS T2CN40WW (third source; direct fetch returned 403 — provenance per reviewer, re-verify on next pass)",
           "confidence": "medium"
         }
       ],
