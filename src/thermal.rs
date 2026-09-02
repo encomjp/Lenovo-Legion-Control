@@ -200,7 +200,8 @@ fn read_thermal_zone_temp(include_acpitz: bool) -> Option<i32> {
             ttype == "x86_pkg_temp"
         };
         if accepted {
-            if let Some(v) = read_temp_file(&zone.path().join("temp"), &format!("thermal {ttype}")) {
+            if let Some(v) = read_temp_file(&zone.path().join("temp"), &format!("thermal {ttype}"))
+            {
                 if v > 0 {
                     return Some(v);
                 }
@@ -217,11 +218,12 @@ fn read_thermal_zone_temp(include_acpitz: bool) -> Option<i32> {
 /// labels, else `x86_pkg_temp` thermal zone. Source-agnostic so the governor
 /// works on both vendors; `sensors::read_all` is the display twin.
 pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
-    if let Some(hw) = crate::sensors::hwmon_by_name("k10temp") {
-        let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl)");
+    if let Some(hw) = crate::sensors::hwmon_by_name("k10temp").or_else(|| crate::sensors::hwmon_by_name("zenpower")) {
+        let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl/Tdie)");
         let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
-        let cpu_temp_2 =
-            tccd1.or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
+        let cpu_temp_2 = tccd1
+            .or_else(|| read_temp_file(&hw.join("temp2_input"), "temp2_input (Tctl fallback)"))
+            .or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
         return (cpu_temp, cpu_temp_2);
     }
     if let Some(hw) = crate::sensors::hwmon_by_name("coretemp") {
@@ -542,7 +544,11 @@ mod tests {
         }
         // Package id 0 hottest wins, Core max as secondary — mirrors Y7000P 83DG (Package 37°C)
         assert_eq!(
-            pick(&[("Package id 0", 37000), ("Core 0", 35000), ("Core 1", 36000)]),
+            pick(&[
+                ("Package id 0", 37000),
+                ("Core 0", 35000),
+                ("Core 1", 36000)
+            ]),
             (Some(37000), Some(36000))
         );
         // Two Package ids — hottest wins

@@ -207,7 +207,8 @@ pub struct AppConfig {
     pub welcome_seen: bool,
     #[serde(default)]
     pub thermal: ThermalConfig,
-    /// Optional anonymous diagnostics (alpha) — off unless the user opts in.
+    /// Optional anonymous diagnostics (alpha) — enabled by default (opt-out);
+    /// the user disables it in Settings.
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
 }

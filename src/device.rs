@@ -521,12 +521,15 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
             // lenovo_wmi_other but the EC reports 0 RPM — the real tachometer
             // lives in yogafan. Prefer yogafan whenever WMI is all-zero and
             // yogafan exposes channels; idle 0 rpm is a valid yogafan reading.
-            if fans.iter().all(|f| f.current_rpm == 0) {
+            let is_quirk_model = profile.is_some_and(|p| p.machine_type == Some("83JG") || p.bios_prefix == "R8CN")
+                || read_dmi("product_name").as_deref() == Some("83JG")
+                || read_dmi("bios_version").is_some_and(|b| b.starts_with("R8CN"));
+            if is_quirk_model && fans.iter().all(|f| f.current_rpm == 0) {
                 if let Some(yw) = crate::sensors::hwmon_by_name("yogafan") {
                     let yfans = collect_fans_from_hwmon(&yw, profile);
                     if !yfans.is_empty() {
                         log::debug!(
-                            "fan probe: lenovo_wmi_other reads 0 RPM — yogafan backend at {}",
+                            "fan probe: lenovo_wmi_other reads 0 RPM on quirk model — yogafan backend at {}",
                             yw.display()
                         );
                         return ("yogafan".into(), yfans);

@@ -235,6 +235,10 @@ fn boot_baseline(current: &[i16]) -> Vec<i16> {
 }
 
 fn validate_driver() -> Result<(u32, String, String), String> {
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    if cpuinfo.contains("GenuineIntel") || cpuinfo.contains("Intel(R)") {
+        return Err("Curve Optimizer is an AMD feature (not applicable on Intel CPUs)".into());
+    }
     if !Path::new(DRIVER).is_dir() {
         return Err(
             "ryzen_smu driver is not loaded — open About → Setup and press 'Install' for AMD ryzen_smu (needs dkms + kernel headers)".into(),

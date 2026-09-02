@@ -40,9 +40,18 @@ fn has_live_fan_input(hw: &std::path::Path) -> bool {
     })
 }
 
+fn is_yogafan_quirk_model() -> bool {
+    let product = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+    let bios = std::fs::read_to_string("/sys/class/dmi/id/bios_version").unwrap_or_default();
+    product.trim() == "83JG" || bios.trim().starts_with("R8CN")
+}
+
 /// True when the tachometer is locked behind yogafan (LOQ 15AHP10 83JG / R8CN).
 /// `lenovo_wmi_other` binds but reads 0 RPM until `yogafan` is loaded.
 pub fn needs_yogafan_setup() -> bool {
+    if !is_yogafan_quirk_model() {
+        return false;
+    }
     let Some(wmi) = hwmon_by_name("lenovo_wmi_other") else {
         return false;
     };
@@ -106,10 +115,10 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
         // LOQ 83JG (and similar): lenovo_wmi_other binds but the EC tach
         // is locked at 0. Real RPM is yogafan. Idle 0 rpm is valid there,
         // so do not wait for a nonzero yogafan sample before switching.
-        if !has_live_fan_input(&hw) {
+        if is_yogafan_quirk_model() && !has_live_fan_input(&hw) {
             if let Some(yw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
                 log::debug!(
-                    "fans::fan_hwmon: lenovo_wmi_other reads 0 — using yogafan at {}",
+                    "fans::fan_hwmon: lenovo_wmi_other reads 0 on quirk model — using yogafan at {}",
                     yw.display()
                 );
                 return Some(("yogafan".into(), yw));
@@ -216,7 +225,8 @@ pub fn rpm_status(fan: u8) -> (Option<u32>, FanRpmState) {
         };
         let index = match fan {
             1 => 0,
-            2 | 4 => 1,
+            2 => 1,
+            4 if !ids().contains(&2) => 1,
             _ => return (None, FanRpmState::NotExposed),
         };
         return match rpms.get(index).copied() {
@@ -428,10 +438,13 @@ fn ec_fallback_rpms_for(layout: &str) -> Option<Vec<u32>> {
 fn ec_fallback_bytes() -> Option<Vec<u8>> {
     use std::io::Read;
     const EC_IO: &str = "/sys/kernel/debug/ec/ec0/io";
-    // Try to ensure ec_sys is loaded if the file doesn't exist.
+    // Try to ensure ec_sys is loaded if the file doesn't exist. Deliberately
+    // WITHOUT write_support=1: this fallback only READS tachometer bytes, and
+    // write_support would grant every root process EC-RAM write access
+    // system-wide — far more privilege than an RPM read needs.
     if !std::path::Path::new(EC_IO).exists() {
         let _ = std::process::Command::new("modprobe")
-            .args(["ec_sys", "write_support=1"])
+            .args(["ec_sys"])
             .output();
         if !std::path::Path::new(EC_IO).exists() {
             return None;

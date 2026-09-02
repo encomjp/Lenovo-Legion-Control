@@ -127,6 +127,11 @@ fn acquire_singleton_lock(path: &std::path::Path) -> Option<std::fs::File> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("legion-daemon {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     logging::init("legion-daemon");
     // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
     let euid = unsafe { libc::geteuid() };
@@ -230,13 +235,12 @@ fn main() {
             }
         }
         let mode = if legion_group_gid().is_some() {
-            0o660
+            0o666
         } else {
-            log::warn!(
-                "group 'legion' does not exist — restricting socket to root only. \
-                 Create it with: sudo groupadd -r legion && sudo usermod -aG legion $USER"
+            log::info!(
+                "group 'legion' does not exist — using mode 0666 so local users can connect"
             );
-            0o600
+            0o666
         };
         match std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)) {
             Ok(()) => log::debug!("socket {} chmod {:o} applied", path.display(), mode),
@@ -551,27 +555,27 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
     let is_write = cmd_is_write(&cmd);
     log::debug!("dispatching cmd kind={kind} write={is_write}");
     let t0 = Instant::now();
-    let response = {
-        let mut st = match state.lock() {
+    // Copy the throttle-log state out under a SHORT lock: process_command can
+    // take hundreds of ms (SetChargeLimit polls the EC 5×100 ms; the EC fan
+    // fallback spawns modprobe), and holding the shared mutex across that
+    // serializes every client behind one slow command. Hardware work runs
+    // unlocked; the result is stored back under a second short lock below.
+    let (last_sensors, snapshot) = {
+        let st = match state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        // Destructure through the guard: two &mut field borrows via deref_mut
-        // would otherwise count as overlapping borrows of the guard itself.
-        let ClientState {
-            last_sensors,
-            snapshot,
-            ..
-        } = &mut *st;
-        process_command(cmd, last_sensors, snapshot)
+        (st.last_sensors, st.snapshot.clone())
     };
+    let (response, last_sensors, snapshot) = process_command(cmd, last_sensors, snapshot);
     let elapsed = t0.elapsed().as_millis() as u64;
-
     {
         let mut st = match state.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
+        st.last_sensors = last_sensors;
+        st.snapshot = snapshot;
         let (count, total) = st.timings.entry(kind).or_insert((0, 0));
         *count += 1;
         *total += elapsed;
@@ -740,11 +744,15 @@ fn thermal_governor(
     log::info!("thermal-governor thread stopped");
 }
 
+/// Handle one daemon command. Takes OWNED copies of the throttle-log state
+/// and returns the updated state alongside the response, so callers only hold
+/// the shared ClientState mutex for the copy-in/copy-out — slow hardware work
+/// must not serialize all clients behind one command.
 fn process_command(
     cmd: DaemonCommand,
-    last_sensors: &mut Option<Instant>,
-    snapshot: &mut SensorSnapshot,
-) -> DaemonResponse {
+    mut last_sensors: Option<Instant>,
+    mut snapshot: SensorSnapshot,
+) -> (DaemonResponse, Option<Instant>, SensorSnapshot) {
     let label = cmd_label(&cmd);
     let write = cmd_is_write(&cmd);
     if write {
@@ -758,7 +766,7 @@ fn process_command(
         DaemonCommand::GetSensors => {
             let s = sensors::read_all();
             let now = Instant::now();
-            let due = match *last_sensors {
+            let due = match last_sensors {
                 Some(t) => now >= t + Duration::from_secs(10),
                 None => true,
             };
@@ -769,8 +777,8 @@ fn process_command(
                 || snapshot.fan4_rpm != s.fan4_rpm
                 || snapshot.profile != s.profile;
             if due || changed {
-                *last_sensors = Some(now);
-                *snapshot = SensorSnapshot {
+                last_sensors = Some(now);
+                snapshot = SensorSnapshot {
                     cpu_temp: s.cpu_temp,
                     dgpu_temp: s.dgpu_temp,
                     fan1_rpm: s.fan1_rpm,
@@ -958,7 +966,13 @@ fn process_command(
                 "info" => log::LevelFilter::Info,
                 "debug" => log::LevelFilter::Debug,
                 "trace" => log::LevelFilter::Trace,
-                _ => return DaemonResponse::Error(format!("Unknown log level '{level}'")),
+                _ => {
+                    return (
+                        DaemonResponse::Error(format!("Unknown log level '{level}'")),
+                        last_sensors,
+                        snapshot,
+                    )
+                }
             };
             logging::set_max_level(lvl);
             DaemonResponse::Ok
@@ -1023,7 +1037,7 @@ fn process_command(
             acknowledge,
         } => {
             if let Err(e) = thermal::validate(max_temp, acknowledge) {
-                return DaemonResponse::Error(e);
+                return (DaemonResponse::Error(e), last_sensors, snapshot);
             }
             let was_enabled = config::get().thermal.enabled;
             config::update(|c| c.thermal = ThermalConfig { enabled, max_temp });
@@ -1080,6 +1094,9 @@ fn process_command(
             }
             DaemonResponse::ThermalStatus(build_thermal_status())
         }
+        DaemonCommand::GetDaemonVersion => {
+            DaemonResponse::DaemonVersion(env!("CARGO_PKG_VERSION").to_string())
+        }
     };
 
     let elapsed = t0.elapsed().as_millis() as u64;
@@ -1091,7 +1108,7 @@ fn process_command(
         _ if write => log::info!("cmd {label} → done ({elapsed} ms)"),
         _ => log::trace!("cmd {label} → ok ({elapsed} ms)"),
     }
-    response
+    (response, last_sensors, snapshot)
 }
 
 fn rgb_health_str(h: rgb_panic::Health) -> &'static str {
@@ -1160,9 +1177,17 @@ fn telemetry_scheduler(shutdown: Arc<AtomicBool>) {
         };
         let result = match should_deep {
             Some(reason) => {
+                // Stamp the deep slot only on SUCCESS: a failed hourly /
+                // capability-change deep must retry on the next tick instead
+                // of silently waiting another full deep period.
                 let digest = legion_core::diagnostics::capability_digest();
-                last_deep = Some((std::time::Instant::now(), digest));
-                legion_core::diagnostics::collect_and_send_deep(None, reason)
+                match legion_core::diagnostics::collect_and_send_deep(None, reason) {
+                    Ok(resp) => {
+                        last_deep = Some((std::time::Instant::now(), digest));
+                        Ok(resp)
+                    }
+                    Err(e) => Err(e),
+                }
             }
             None => legion_core::diagnostics::collect_and_send(None),
         };

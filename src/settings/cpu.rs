@@ -38,7 +38,8 @@ pub(crate) fn update_curve_optimizer_ui(
 
     ui.refresh_button.set_sensitive(true);
     ui.status_row.set_subtitle(&status.reason);
-    ui.install_button.set_visible(!status.available);
+    let needs_install = !status.available && status.reason.contains("ryzen_smu driver is not loaded");
+    ui.install_button.set_visible(needs_install);
     ui.apply_button.set_sensitive(status.available);
     ui.reset_button.set_sensitive(status.available);
     ui.offset_scale.set_sensitive(status.available);
@@ -476,6 +477,18 @@ pub(crate) fn build_cpu_power_page(
     go_home: &Rc<dyn Fn(&'static str, &'static str)>,
 ) -> gtk::Box {
     let page = page_lede("");
+    let all_limits = legion_core::profile::all_ppt_limits();
+    if all_limits.is_empty() {
+        let empty_group = pref_group("Power limits", None);
+        let row = adw::ActionRow::builder()
+            .title("Not available on this model")
+            .subtitle("Configurable CPU/GPU wattage targets (PPT/TGP) are not exposed by this system's ACPI/WMI firmware.")
+            .activatable(false)
+            .build();
+        empty_group.add(&row);
+        page.append(&empty_group);
+        return page;
+    }
     let mode = legion_core::profile::current();
 
     // Guidance row — live wording, one clear way out.
@@ -672,9 +685,12 @@ pub(crate) fn build_cpu_tuning_page(
     );
     autostart_group.add(&autostart_row);
     // Order: chips-first tuning (thermal) already has its own chips on top internally;
-    // then undervolt + stability + autostart.
+    // then undervolt (AMD only) + stability + autostart.
+    let is_intel = legion_core::device::detect().cpu_model.to_lowercase().contains("intel");
     page.append(&thermal);
-    page.append(&co);
+    if !is_intel {
+        page.append(&co);
+    }
     page.append(&build_stability_group(toast_overlay));
     page.append(&autostart_group);
     page

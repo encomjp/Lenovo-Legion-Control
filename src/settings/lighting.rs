@@ -160,7 +160,15 @@ fn build_simple_backlight_page(
     let max = legion_core::keyboard::max_brightness().unwrap_or(2);
     let row = adw::ActionRow::builder()
         .title("Backlight brightness")
-        .subtitle(format!("{} %", if max > 0 { level * 100 / max } else { 0 }))
+        .subtitle(format!(
+            "{} %",
+            // u32 math: u8 `level * 100` overflows (debug panic, release wrap) on 3+ level boards.
+            if max > 0 {
+                (level as u32 * 100 / max as u32) as u8
+            } else {
+                0
+            }
+        ))
         .activatable(false)
         .build();
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, max as f64, 1.0);
@@ -172,7 +180,8 @@ fn build_simple_backlight_page(
         let v = s.value() as u8;
         let _ = legion_core::keyboard::set_brightness(v);
         let maxv = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
-        row_c.set_subtitle(&format!("{} %", v * 100 / maxv));
+        // u32 math — see the u8-overflow note on the initial subtitle above.
+        row_c.set_subtitle(&format!("{} %", (v as u32 * 100 / maxv as u32) as u8));
     });
     row.add_suffix(&scale);
     card.append(&row);

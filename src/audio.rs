@@ -898,7 +898,18 @@ malformed-line-without-tabs\n\
         // inputs surface as HardwareBroken (expected amp missing) — either way
         // the speaker fix must stay disabled (UI grey, daemon early-exit).
         let (health, summary, details, fixable) = classify(
-            false, true, true, true, Some(0), true, true, false, true, false, &None, &None,
+            false,
+            true,
+            true,
+            true,
+            Some(0),
+            true,
+            true,
+            false,
+            true,
+            false,
+            &None,
+            &None,
         );
         assert!(
             matches!(health, Health::NotApplicable | Health::HardwareBroken),
@@ -920,7 +931,18 @@ malformed-line-without-tabs\n\
     #[test]
     fn classify_hardware_broken_when_amp_acpi_without_modules() {
         let (health, summary, _, fixable) = classify(
-            true, false, false, false, Some(0), false, false, false, false, false, &None, &None,
+            true,
+            false,
+            false,
+            false,
+            Some(0),
+            false,
+            false,
+            false,
+            false,
+            false,
+            &None,
+            &None,
         );
         assert_eq!(health, Health::HardwareBroken);
         assert!(summary.contains("Smart amp not working"));
@@ -930,7 +952,18 @@ malformed-line-without-tabs\n\
     #[test]
     fn classify_soft_issue_when_amp_ok_but_muted() {
         let (health, summary, _, fixable) = classify(
-            true, true, true, true, Some(0), true, true, false, false, false, &None, &None,
+            true,
+            true,
+            true,
+            true,
+            Some(0),
+            true,
+            true,
+            false,
+            false,
+            false,
+            &None,
+            &None,
         );
         assert_eq!(health, Health::SoftIssue);
         assert!(fixable);
@@ -940,7 +973,18 @@ malformed-line-without-tabs\n\
     #[test]
     fn classify_ok_when_amp_and_no_soft() {
         let (health, _, _, fixable) = classify(
-            true, true, true, true, Some(0), false, false, false, false, false, &None, &None,
+            true,
+            true,
+            true,
+            true,
+            Some(0),
+            false,
+            false,
+            false,
+            false,
+            false,
+            &None,
+            &None,
         );
         assert_eq!(health, Health::Ok);
         assert!(fixable);

@@ -138,6 +138,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(" · ")));
 
     // Temperatures — source-agnostic: k10temp (AMD) or coretemp/x86_pkg_temp (Intel).
+    let is_intel = device::detect().cpu_model.to_lowercase().contains("intel");
     let s = sensors::read_all();
     let t_ok = plaus(s.cpu_temp, 0.0, 125.0);
     let cpu_detail = if s.cpu_temp == 0.0 {
@@ -147,7 +148,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         format!("{:.1}°C", s.cpu_temp)
     };
     out.push(check(
-        "k10temp_cpu_temp",
+        if is_intel { "coretemp_cpu_temp" } else { "k10temp_cpu_temp" },
         t_ok,
         cpu_detail,
     ));
@@ -184,11 +185,22 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             "048d:c197 not detected (optional component)",
         )),
     }
-    out.push(check(
-        "camera_switch",
-        keyboard::camera_power().is_some(),
-        String::from("ideapad attr"),
-    ));
+    match keyboard::camera_power() {
+        Some(enabled) => out.push(check(
+            "camera_switch",
+            true,
+            if enabled {
+                "enabled (ideapad attr)"
+            } else {
+                "kill-switch engaged (ideapad attr)"
+            },
+        )),
+        None => out.push(check(
+            "camera_switch",
+            true,
+            "not exposed (physical shutter or no ideapad attr)",
+        )),
+    }
 
     // Platform profile.
     let current = profile::current();
@@ -213,20 +225,28 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         ),
     ));
 
-    // Curve optimizer (root-only probe degrades gracefully off-daemon).
-    let co = undervolt::status();
-    let is_root = unsafe { libc::geteuid() } == 0;
-    out.push(check(
-        "curve_optimizer",
-        co.available || !is_root,
-        if co.available {
-            format!("available ({})", co.reason)
-        } else if is_root {
-            format!("root probe failed: {}", co.reason)
-        } else {
-            format!("unavailable without root (expected): {}", co.reason)
-        },
-    ));
+    // Curve optimizer (AMD only; root-only probe degrades gracefully off-daemon).
+    if is_intel {
+        out.push(check(
+            "curve_optimizer",
+            true,
+            "not applicable (Intel CPU)",
+        ));
+    } else {
+        let co = undervolt::status();
+        let is_root = unsafe { libc::geteuid() } == 0;
+        out.push(check(
+            "curve_optimizer",
+            co.available || !is_root,
+            if co.available {
+                format!("available ({})", co.reason)
+            } else if is_root {
+                format!("root probe failed: {}", co.reason)
+            } else {
+                format!("unavailable without root (expected): {}", co.reason)
+            },
+        ));
+    }
 
     // cpufreq inputs + dynamic scaling policy check (bounds check against hardware capability).
     match thermal::read_cur_max() {
@@ -258,13 +278,33 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         )),
     }
 
-    // Daemon reachable (meaningful for CLI/GUI contexts; trivially true when
-    // this code runs inside the daemon itself).
-    let daemon_ok = matches!(
-        comms::send_command(comms::DaemonCommand::GetProfile),
-        Ok(comms::DaemonResponse::Profile(_))
-    );
-    out.push(check("daemon_reachable", daemon_ok, String::new()));
+    // Daemon reachable and version verification (detects stale daemon running
+    // an older release than the GUI/CLI client).
+    let (daemon_ok, daemon_detail) = match comms::query_daemon_version() {
+        Ok(v) => {
+            let current = env!("CARGO_PKG_VERSION");
+            if v == current {
+                (true, format!("v{v}"))
+            } else {
+                (false, format!("v{v} (mismatch: expected v{current})"))
+            }
+        }
+        Err(e) => {
+            let responds = matches!(
+                comms::send_command(comms::DaemonCommand::GetProfile),
+                Ok(comms::DaemonResponse::Profile(_))
+            );
+            if responds {
+                (
+                    false,
+                    format!("legacy daemon pre-v0.2.11 (client is v{})", env!("CARGO_PKG_VERSION")),
+                )
+            } else {
+                (false, e)
+            }
+        }
+    };
+    out.push(check("daemon_version", daemon_ok, daemon_detail));
 
     // Socket candidates sane.
     let sane = comms::socket_candidates()
@@ -286,6 +326,8 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         true,
         if crate::intel::pstate_available() {
             String::from("present")
+        } else if is_intel {
+            String::from("not present (intel_pstate disabled)")
         } else {
             String::from("not present (AMD)")
         },
@@ -295,6 +337,8 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         true,
         if crate::intel::uncore_available() {
             String::from("present")
+        } else if is_intel {
+            String::from("not present (intel_uncore disabled)")
         } else {
             String::from("not present (AMD)")
         },
@@ -304,6 +348,8 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         true,
         if crate::intel_msr::is_available() {
             String::from("present")
+        } else if is_intel {
+            String::from("not present (msr driver not loaded)")
         } else {
             String::from("not present (AMD)")
         },

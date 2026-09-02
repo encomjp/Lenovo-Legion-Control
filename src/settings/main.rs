@@ -363,6 +363,26 @@ fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdat
         banner.set_revealed(true);
         return;
     }
+    let current_ver = legion_core::update::CURRENT_VERSION;
+    match legion_core::comms::query_daemon_version() {
+        Ok(v) if v != current_ver => {
+            banner.set_title(&format!(
+                "Daemon version mismatch: running v{v}, GUI is v{current_ver}"
+            ));
+            banner.set_button_label(Some("Restart daemon"));
+            banner.set_revealed(true);
+            return;
+        }
+        Err(_) => {
+            banner.set_title(&format!(
+                "Daemon is outdated (legacy pre-v0.2.11, GUI is v{current_ver})"
+            ));
+            banner.set_button_label(Some("Restart daemon"));
+            banner.set_revealed(true);
+            return;
+        }
+        Ok(_) => {}
+    }
     if let Some(info) = pending.borrow().as_ref() {
         banner.set_title(&format!(
             "New version available: v{} (installed v{})",
@@ -836,6 +856,33 @@ fn build_ui(app: &adw::Application) {
             }
             return;
         }
+        if banner_b.button_label().as_deref() == Some("Restart daemon") {
+            starting_b.set(true);
+            banner_b.set_button_label(Some("Restarting…"));
+            let overlay = overlay_banner.clone();
+            let banner = banner_b.clone();
+            let dot = dot_b.clone();
+            let conn_l = conn_l_b.clone();
+            let conn_s = conn_s_b.clone();
+            let foot = foot_b.clone();
+            let gate = gate_b.clone();
+            let pending = pending_b.clone();
+            let starting = starting_b.clone();
+            run_setup_helper("enable-daemon", move |result| {
+                starting.set(false);
+                match result {
+                    Ok(_) => {
+                        sync_daemon_ui(true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending);
+                        toast_ok(&overlay, "Hardware daemon restarted");
+                    }
+                    Err(e) => {
+                        banner.set_button_label(Some("Restart daemon"));
+                        toast_error(&overlay, &e);
+                    }
+                }
+            });
+            return;
+        }
         let overlay_ready = overlay_banner.clone();
         let dot_r = dot_b.clone();
         let conn_l_r = conn_l_b.clone();
@@ -1307,9 +1354,24 @@ fn apply_conn_status(
 ) {
     if online {
         dot.remove_css_class("off");
-        conn_l.set_text("Connected");
-        conn_s.set_text("Service ready");
-        tip(conn_l, "Root legion-control service is reachable");
+        let current_ver = legion_core::update::CURRENT_VERSION;
+        match legion_core::comms::query_daemon_version() {
+            Ok(v) if v == current_ver => {
+                conn_l.set_text("Connected");
+                conn_s.set_text(&format!("Daemon v{v} ready"));
+                tip(conn_l, "Root legion-control service is reachable and up to date");
+            }
+            Ok(v) => {
+                conn_l.set_text("Outdated");
+                conn_s.set_text(&format!("Daemon v{v} (GUI v{current_ver})"));
+                tip(conn_l, "Daemon is older than GUI — restart to update");
+            }
+            Err(_) => {
+                conn_l.set_text("Outdated");
+                conn_s.set_text(&format!("Legacy daemon (GUI v{current_ver})"));
+                tip(conn_l, "Daemon is pre-v0.2.11 — restart to update");
+            }
+        }
         tip(
             conn_s,
             "Fans, profile, charge, and PPT commands can be applied",
@@ -1486,7 +1548,7 @@ fn bootstrap_appimage_setup(operation: &str) -> Result<String, String> {
                 "-c",
                 "tar -C / -xpf - && systemctl daemon-reload \
                  && /usr/local/libexec/legion-control-setup \"$1\" \
-                 && systemctl try-restart legion-control.service",
+                 && (systemctl try-restart legion-control.service || systemctl start legion-control.service)",
                 "sh",
                 operation,
             ])
@@ -1547,7 +1609,7 @@ fn maybe_finish_pending_restage(overlay: &adw::ToastOverlay) {
                 Err(e) => {
                     toast_error(
                         &overlay,
-                        &format!("Could not refresh the background service — {e}"),
+                        &format!("Background service refresh failed: {e}"),
                     );
                 }
             },
@@ -1569,11 +1631,11 @@ fn run_daemon_command_async(
 
 /// Run one fixed PolicyKit setup operation synchronously.
 pub(crate) fn run_setup_helper_blocking(operation: &str) -> Result<String, String> {
+    if appimage_root().is_some() && (operation == "enable-daemon" || setup_helper_path().is_none()) {
+        log::info!("bootstrap: staging stable setup helper and daemon from running AppImage ({operation})");
+        return bootstrap_appimage_setup(operation);
+    }
     if setup_helper_path().is_none() {
-        if appimage_root().is_some() {
-            log::info!("bootstrap: staging stable setup helper via one PolicyKit transaction");
-            return bootstrap_appimage_setup(operation);
-        }
         return Err(
             "Setup helper is missing; reinstall Legion Control from the current package".into(),
         );
@@ -1749,12 +1811,12 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         .row_spacing(12)
         .build();
     chips.add_css_class("metric-grid");
-    let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) =
-        metric_chip_tip("CPU temp", Some("Main CPU temperature (k10temp/coretemp/x86_pkg_temp)"));
-    let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) = metric_chip_tip(
-        "CPU CCD 2",
-        Some("Second CPU CCD/core temperature"),
+    let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) = metric_chip_tip(
+        "CPU temp",
+        Some("Main CPU temperature (k10temp/coretemp/x86_pkg_temp)"),
     );
+    let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) =
+        metric_chip_tip("CPU CCD 2", Some("Second CPU CCD/core temperature"));
     let (freq_chip, freq_v, freq_d) = metric_chip_tip(
         "Max freq",
         Some("Current scaling_max_freq across online CPUs"),

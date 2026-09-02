@@ -349,8 +349,8 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     later.add_css_class("pill-btn");
     later.set_hexpand(true);
     // Source installs can do a full cargo build (2-4 min) *or* a quick AppImage swap
-    let is_source_with_appimage = kind == legion_core::update::InstallKind::Source
-        && info.appimage.is_some();
+    let is_source_with_appimage =
+        kind == legion_core::update::InstallKind::Source && info.appimage.is_some();
     let (action, appimage_btn) = if is_source_with_appimage {
         let a = primary_button_tip("Build from source", Some("Rebuilds locally — 2-4 min"));
         let b = gtk::Button::with_label("Use AppImage");
@@ -956,21 +956,40 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     let group = pref_group("First-time setup", None);
 
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
+    let current_ver = legion_core::update::CURRENT_VERSION;
+    let daemon_ver_opt = legion_core::comms::query_daemon_version().ok();
+    let (subtitle, is_mismatch, is_up_to_date) = if !daemon_active {
+        ("Inactive".to_string(), false, false)
+    } else {
+        match &daemon_ver_opt {
+            Some(v) if v == current_ver => (format!("Active (v{v})"), false, true),
+            Some(v) => (
+                format!("Active (v{v} — outdated; restart to update to v{current_ver})"),
+                true,
+                false,
+            ),
+            None => (
+                format!("Active (legacy pre-v0.2.11 — restart to update to v{current_ver})"),
+                true,
+                false,
+            ),
+        }
+    };
+
     let daemon_row = adw::ActionRow::builder()
         .title("Hardware control daemon")
-        .subtitle(if daemon_active { "Active" } else { "Inactive" })
+        .subtitle(&subtitle)
         .activatable(false)
         .build();
-    // Positive states render as a green status pill (like Fix badges), not a
-    // red button that reads as a destructive action.
+
     let daemon_suffix = gtk::Box::new(Orientation::Horizontal, 8);
     daemon_suffix.set_valign(Align::Center);
     let daemon_button = primary_button_tip(
-        "Enable",
+        if is_mismatch { "Restart daemon" } else { "Enable" },
         Some("Uses a narrowly scoped PolicyKit helper; no shell command is accepted"),
     );
-    let daemon_pill = status_pill_tip("Enabled", "ok", Some("legion-control.service is active"));
-    if daemon_active {
+    let daemon_pill = status_pill_tip("Enabled", "ok", Some("legion-control.service is active and up to date"));
+    if is_up_to_date {
         daemon_suffix.append(&daemon_pill);
     } else {
         daemon_suffix.append(&daemon_button);
@@ -985,7 +1004,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     let pill = daemon_pill.clone();
     daemon_button.connect_clicked(move |_| {
         button.set_sensitive(false);
-        button.set_label("Enabling…");
+        button.set_label("Updating…");
         let overlay = overlay.clone();
         let row = row.clone();
         let suffix = suffix.clone();
@@ -993,14 +1012,14 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
         let pill = pill.clone();
         run_setup_helper("enable-daemon", move |result| match result {
             Ok(_) => {
-                row.set_subtitle("Active");
+                row.set_subtitle(&format!("Active (v{})", legion_core::update::CURRENT_VERSION));
                 suffix.remove(&button);
                 pill.set_text("Enabled");
                 suffix.append(&pill);
-                toast_ok(&overlay, "Hardware daemon enabled");
+                toast_ok(&overlay, "Hardware daemon updated and restarted");
             }
             Err(error) => {
-                button.set_label("Enable");
+                button.set_label("Retry");
                 button.set_sensitive(true);
                 toast_error(&overlay, &error);
             }

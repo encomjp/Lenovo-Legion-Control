@@ -175,7 +175,12 @@ pub fn read_metrics_batch() -> DgpuMetrics {
         Some(r) => r,
         None => return DgpuMetrics::default(),
     };
-    let parts: Vec<&str> = raw.split(',').map(|s| s.trim()).collect();
+    parse_metrics_batch(&raw)
+}
+
+pub(crate) fn parse_metrics_batch(raw: &str) -> DgpuMetrics {
+    let first_line = raw.lines().next().unwrap_or("").trim();
+    let parts: Vec<&str> = first_line.split(',').map(|s| s.trim()).collect();
     DgpuMetrics {
         temp: parts.first().and_then(|s| s.parse().ok()),
         power: parts.get(1).and_then(|s| s.parse().ok()),
@@ -271,5 +276,34 @@ mod tests {
         assert!(parse_smi_value("").is_none());
         assert!(parse_smi_value("   ").is_none());
         assert!(parse_smi_value("N/A").is_none());
+    }
+
+    #[test]
+    fn test_parse_metrics_batch_edge_cases() {
+        // Standard single GPU reading
+        let m = parse_metrics_batch("55, 23.4, 1800, 15");
+        assert_eq!(m.temp, Some(55.0));
+        assert_eq!(m.power, Some(23.4));
+        assert_eq!(m.clock, Some(1800.0));
+        assert_eq!(m.util, Some(15.0));
+
+        // Dual GPU / eGPU multiline output: safely picks primary GPU line
+        let m2 = parse_metrics_batch("55, 23.4, 1800, 15\n42, 10.0, 800, 0");
+        assert_eq!(m2.temp, Some(55.0));
+        assert_eq!(m2.power, Some(23.4));
+        assert_eq!(m2.clock, Some(1800.0));
+        assert_eq!(m2.util, Some(15.0));
+
+        // Non-numeric / error fields
+        let m3 = parse_metrics_batch("N/A, [Not Supported], ERR!, 0");
+        assert_eq!(m3.temp, None);
+        assert_eq!(m3.power, None);
+        assert_eq!(m3.clock, None);
+        assert_eq!(m3.util, Some(0.0));
+
+        // Empty string
+        let m4 = parse_metrics_batch("");
+        assert_eq!(m4.temp, None);
+        assert_eq!(m4.power, None);
     }
 }

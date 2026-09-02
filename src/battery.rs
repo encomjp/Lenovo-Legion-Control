@@ -258,6 +258,19 @@ fn set_conservation_file(on: bool) -> std::io::Result<()> {
             return Err(e);
         }
     };
+    if on {
+        // Lenovo EC quirk: rapid_charge and conservation_mode are mutually exclusive in firmware.
+        // If rapid_charge is active, turn it off first so conservation_mode can engage.
+        let rapid = path.with_file_name("rapid_charge");
+        if rapid.exists() {
+            if let Ok(v) = std::fs::read_to_string(&rapid) {
+                if v.trim() == "1" {
+                    log::info!("battery::set_conservation_file — disabling conflicting rapid_charge before setting conservation_mode");
+                    let _ = std::fs::write(&rapid, "0");
+                }
+            }
+        }
+    }
     let res = std::fs::write(path, if on { "1" } else { "0" });
     match &res {
         Ok(()) => log::debug!(

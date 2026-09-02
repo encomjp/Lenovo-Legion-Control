@@ -450,6 +450,18 @@ fn main() {
         }
         Commands::Info => match send_command(DaemonCommand::GetDeviceInfo) {
             Ok(DaemonResponse::DeviceInfo(info)) => {
+                let cli_ver = env!("CARGO_PKG_VERSION");
+                match legion_core::comms::query_daemon_version() {
+                    Ok(dver) if dver == cli_ver => {
+                        println!("daemon      v{dver} (in sync with CLI v{cli_ver})");
+                    }
+                    Ok(dver) => {
+                        println!("daemon      v{dver} (MISMATCH: CLI is v{cli_ver} — restart daemon!)");
+                    }
+                    Err(e) => {
+                        println!("daemon      unknown / legacy ({e})");
+                    }
+                }
                 println!("model       {}", info.model);
                 println!("machine     {}", info.machine_type);
                 println!("series      {}", info.series);

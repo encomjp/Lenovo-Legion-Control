@@ -964,7 +964,10 @@ fn probe_acpi() -> AcpiProbe {
         .flatten()
         .flatten()
         .find_map(|e| {
-            let acpi_path = std::fs::read_to_string(e.path().join("path")).ok()?.trim().to_string();
+            let acpi_path = std::fs::read_to_string(e.path().join("path"))
+                .ok()?
+                .trim()
+                .to_string();
             if acpi_path.contains("EC0") {
                 Some(acpi_path)
             } else {
@@ -1548,7 +1551,6 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
                 .map_err(|e| format!("temp write: {e}"))?;
         }
         let tmp = tmp_path;
-        temps.push(tmp.clone());
 
         // Per-send env read: the secret flows ONLY into its own brand-new
         // 0600 header file, referenced from curl as `-H @path` — never into

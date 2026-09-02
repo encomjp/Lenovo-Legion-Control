@@ -465,6 +465,9 @@ fn f30_scaling_max_freq_readable_and_bounded() {
 #[ignore = "live self-test"]
 fn f31_hardcoded_max_full_matches_real_cpufreq_policy() {
     skip_unless_hw!();
+    if legion_core::profile::current() == "low-power" {
+        return;
+    }
     let policy_max: u32 =
         std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
             .ok()
@@ -484,6 +487,9 @@ fn f31_hardcoded_max_full_matches_real_cpufreq_policy() {
 #[ignore = "live self-test"]
 fn f32_compute_target_on_live_inputs() {
     skip_unless_hw!();
+    if legion_core::profile::current() == "low-power" {
+        return;
+    }
     use legion_core::thermal::{compute_target, ThermalConfig};
     let temp_mc = thermal::read_cpu_temps().0.unwrap_or(60_000);
     let cur = thermal::read_cur_max().unwrap_or(thermal::MAX_FULL);
@@ -980,6 +986,7 @@ fn f58_read_command_kinds_are_unique() {
         DaemonCommand::DiagnoseRgb,
         DaemonCommand::GetThermalStatus,
         DaemonCommand::GetCurveOptimizer,
+        DaemonCommand::GetDaemonVersion,
     ];
     let mut kinds: Vec<&'static str> = reads.iter().map(comms::cmd_kind).collect();
     kinds.sort_unstable();

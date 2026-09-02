@@ -237,7 +237,7 @@ pub fn read_all() -> SensorReadings {
     let mut s = SensorReadings::default();
 
     // ─── CPU (k10temp AMD + coretemp Intel) ───
-    if let Some(hw) = hwmon_by_name("k10temp") {
+    if let Some(hw) = hwmon_by_name("k10temp").or_else(|| hwmon_by_name("zenpower")) {
         let mut labels_seen: Vec<(String, &str)> = Vec::new();
         for entry in read_dir_entries(&hw) {
             let fname = entry.file_name().to_string_lossy().to_string();
@@ -247,8 +247,8 @@ pub fn read_all() -> SensorReadings {
                     if let Some(val) = read_int(&input_path) {
                         let temp = val as f64 / 1000.0;
                         let field = match label.as_str() {
-                            "Tctl" => {
-                                log::debug!("sensors::read_all: k10temp Tctl → cpu_temp={temp}");
+                            "Tctl" | "Tdie" => {
+                                log::debug!("sensors::read_all: AMD cpu temp → cpu_temp={temp}");
                                 s.cpu_temp = temp;
                                 "cpu_temp"
                             }
@@ -302,7 +302,9 @@ pub fn read_all() -> SensorReadings {
         }
         if let Some(pkg) = max_pkg {
             s.cpu_temp = pkg;
-            log::debug!("sensors::read_all: coretemp Package → cpu_temp={pkg} (labels={labels_seen:?})");
+            log::debug!(
+                "sensors::read_all: coretemp Package → cpu_temp={pkg} (labels={labels_seen:?})"
+            );
         }
         if let Some(core_max) = max_core {
             // Expose hottest core as cpu_temp_1 for Intel; keeps cpu_temp_1 non-zero in fleet.
@@ -314,7 +316,7 @@ pub fn read_all() -> SensorReadings {
             for zone in read_dir_entries(Path::new("/sys/class/thermal")) {
                 let type_path = zone.path().join("type");
                 if let Some(t) = read_file(&type_path) {
-                    if t == "x86_pkg_temp" || t == "acpitz" && s.cpu_temp == 0.0 {
+                    if (t == "x86_pkg_temp" || t == "acpitz") && s.cpu_temp == 0.0 {
                         if let Some(v) = read_int(&zone.path().join("temp")) {
                             let temp = v as f64 / 1000.0;
                             if temp > 0.0 {
@@ -338,7 +340,9 @@ pub fn read_all() -> SensorReadings {
                         let temp = v as f64 / 1000.0;
                         if temp > 0.0 {
                             s.cpu_temp = temp;
-                            log::debug!("sensors::read_all: thermal {t} fallback → cpu_temp={temp}");
+                            log::debug!(
+                                "sensors::read_all: thermal {t} fallback → cpu_temp={temp}"
+                            );
                             break;
                         }
                     }
@@ -594,11 +598,15 @@ pub fn read_all() -> SensorReadings {
     );
 
     // Fans -- via fans:: backend so 83JG yogafan is honored (reconciles flattened fields with FanLive)
+    let active_fan_ids = crate::fans::ids();
     for (fan_num, dst_rpm, dst_target) in [
         (1u8, &mut s.fan1_rpm, &mut s.fan1_target),
         (2u8, &mut s.fan2_rpm, &mut s.fan2_target),
         (4u8, &mut s.fan4_rpm, &mut s.fan4_target),
     ] {
+        if !active_fan_ids.contains(&fan_num) {
+            continue;
+        }
         if let Some(v) = crate::fans::read_rpm(fan_num) {
             *dst_rpm = v;
         }

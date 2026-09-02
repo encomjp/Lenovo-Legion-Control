@@ -131,6 +131,7 @@ pub enum DaemonCommand {
         acknowledge: bool,
     },
     GetThermalStatus,
+    GetDaemonVersion,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -183,6 +184,7 @@ pub enum DaemonResponse {
     CurveOptimizerPersistence(crate::undervolt::CurveOptimizerPersistence),
     Thermal(crate::thermal::ThermalConfig),
     ThermalStatus(crate::thermal::ThermalStatus),
+    DaemonVersion(String),
 }
 
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
@@ -256,6 +258,7 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
     log::debug!("ipc → {label}");
 
     let mut last_err = String::from("No legion-control socket found");
+    let mut perm_err: Option<String> = None;
     for path in socket_candidates() {
         let attempt_started = std::time::Instant::now();
         let mut stream = match UnixStream::connect(&path) {
@@ -268,6 +271,9 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
                 s
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    perm_err = Some(format!("{}: {e}", path.display()));
+                }
                 last_err = format!("{}: {}", path.display(), e);
                 match e.raw_os_error() {
                     Some(errno) => log::debug!(
@@ -355,11 +361,22 @@ pub fn send_command(cmd: DaemonCommand) -> Result<DaemonResponse, String> {
         return Ok(resp);
     }
 
+    let err_detail = perm_err.unwrap_or(last_err);
     let msg = format!(
-        "{last_err}. Start the daemon: sudo systemctl enable --now legion-control  (AppImage: open Settings → Fix → Enable daemon, or run: pkexec /usr/local/libexec/legion-control-setup enable-daemon)"
+        "{err_detail}. Start the daemon: sudo systemctl enable --now legion-control  (AppImage: open Settings → Fix → Enable daemon, or run: pkexec /usr/local/libexec/legion-control-setup enable-daemon)"
     );
     log::warn!("ipc ✗ {label} after {:?}: {msg}", started.elapsed());
     Err(msg)
+}
+
+/// Query the running daemon's version over IPC.
+pub fn query_daemon_version() -> Result<String, String> {
+    match send_command(DaemonCommand::GetDaemonVersion) {
+        Ok(DaemonResponse::DaemonVersion(v)) => Ok(v),
+        Ok(DaemonResponse::Error(e)) => Err(format!("daemon error (likely pre-v0.2.11): {e}")),
+        Ok(other) => Err(format!("unexpected response: {other:?}")),
+        Err(e) => Err(e),
+    }
 }
 
 /// Short label for logs (avoids dumping large sensor payloads).
@@ -423,6 +440,7 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
             enabled, max_temp, ..
         } => format!("SetThermal({enabled},{max_temp})"),
         DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
+        DaemonCommand::GetDaemonVersion => "GetDaemonVersion".into(),
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_label: {label}");
@@ -470,6 +488,7 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::GetThermal => "GetThermal",
         DaemonCommand::SetThermal { .. } => "SetThermal",
         DaemonCommand::GetThermalStatus => "GetThermalStatus",
+        DaemonCommand::GetDaemonVersion => "GetDaemonVersion",
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_kind: {kind}");
@@ -502,6 +521,7 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
         DaemonResponse::CurveOptimizerPersistence(_) => "CurveOptimizerPersistence",
         DaemonResponse::Thermal(_) => "Thermal",
         DaemonResponse::ThermalStatus(_) => "ThermalStatus",
+        DaemonResponse::DaemonVersion(_) => "DaemonVersion",
     }
 }
 

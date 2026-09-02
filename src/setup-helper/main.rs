@@ -275,7 +275,16 @@ fn enable_daemon() -> Result<(), String> {
                 .collect();
             !bundled_rules.is_empty() && bundled_rules != host_rules
         });
-    if !host_daemon || !host_unit || unit_needs_refresh {
+    let is_same_file = bundled_usr_dir().ok().is_some_and(|usr| {
+        usr.join("bin/legion-daemon") == Path::new("/usr/local/bin/legion-daemon")
+    });
+    let can_stage_from_bundle = !is_same_file
+        && bundled_usr_dir().ok().is_some_and(|usr| {
+            usr.join("bin/legion-daemon").is_file()
+                && usr.join("lib/systemd/system/legion-control.service").is_file()
+        });
+
+    if can_stage_from_bundle || unit_needs_refresh || !host_daemon || !host_unit {
         let usr = bundled_usr_dir()?;
         let bundled_daemon = usr.join("bin/legion-daemon");
         let bundled_unit = usr.join("lib/systemd/system/legion-control.service");
@@ -288,7 +297,7 @@ fn enable_daemon() -> Result<(), String> {
         // PolicyKit's auth_admin_keep instead of the AppImage mount path.
         let bundled_helper = usr.join("libexec/legion-control-setup");
         let stable_helper = Path::new("/usr/local/libexec/legion-control-setup");
-        if bundled_helper.is_file() && !stable_helper.is_file() {
+        if bundled_helper.is_file() {
             install_executable(&bundled_helper, stable_helper)?;
         }
         let bundled_policy = usr.join("share/polkit-1/actions/com.encomjp.legion-control.policy");
@@ -329,12 +338,33 @@ fn enable_daemon() -> Result<(), String> {
         systemctl(&["daemon-reload"])?;
         println!("staged daemon + helper + policy + unit from portable bundle");
     }
+
+    // Ensure the legion group exists so the daemon and systemd sysusers can operate properly.
+    let _ = Command::new("groupadd").args(["-r", "legion"]).status();
+
+    // If invoked through pkexec or sudo, add the calling user to group `legion`.
+    let user_opt = std::env::var("PKEXEC_UID")
+        .ok()
+        .and_then(|uid| {
+            Command::new("id")
+                .args(["-nu", &uid])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+        })
+        .or_else(|| std::env::var("SUDO_USER").ok().filter(|s| !s.is_empty()));
+    if let Some(ref user) = user_opt {
+        let _ = Command::new("usermod").args(["-aG", "legion", user]).status();
+    }
+
     // The portable bootstrap pre-stages the daemon at /usr/local/bin, so the
     // branch above is skipped — Spectrum permissions still need the udev rule.
     if !udev_rule_installed() {
         install_udev_rule()?;
     }
-    systemctl(&["enable", "--now", "legion-control.service"])
+    systemctl(&["enable", "legion-control.service"])?;
+    systemctl(&["restart", "legion-control.service"])
 }
 
 fn install_udev_rule() -> Result<(), String> {
@@ -369,14 +399,18 @@ fn install_udev_rule() -> Result<(), String> {
 }
 
 fn install_yogafan() -> Result<(), String> {
-    if Path::new("/sys/class/hwmon").read_dir().ok().is_some_and(|iter| {
-        iter.flatten().any(|e| {
-            std::fs::read_to_string(e.path().join("name"))
-                .unwrap_or_default()
-                .trim()
-                == "yogafan"
+    if Path::new("/sys/class/hwmon")
+        .read_dir()
+        .ok()
+        .is_some_and(|iter| {
+            iter.flatten().any(|e| {
+                std::fs::read_to_string(e.path().join("name"))
+                    .unwrap_or_default()
+                    .trim()
+                    == "yogafan"
+            })
         })
-    }) {
+    {
         // Already present — just ensure persistence
         let _ = fs::write("/etc/modules-load.d/legion-yogafan.conf", "yogafan\n");
         println!("yogafan already loaded");
@@ -392,14 +426,17 @@ fn install_yogafan() -> Result<(), String> {
     }
     // Wait up to 1s for hwmon to appear
     for _ in 0..10 {
-        let found = Path::new("/sys/class/hwmon").read_dir().ok().is_some_and(|iter| {
-            iter.flatten().any(|e| {
-                std::fs::read_to_string(e.path().join("name"))
-                    .unwrap_or_default()
-                    .trim()
-                    == "yogafan"
-            })
-        });
+        let found = Path::new("/sys/class/hwmon")
+            .read_dir()
+            .ok()
+            .is_some_and(|iter| {
+                iter.flatten().any(|e| {
+                    std::fs::read_to_string(e.path().join("name"))
+                        .unwrap_or_default()
+                        .trim()
+                        == "yogafan"
+                })
+            });
         if found {
             fs::write("/etc/modules-load.d/legion-yogafan.conf", "yogafan\n")
                 .map_err(|e| format!("cannot persist yogafan at boot: {e}"))?;
@@ -408,7 +445,10 @@ fn install_yogafan() -> Result<(), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Err("yogafan loaded but hwmon did not appear — kernel may lack the driver (needs >=6.14)".into())
+    Err(
+        "yogafan loaded but hwmon did not appear — kernel may lack the driver (needs >=6.14)"
+            .into(),
+    )
 }
 
 fn real_main() -> Result<(), String> {
@@ -419,10 +459,11 @@ fn real_main() -> Result<(), String> {
         Some("install-ryzen-smu") => install_ryzen_smu(),
         Some("remove-ryzen-smu") => remove_ryzen_smu(),
         Some("enable-daemon") => enable_daemon(),
+        Some("restart-daemon") => restart_daemon(),
         Some("install-udev") => install_udev_rule(),
         Some("install-yogafan") => install_yogafan(),
         _ => Err(
-            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, install-udev, install-yogafan"
+            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, restart-daemon, install-udev, install-yogafan"
                 .into(),
         ),
     }

@@ -1504,25 +1504,27 @@ pub fn max_brightness() -> Option<u8> {
 
 /// Camera privacy kill-switch (ideapad).
 pub fn camera_power() -> Option<bool> {
-    let known = "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power";
-    match std::fs::read_to_string(known) {
-        Ok(val) => {
+    const CANDIDATES: &[&str] = &[
+        "/sys/bus/platform/devices/VPC2004:00/camera_power",
+        "/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00/camera_power",
+        "/sys/devices/pci0000:00/0000:00:14.3/PNP0C09:00/VPC2004:00/camera_power",
+    ];
+    for path in CANDIDATES {
+        if let Ok(val) = std::fs::read_to_string(path) {
             let enabled = val.trim() == "1";
             log::trace!(
-                "camera: camera_power → {}",
+                "camera: camera_power ({path}) → {}",
                 if enabled {
                     "camera enabled"
                 } else {
                     "kill-switch engaged"
                 }
             );
-            Some(enabled)
-        }
-        Err(e) => {
-            log::trace!("camera: camera_power unreadable ({e}) — reporting unknown");
-            None
+            return Some(enabled);
         }
     }
+    log::trace!("camera: camera_power unreadable — reporting unknown");
+    None
 }
 
 #[cfg(test)]
