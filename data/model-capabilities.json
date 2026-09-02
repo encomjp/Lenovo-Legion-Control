@@ -829,7 +829,7 @@
         "Legion 7i 16IAX10"
       ],
       "bios_prefixes": [
-        "Q7CN"
+        "RXCN"
       ],
       "family": "legion-7",
       "generation": 10,
@@ -856,16 +856,23 @@
         {
           "source": "lenovo-legion-linux",
           "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/409",
-          "claim": "83KY/Q7CN EC dump and support context",
-          "confidence": "medium"
+          "claim": "83KY live dmidecode BIOS RXCN27WW (Core Ultra 9 275HX, RTX 5070) plus EC dumps",
+          "confidence": "high"
         },
         {
-          "source": "lenovo-legion-toolkit-compatibility",
-          "claim": "family grouping cross-check",
-          "confidence": "medium"
+          "source": "lenovo-legion-linux",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/issues/355",
+          "claim": "83KY live dmidecode BIOS RXCN21WW",
+          "confidence": "high"
+        },
+        {
+          "source": "lenovo-legion-linux-kernel-module",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+          "claim": "kernel_module DMI entry line ~2066: \"Legion 7 16IAX10 (83KY)\" matches BIOS prefix RXCN; Q7CN absent from the kernel allowlist (belongs to 83F5 Legion Pro 7 16IAX10H)",
+          "confidence": "high"
         }
       ],
-      "notes": "Expected capabilities require live probing; no matching fleet report was available in the current evidence set."
+      "notes": "BIOS prefix corrected from the earlier contradictory Q7CN claim to RXCN (live #355/#409 + kernel_module DMI match). Q7CN belongs to 83F5. Expected capabilities still require live probing."
     },
     {
       "machine_types": [
@@ -2966,6 +2973,270 @@
         }
       ],
       "notes": "Keep keyboard, RGB zones, TGP, and battery SKU-dependent. The degraded 82K2 telemetry supports unavailable fan RPM/PPT and absence of Spectrum, not an exact controller claim; H3CN fan/EC behavior requires live per-host probing."
+    },
+    {
+      "machine_types": [
+        "83Q7"
+      ],
+      "aliases": [
+        "Legion 5 15AHP11"
+      ],
+      "bios_prefixes": [
+        "T2CN"
+      ],
+      "family": "legion-5",
+      "generation": 11,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-linux-kernel-module",
+          "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
+          "claim": "kernel_module DMI entry ident T2CN: \"e.g. Legion 5 15AHP11 (83Q7, AMD Ryzen 7 250 + RTX 5050) — same platform as LOQ 15AHP10; mapping pending on-hardware confirmation\" (maps to model_r8cn)",
+          "confidence": "medium"
+        },
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83Q7 mapped to LegionSeries.Legion_5 in Compatibility.cs MachineTypeMap (added ~v2.34.0.0)",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Gen 11, added in toolkit v2.34.0.0; kernel ident T2CN reuses the R8CN (LOQ 15AHP10) model struct pending on-hardware confirmation. All capabilities unknown — requires live probe."
+    },
+    {
+      "machine_types": [
+        "83F1"
+      ],
+      "aliases": [
+        "Legion 5 15IRX10"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83F1 mapped to LegionSeries.Legion_5 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+    },
+    {
+      "machine_types": [
+        "83EW",
+        "83EG",
+        "83EF"
+      ],
+      "aliases": [
+        "Legion 5 (Gen 10 variants)"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83EW/83EG/83EF mapped to LegionSeries.Legion_5 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+    },
+    {
+      "machine_types": [
+        "83LT"
+      ],
+      "aliases": [
+        "Legion Pro 5 (Gen 10)"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83LT mapped to LegionSeries.Legion_Pro_5 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+    },
+    {
+      "machine_types": [
+        "83FD"
+      ],
+      "aliases": [
+        "Legion 7 (Gen 10 variant)"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-7",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83FD mapped to LegionSeries.Legion_7 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+    },
+    {
+      "machine_types": [
+        "83EX"
+      ],
+      "aliases": [
+        "Legion Slim 5 (Gen 10)"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-slim-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "83EX mapped to LegionSeries.Legion_Slim_5 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+    },
+    {
+      "machine_types": [
+        "82Y9",
+        "82Y5",
+        "82YA"
+      ],
+      "aliases": [
+        "Legion Slim 5 (Gen 8/9)"
+      ],
+      "bios_prefixes": [],
+      "family": "legion-slim-5",
+      "generation": 9,
+      "detection_method": {
+        "machine_type": "DMI product name before BIOS-family fallback",
+        "bios_prefix": "match the listed BIOS prefix",
+        "ec_window": "probe after DMI/BIOS match; offsets are model-specific",
+        "wmi_variant": "probe the model-specific WMI/EC backend",
+        "hid_controller": "probe live USB HID descriptor; do not infer from family"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown_per_sku",
+        "rgb_protocol": "unknown",
+        "fan_count": "unknown",
+        "fan_rpm_backend": "unknown",
+        "fan_control": "unknown",
+        "ppt": "expected_but_probe_live",
+        "smart_amp_aw88399": "unknown"
+      },
+      "evidence": [
+        {
+          "source": "lenovo-legion-toolkit-compatibility",
+          "claim": "82Y9/82Y5/82YA mapped to LegionSeries.Legion_Slim_5 in Compatibility.cs MachineTypeMap",
+          "confidence": "medium"
+        }
+      ],
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
     }
   ],
   "family_patterns_not_machine_exact": [
@@ -3159,7 +3430,7 @@
     "LOQ 15IRH8/16APH8 PSREF lists White/Blue/4-Zone RGB SKU variant; live MT table 403 Akamai-gated so per-MTM enumeration remains unverified; treat as family pattern low confidence.",
     "Gen5 17-inch verification closed for exact MTs 82GN (17ARH05H, 160/160 PSREF rows), 81Y8 (17IMH05H, 297/297), and 82B3 (17IMH05, 409/409); all are official white-backlight-only, no-system-lighting products. FSCN/EFCN remain family-level BIOS prefixes; exact BIOS versions, keyboard controllers, PPT, and smart amp remain unknown.",
     "Gen5 Slim 7 exact MTMs: no downloadable PSREF Spec PDF or ShowModel for a Slim 7 Gen5 product key; brand first appears Gen8 (16APH8/16IRH8 82Y4/82Y3 exact). Gen5 Slim 7 remains unknown/contradictory.",
-    "Gen6 16ACHg6 MT 82N6 remains toolkit-only medium (Compatibility.cs alternative spectrum), PSREF ShowModel gated 403; official enumeration required before promoting to high-confidence MT row.",
+    "Gen6 16ACHg6 MT 82N6 remains toolkit-only medium: Compatibility.cs maps it as plain Legion 7 (no alternative-spectrum association — alt-spectrum is only 83G0 and 83AG). PSREF ShowModel gated 403; official enumeration required before promoting to high-confidence MT row.",
     "Gen6 16ITH6H MT unknown — no ShowModel enumeration for 16ITH6H product key; PSREF PDF omits MT column; fleet has no H sample. Do not assign 82JH guess; keep unknown until dmidecode+HID probe.",
     "Gen7 Slim 5 16APH7 PSREF product key does not exist under Lenovo canonical PDF path 404; identifier likely marketplace typo; treat as unverified contradictory.",
     "Gen7 Slim 7/7i no exact MTM verified; J2CN/KFCN etc. are BIOS-family placeholders medium→low for per-MTM lighting inference; official PSREF PDFs for Slim 7 Gen7 not recovered (JS shell gated).",
@@ -3171,7 +3442,7 @@
     "Gen9 Legion 5 15AHP9 mislabel: search total 0 and PDF 404; official Gen9 15AHP9 is LOQ 15AHP9 83DX/NZCN non-Legion; LOQ row added but Legion 5 15AHP9 remains contradictory.",
     "Gen9 Legion Slim 5/Slim 7: only one Gen9 Slim row exists 83DH/NRCN Legion Slim 5 16AHP9 verified; 16ARP9 refresh MT/BIOS remain unknown; do not merge 83DH caps to 83DM/83DN.",
     "Gen10 Legion 5 16IAX10 83NX 2-row niche: 83NX confidence low due to 2 US NA samples; worldwide 16IAX10 may have additional MTs not yet announced; BIOS unverified.",
-    "Gen10 Legion Pro 7 and 7i: PSREF Pro_7_16AFR10 404 (must include H), Legion_7i_16IAX10 404 (canonical omits i); 83KY BIOS prefix contradictory Q7CN catalog vs RXCN27WW live #409; keep contradictory not Spectrum.",
+    "Gen10 Legion Pro 7 and 7i: PSREF Pro_7_16AFR10 404 (must include H), Legion_7i_16IAX10 404 (canonical omits i); 83KY BIOS contradiction RESOLVED 2026-09-02 — catalog now RXCN (live #355 RXCN21WW / #409 RXCN27WW + kernel_module DMI match); Q7CN reassigned to 83F5 only. Gen 11 rows (83Q7/T2CN etc.) added as toolkit-cited unknown-capability stubs pending PSREF pass + live probes.",
     "Legion 9 MHCN lacks kernel model_config; NXCN WMI3 fan path contradictory 0 RPM at 82C; 18IAX10 hybrid absence unresolved; alternative full spectrum controller unknown not c197 nor c965; pump telemetry unverified.",
     "Family-level BIOS prefixes GKCN/H1CN/FSCN/EFCN/BHCN/JUCN/KFCN/QNCN/S2CN/NZCN etc. are DMI allowlist medium not per-MTM verified; per-MTM BIOS remains unknown until live dmidecode telemetry confirms exact prefix-version; machine_type_precedes_bios_prefix policy enforced.",
     "Legacy four-zone controller IDs vary by model year; 048d:c965 33-byte is verified for 2021 Gen6 class only; 2022 c975 2023 c984/c985 etc. vary; do not reuse c965 blindly for Gen7-10; gate HID UI on live lsusb + report descriptor.",
