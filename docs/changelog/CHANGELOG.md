@@ -16,6 +16,14 @@ The app does not read this folder; in-app update text comes from the GitHub rele
 
 - Catalog (`data/model-capabilities.json`): fix 83KY BIOS prefix Q7CN → RXCN (live LLL #355/#409 + kernel DMI match; Q7CN belongs to 83F5); correct the 82N6 known-gaps note (plain Legion 7, alt-spectrum is only 83G0/83AG); add rows for 83Q7 (T2CN, Gen 11) and the toolkit-mapped MTs 83F1, 83EW/83EG/83EF, 83LT, 83FD, 83EX, 82Y9/82Y5/82YA as unknown-capability stubs pending the PSREF pass.
 
+## 0.2.11 - 2026-09-02
+
+- AppImage Staging: Always restage bundled daemon and helper upon `enable-daemon`, preventing daemon version skew.
+- IPC Socket: Mode 0666 socket permissions and automatic `legion` group creation in `setup-helper` to prevent client permission denied errors.
+- IPC Error Reporting: Preserve `PermissionDenied` error details in `comms.rs` instead of masking with fallback socket `NotFound`.
+- Hardware Profiles: Add official mapping for Legion Y7000P IRX9 (`83DG`, `NMCN`), correct Pro 7 16IRX8H fan layout, and hide Curve Optimizer on Intel systems.
+- Telemetry: Collect motherboard DMI details, keyboard lighting kind, battery charge types, and deep hardware inventories; uncap server-side retention.
+
 ## 0.2.10 - 2026-09-01
 
 - Fix Intel `coretemp` CPU temperature handling, including Package/Core readings and thermal-zone fallback.
