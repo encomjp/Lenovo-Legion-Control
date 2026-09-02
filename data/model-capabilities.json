@@ -972,10 +972,7 @@
       "aliases": [
         "Legion Pro 7 16ARX8H"
       ],
-      "bios_prefixes": [
-        "KWCN",
-        "LPCN"
-      ],
+      "bios_prefixes": [],
       "family": "legion-pro-7",
       "generation": 8,
       "detection_method": {
@@ -1011,7 +1008,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "2026-09-02 PSREF pass: 82WS = Legion Pro 7 16ARX8H (AMD, Gen 8). Backlight is per-key or white by SKU — not a 4-zone Gen 8/9 family bucket. Per-key SKUs likely Spectrum-class (048d:c197) but requires live HID probe."
+      "notes": "2026-09-02 PSREF pass: 82WS = Legion Pro 7 16ARX8H (AMD, Gen 8). Backlight is per-key or white by SKU — not a 4-zone Gen 8/9 family bucket. Per-key SKUs likely Spectrum-class (048d:c197) but requires live HID probe. BIOS prefixes KWCN/LPCN from the old family bucket dropped 2026-09-02 (they belong to 16IRX8 / Pro 5); [] until a live dmidecode."
     },
     {
       "machine_types": [
@@ -3028,7 +3025,7 @@
         "83F1"
       ],
       "aliases": [
-        "Legion 5 15IRX10"
+        "Legion 5 15IAX10 sibling MT (83F0 is 15IAX10; exact marketing name unverified)"
       ],
       "bios_prefixes": [],
       "family": "legion-5",
@@ -3057,7 +3054,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion."
+      "notes": "Machine type mapped in LenovoLegionToolkit Compatibility.cs but absent from PSREF-verified enumeration so far. All capabilities unknown — requires live probe (dmidecode + HID + WMI) before promotion. Alias corrected 2026-09-02: 15IRX10 is 83LY; toolkit groups 83F1 as sibling of 83F0 (15IAX10)."
     },
     {
       "machine_types": [
