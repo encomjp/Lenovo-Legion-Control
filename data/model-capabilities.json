@@ -3019,7 +3019,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Gen 11, added in toolkit v2.34.0.0; kernel ident T2CN reuses the R8CN (LOQ 15AHP10) model struct pending on-hardware confirmation. All capabilities unknown — requires live probe. 2026-09-02 PSREF pass: lighting 1-zone RGB or 24-zone (Spec PDF); kept sku_variant — no controller protocol identified."
+      "notes": "Gen 11, added in toolkit v2.34.0.0; kernel ident T2CN reuses the R8CN (LOQ 15AHP10) model struct pending on-hardware confirmation. All capabilities unknown — requires live probe. 2026-09-02 PSREF pass: lighting 1-zone RGB or 24-zone (Spec PDF); kept sku_variant — no controller protocol identified. 2026-09-02: pass found no dump and no Lenovo BIOS filename — T2CN stays medium (kernel comment + catalog XML only)."
     },
     {
       "machine_types": [
@@ -3082,7 +3082,9 @@
       "aliases": [
         "Legion 5 15ARP8"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "NDCN"
+      ],
       "family": "legion-5",
       "generation": 8,
       "detection_method": {
@@ -3113,9 +3115,14 @@
           "source": "psref-spec",
           "claim": "15ARP8 Spec: white backlight only",
           "confidence": "high"
+        },
+        {
+          "source": "firmware-tracker",
+          "claim": "Lenovo package ndcn15ww for 83EF (Badcaps listing)",
+          "confidence": "medium"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02: name + white-only lighting from PSREF/Lenovo Support. No live BIOS prefix yet (do not copy neighbours)."
+      "notes": "Promoted from stub 2026-09-02: name + white-only lighting from PSREF/Lenovo Support. No live BIOS prefix yet (do not copy neighbours). 2026-09-02 Legion-5/7/Pro pass: BIOS NDCN (Lenovo package ndcn15ww on Badcaps) — medium, only AMD 15in pair prefix still missing was this one. 83EG gets no prefix from it."
     },
     {
       "machine_types": [
@@ -3166,9 +3173,7 @@
       "aliases": [
         "Legion 5 16IRX9 (sibling of 83DG)"
       ],
-      "bios_prefixes": [
-        "NMCN"
-      ],
+      "bios_prefixes": [],
       "family": "legion-5",
       "generation": 9,
       "detection_method": {
@@ -3201,7 +3206,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02: split from the old 83EW/83EG/83EF bucket — 83EW is Legion 5 16IRX9, sibling of 83DG. BIOS NMCN medium: drivers.eu package NMCN29WW for Type-83EW + 83DG live NMCN30WW; no direct LLL dump yet."
+      "notes": "Promoted from stub 2026-09-02: split from the old 83EW/83EG/83EF bucket — 83EW is Legion 5 16IRX9, sibling of 83DG. BIOS NMCN medium: drivers.eu package NMCN29WW for Type-83EW + 83DG live NMCN30WW; no direct LLL dump yet. 2026-09-02: NMCN prefix removed — NMCN29WW is a third-party package name, the live NMCN dump is sibling 83DG. Leave [] until a 83EW dmidecode."
     },
     {
       "machine_types": [
@@ -3248,9 +3253,14 @@
           "source": "cve-firmware-tracker",
           "claim": "RLCN21WW (CVE) / RLCN31WW (Advanced-BIOS)",
           "confidence": "medium"
+        },
+        {
+          "source": "firmware-tracker",
+          "claim": "live RLCN29WW / RLCN32WW packages for 83LT",
+          "confidence": "medium"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. BIOS RLCN from firmware trackers (CVE RLCN21WW, Advanced-BIOS RLCN31WW) — no LLL dump."
+      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. BIOS RLCN from firmware trackers (CVE RLCN21WW, Advanced-BIOS RLCN31WW) — no LLL dump. 2026-09-02: 83LT is 16ADR10 (AMD) — not 16IAX10 (that is 83LU). Live packages RLCN29WW / RLCN32WW strengthen RLCN."
     },
     {
       "machine_types": [
@@ -3280,7 +3290,7 @@
         "fan_control": "unknown",
         "ppt": "expected_but_probe_live",
         "smart_amp_aw88399": "unknown",
-        "keyboard_backlight_note": "PSREF: per-key or white; RGB power button; no lid logo."
+        "keyboard_backlight_note": "PSREF: white or per-key; rear/IO-port light yes; no lid logo. TGP RTX 4060/4070 130W."
       },
       "evidence": [
         {
@@ -3299,7 +3309,7 @@
           "confidence": "high"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. BIOS NSCN via LLL #226 (closed as supported, model_nscn; NSCN25WW/NSCN23WW)."
+      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. BIOS NSCN via LLL #226 (closed as supported, model_nscn; NSCN25WW/NSCN23WW). 2026-09-02: lighting tightened — white or per-key, IO-port light yes, no lid logo; TGP 4060/4070 130W."
     },
     {
       "machine_types": [
@@ -3308,7 +3318,9 @@
       "aliases": [
         "Legion Slim 5 16ARP9"
       ],
-      "bios_prefixes": [],
+      "bios_prefixes": [
+        "NUCN"
+      ],
       "family": "legion-slim-5",
       "generation": 9,
       "detection_method": {
@@ -3339,9 +3351,19 @@
           "source": "psref-spec",
           "claim": "16ARP9: 4-zone or white backlight",
           "confidence": "high"
+        },
+        {
+          "source": "lenovo-catalog-xml",
+          "claim": "Lenovo catalog BIOS nucn17ww for 83EX",
+          "confidence": "high"
+        },
+        {
+          "source": "fleet-live",
+          "claim": "live dmidecode NUCN11WW on an 83EX host",
+          "confidence": "high"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. No live BIOS prefix yet."
+      "notes": "Promoted from stub 2026-09-02: name + lighting from PSREF. No live BIOS prefix yet. 2026-09-02 Slim-5 pass: BIOS NUCN (Lenovo catalog nucn17ww; live NUCN11WW) — high. Kernel allowlist has no NUCN row; do not merge with 83DH/NRCN."
     },
     {
       "machine_types": [
@@ -3363,7 +3385,7 @@
         "hid_controller": "probe live USB HID descriptor; do not infer from family"
       },
       "capabilities": {
-        "keyboard_backlight": "sku_variant",
+        "keyboard_backlight": "white_or_four_zone_rgb",
         "rgb_zones": "unknown_per_sku",
         "rgb_protocol": "unknown",
         "fan_count": "unknown",
@@ -3371,7 +3393,7 @@
         "fan_control": "unknown",
         "ppt": "expected_but_probe_live",
         "smart_amp_aw88399": "unknown",
-        "keyboard_backlight_note": "Live LLL #76/#265: white levels on those hosts; RGB SKUs exist per PSREF. Not copied onto 82Y5/82YA."
+        "keyboard_backlight_note": "PSREF Spec: 4-zone or white (LLL #265 unit was a white one — not proof of white-only). Kernel exact 82Y9+M3CN uses EC 0x8227; the family M3CN entry expects 0x5507 and fails on this chassis."
       },
       "evidence": [
         {
@@ -3387,6 +3409,11 @@
         {
           "source": "lenovo-legion-linux-kernel-module",
           "claim": "kernel DMI PRODUCT_NAME 82Y9 exact match, M3CN31WW/M3CN43WW",
+          "confidence": "high"
+        },
+        {
+          "source": "kernel-ec-research",
+          "claim": "82Y9+M3CN EC id 0x8227 vs family M3CN 0x5507 mismatch — chassis-specific EC mapping needed",
           "confidence": "high"
         }
       ],
@@ -3439,7 +3466,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02. BIOS MACN (MACN33WW/MACN23WW) via LLL #331 + linux-hardware probe."
+      "notes": "Promoted from stub 2026-09-02. BIOS MACN (MACN33WW/MACN23WW) via LLL #331 + linux-hardware probe. 2026-09-02: Lenovo catalog latest MACN38WW."
     },
     {
       "machine_types": [
@@ -3488,7 +3515,7 @@
           "confidence": "medium"
         }
       ],
-      "notes": "Promoted from stub 2026-09-02. BIOS M2CN via LLL #93 (kernel comment: Slim 5 16IRH8 RTX 4070). Backlight white-only on that host; SKU variance possible."
+      "notes": "Promoted from stub 2026-09-02. BIOS M2CN via LLL #93 (kernel comment: Slim 5 16IRH8 RTX 4070). Backlight white-only on that host; SKU variance possible. 2026-09-02: Lenovo catalog latest M2CN40WW."
     }
   ],
   "family_patterns_not_machine_exact": [
