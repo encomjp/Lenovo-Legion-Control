@@ -28,6 +28,16 @@ python3 collector.py     # binds LEGION_TELEMETRY_HOST:LEGION_TELEMETRY_PORT (de
 curl http://127.0.0.1:8787/health   # -> {"ok": true, "count": <n>}
 ```
 
+## Tests
+
+Regression tests for the request path — gzip acceptance (the client sends
+`Content-Encoding: gzip`), corrupt/bomb guards, schema gate, verbatim storage:
+
+```bash
+pip install pytest fastapi uvicorn httpx
+python3 -m pytest server/test_collector.py -v
+```
+
 ## Run under systemd
 
 Place the file, then enable the unit:
