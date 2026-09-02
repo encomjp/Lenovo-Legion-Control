@@ -300,6 +300,8 @@ legion-cli check-update --apply
 
 Logging behavior is implemented in [`src/logging.rs`](../src/logging.rs). By default entries are written to stderr and the ring buffer. For the root system service, stderr is normally collected by journald; use `journalctl -u legion-control`. Set `LEGION_LOG_FILE=1` for a rotated JSON log under the process user's platform data directory, normally `~/.local/share/legion-control/`; for the root daemon this is often `/root/.local/share/legion-control/`, not the desktop user's log directory. Files older than seven days are cleaned up. `LEGION_LOG_RING` changes the ring size within the supported 100–2,000 range. The GUI's own logs are separate user-process logs.
 
+Debug: `LEGION_LIGHTING_OVERRIDE=spectrum|fourzone|white` forces the lighting capability probe to the given kind, letting you preview each Lighting UI branch on hardware that doesn't have it. Unset it for real behavior.
+
 `SIGHUP` reloads the daemon's inherited environment log filter; it does not change the service unit's environment. Prefer the IPC command for a running service:
 
 ```bash

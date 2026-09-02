@@ -42,13 +42,9 @@ const EFFECT_LABELS: &[&str] = &[
 ];
 
 /// Hardware lighting capability — `device::probe_lighting()`.
-/// `"None detected"` = white-only keyboard (fn+Q brightness), no Spectrum/
-/// Lighting/4-zone HID. Used to collapse the Lighting hub to a notice page.
-fn rgb_available() -> bool {
-    !matches!(
-        legion_core::device::detect().capabilities.lighting.as_str(),
-        "" | "None detected"
-    )
+/// Spectrum gets every tab; FourZone and White collapse to the notice page.
+fn lighting_kind() -> legion_core::device::LightingKind {
+    legion_core::device::detect().capabilities.lighting_kind
 }
 
 pub fn build_lighting(
@@ -56,54 +52,26 @@ pub fn build_lighting(
     app: &adw::Application,
 ) -> (gtk::Box, adw::ViewStack) {
     let cfg = legion_core::config::get();
+    let kind = lighting_kind();
     let page = page_lede("");
 
-    // White-only boards (e.g. Y7000P IRX9 83DG): no RGB HID → the zone tabs
-    // would write to nothing and trigger Fix-page scares ("RGB panic").
-    // Collapse to a single notice + the brightness control the EC already owns.
-    if !rgb_available() {
-        let (sec, card) = section_tip(
-            "Keyboard backlight",
-            Some("This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off."),
-        );
-        let note = gtk::Label::new(Some(
-            "This keyboard has white backlight only — no RGB zones or effects.\n\
-             Adjust brightness with fn+Q (50% → 100% → Off), or with the slider here:",
-        ));
-        note.set_wrap(true);
-        note.set_xalign(0.0);
-        note.set_margin_start(12);
-        note.set_margin_end(12);
-        note.set_margin_top(4);
-        note.add_css_class("dim-label");
-        card.append(&note);
-
-        // Native brightness slider bound to /sys/class/leds/*::kbd_backlight
-        let level = legion_core::keyboard::brightness().unwrap_or(0);
-        let max = legion_core::keyboard::max_brightness().unwrap_or(2);
-        let row = adw::ActionRow::builder()
-            .title("Backlight brightness")
-            .subtitle(format!("{} %", if max > 0 { level * 100 / max } else { 0 }))
-            .activatable(false)
-            .build();
-        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, max as f64, 1.0);
-        scale.set_value(level as f64);
-        scale.set_hexpand(true);
-        scale.set_valign(Align::Center);
-        let row_c = row.clone();
-        scale.connect_value_changed(move |s| {
-            let v = s.value() as u8;
-            let _ = legion_core::keyboard::set_brightness(v);
-            let maxv = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
-            row_c.set_subtitle(&format!("{} %", v * 100 / maxv));
-        });
-        row.add_suffix(&scale);
-        card.append(&row);
-        sec.append(&card);
-        page.append(&sec);
-
-        let tabs = adw::ViewStack::new(); // empty — no zone tabs on white-only boards
-        return (page, tabs);
+    // Non-Spectrum boards: the Spectrum write path targets 048d:c197 only, so
+    // zone tabs would write to nothing (or nothing exists to write to) and
+    // trigger Fix-page scares ("RGB panic"). Collapse to a single notice +
+    // the brightness control the EC already owns.
+    if kind != legion_core::device::LightingKind::Spectrum {
+        let (title, note) = match kind {
+            legion_core::device::LightingKind::White => (
+                "Keyboard backlight",
+                "This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off.",
+            ),
+            _ => (
+                "4-zone RGB keyboard",
+                "A 4-zone RGB keyboard was detected, but its controller isn't supported yet. \
+                 Brightness: fn+Q cycles 50% → 100% → Off.",
+            ),
+        };
+        return build_simple_backlight_page(&cfg, page, title, note);
     }
 
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
@@ -163,6 +131,55 @@ pub fn build_lighting(
         tabs.set_visible_child_name("keyboard");
     }
 
+    (page, tabs)
+}
+
+/// Fallback page for non-Spectrum lighting (white-only or unsupported
+/// 4-zone): a notice + the kbd_backlight brightness slider the EC owns.
+fn build_simple_backlight_page(
+    _cfg: &legion_core::config::AppConfig,
+    page: gtk::Box,
+    title: &str,
+    note: &str,
+) -> (gtk::Box, adw::ViewStack) {
+    let (sec, card) = section_tip(title, Some(note));
+    let note = gtk::Label::new(Some(
+        "This keyboard has white backlight only — no RGB zones or effects.\n\
+         Adjust brightness with fn+Q (50% → 100% → Off), or with the slider here:",
+    ));
+    note.set_wrap(true);
+    note.set_xalign(0.0);
+    note.set_margin_start(12);
+    note.set_margin_end(12);
+    note.set_margin_top(4);
+    note.add_css_class("dim-label");
+    card.append(&note);
+
+    // Native brightness slider bound to /sys/class/leds/*::kbd_backlight
+    let level = legion_core::keyboard::brightness().unwrap_or(0);
+    let max = legion_core::keyboard::max_brightness().unwrap_or(2);
+    let row = adw::ActionRow::builder()
+        .title("Backlight brightness")
+        .subtitle(format!("{} %", if max > 0 { level * 100 / max } else { 0 }))
+        .activatable(false)
+        .build();
+    let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, max as f64, 1.0);
+    scale.set_value(level as f64);
+    scale.set_hexpand(true);
+    scale.set_valign(Align::Center);
+    let row_c = row.clone();
+    scale.connect_value_changed(move |s| {
+        let v = s.value() as u8;
+        let _ = legion_core::keyboard::set_brightness(v);
+        let maxv = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
+        row_c.set_subtitle(&format!("{} %", v * 100 / maxv));
+    });
+    row.add_suffix(&scale);
+    card.append(&row);
+    sec.append(&card);
+    page.append(&sec);
+
+    let tabs = adw::ViewStack::new(); // empty — no zone tabs on white-only boards
     (page, tabs)
 }
 

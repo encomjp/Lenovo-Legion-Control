@@ -29,11 +29,68 @@ pub struct DeviceInfo {
     pub capabilities: Capabilities,
 }
 
+/// Structured lighting capability — derived from the HID probe.
+/// Drives the Lighting UI: `Spectrum` gets every tab (incl. per-key),
+/// `FourZone` gets keyboard-only, `White` collapses to the notice page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LightingKind {
+    /// Spectrum RGB (048d:c197) — per-key painting + 4 zones + logo.
+    Spectrum,
+    /// Lenovo Lighting / 4-zone RGB HID (048d:c193, c100, c965).
+    /// The write path (`SpectrumDevice::open`) currently targets c197 only,
+    /// so these boards get a notice page until the 4-zone protocol lands.
+    FourZone,
+    /// No RGB HID — white backlight via fn+Q / kbd_backlight sysfs.
+    White,
+}
+
+impl LightingKind {
+    /// Whether the per-key painter is supported.
+    pub fn per_key(&self) -> bool {
+        matches!(self, LightingKind::Spectrum)
+    }
+
+    /// Lighting tab names this hardware should show, in order.
+    /// FourZone returns an empty list: the Spectrum write path can't drive
+    /// those HIDs yet, so the UI collapses to a notice page (same as White).
+    pub fn tabs(&self) -> &'static [&'static str] {
+        match self {
+            LightingKind::Spectrum => &["keyboard", "front", "rear", "logo", "more"],
+            LightingKind::FourZone | LightingKind::White => &[],
+        }
+    }
+
+    /// Short nav subtitle for the Lighting rail entry.
+    pub fn nav_subtitle(&self) -> &'static str {
+        match self {
+            LightingKind::Spectrum => "Keyboard, front and rear bars, logo, per-key",
+            LightingKind::FourZone => "4-zone RGB keyboard detected — control coming soon",
+            LightingKind::White => "White backlight brightness",
+        }
+    }
+}
+
+/// Map probed USB HID (vid, pid) pairs to a lighting kind.
+/// Pure function so the mapping is unit-testable without sysfs.
+fn kind_from_hids(hids: &[(&str, &str)]) -> LightingKind {
+    if hids.contains(&("048d", "c197")) {
+        return LightingKind::Spectrum;
+    }
+    if hids
+        .iter()
+        .any(|(v, p)| *v == "048d" && (*p == "c193" || *p == "c100" || *p == "c965"))
+    {
+        return LightingKind::FourZone;
+    }
+    LightingKind::White
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capabilities {
     pub fan_backend: String,
     pub fans: Vec<FanCapability>,
     pub lighting: String,
+    pub lighting_kind: LightingKind,
     pub peak_gpu_w: Option<u32>,
     pub peak_gpu_source: String,
     pub ppt_attrs: Vec<String>,
@@ -198,8 +255,8 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
         "capability probe: fan backend {fan_backend:?} ({} fan channels)",
         fans.len()
     );
-    let lighting = probe_lighting();
-    log::debug!("capability probe: lighting {lighting:?}");
+    let (lighting_kind, lighting) = probe_lighting();
+    log::debug!("capability probe: lighting {lighting:?} (kind {lighting_kind:?})");
     let ppt_attrs = probe_ppt_attrs();
     let platform_profiles = crate::profile::choices();
     let has_custom = platform_profiles.iter().any(|p| p == "custom");
@@ -239,6 +296,7 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
         fan_backend,
         fans,
         lighting,
+        lighting_kind,
         peak_gpu_w,
         peak_gpu_source,
         ppt_attrs,
@@ -680,26 +738,66 @@ pub fn fan_title(id: u8) -> &'static str {
     }
 }
 
-fn probe_lighting() -> String {
+fn probe_lighting() -> (LightingKind, String) {
+    // Debug/testing override — lets any UI branch be exercised on hardware
+    // that doesn't have it: LEGION_LIGHTING_OVERRIDE=spectrum|fourzone|white
+    if let Ok(ov) = std::env::var("LEGION_LIGHTING_OVERRIDE") {
+        let kind = match ov.trim().to_ascii_lowercase().as_str() {
+            "spectrum" => Some(LightingKind::Spectrum),
+            "fourzone" | "4zone" => Some(LightingKind::FourZone),
+            "white" => Some(LightingKind::White),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            log::warn!("lighting probe: override via LEGION_LIGHTING_OVERRIDE={ov:?} → {kind:?}");
+            return (
+                kind,
+                format!("Override ({kind:?}) via LEGION_LIGHTING_OVERRIDE"),
+            );
+        }
+        log::debug!("lighting probe: LEGION_LIGHTING_OVERRIDE={ov:?} not recognized — ignored");
+    }
+
+    const PROBED_HIDS: [(&str, &str); 4] = [
+        ("048d", "c197"),
+        ("048d", "c193"),
+        ("048d", "c100"),
+        ("048d", "c965"),
+    ];
+    let present: Vec<(&str, &str)> = PROBED_HIDS
+        .iter()
+        .copied()
+        .filter(|(v, p)| usb_hid_present(v, p))
+        .collect();
+
     let mut kinds = Vec::new();
-    if usb_hid_present("048d", "c197") {
+    if present.contains(&("048d", "c197")) {
         log::debug!("lighting probe: Spectrum RGB HID (048d:c197) present");
         kinds.push("Spectrum RGB (048d:c197)");
     }
-    if usb_hid_present("048d", "c193") {
+    if present.contains(&("048d", "c193")) {
         log::debug!("lighting probe: Lenovo Lighting HID (048d:c193) present");
         kinds.push("Lenovo Lighting (048d:c193)");
     }
-    if usb_hid_present("048d", "c100") || usb_hid_present("048d", "c965") {
+    if present.contains(&("048d", "c100")) || present.contains(&("048d", "c965")) {
         log::debug!("lighting probe: 4-zone RGB HID (048d:c100/c965) present");
         kinds.push("4-zone RGB");
     }
-    if kinds.is_empty() {
-        log::debug!("lighting probe: none detected");
-        "None detected".into()
+
+    let kind = kind_from_hids(&present);
+    if present.is_empty() {
+        log::debug!("lighting probe: none detected → {kind:?}");
     } else {
-        kinds.join(" · ")
+        log::debug!("lighting probe: resolved {kind:?}");
     }
+    (
+        kind,
+        if kinds.is_empty() {
+            "None detected".into()
+        } else {
+            kinds.join(" · ")
+        },
+    )
 }
 
 fn probe_ppt_attrs() -> Vec<String> {
@@ -931,6 +1029,48 @@ fn read_u32(path: impl AsRef<std::path::Path>) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lighting_kind_from_hids() {
+        assert_eq!(kind_from_hids(&[]), LightingKind::White);
+        assert_eq!(kind_from_hids(&[("048d", "c197")]), LightingKind::Spectrum);
+        for pid in ["c193", "c100", "c965"] {
+            assert_eq!(
+                kind_from_hids(&[("048d", pid)]),
+                LightingKind::FourZone,
+                "pid {pid}"
+            );
+        }
+        // Non-Lenovo / unrelated HIDs → white.
+        assert_eq!(
+            kind_from_hids(&[("046d", "c53a"), ("048d", "c960")]),
+            LightingKind::White
+        );
+        // Spectrum wins when both classes are present.
+        assert_eq!(
+            kind_from_hids(&[("048d", "c100"), ("048d", "c197")]),
+            LightingKind::Spectrum
+        );
+    }
+
+    #[test]
+    fn lighting_kind_ui_surface() {
+        assert!(LightingKind::Spectrum.per_key());
+        assert!(!LightingKind::FourZone.per_key());
+        assert!(!LightingKind::White.per_key());
+
+        assert_eq!(
+            LightingKind::Spectrum.tabs(),
+            &["keyboard", "front", "rear", "logo", "more"]
+        );
+        // FourZone: write path not implemented yet → notice page, no tabs.
+        assert!(LightingKind::FourZone.tabs().is_empty());
+        assert!(LightingKind::White.tabs().is_empty());
+
+        assert!(LightingKind::Spectrum.nav_subtitle().contains("per-key"));
+        assert!(LightingKind::FourZone.nav_subtitle().contains("4-zone"));
+        assert!(LightingKind::White.nav_subtitle().contains("White"));
+    }
 
     #[test]
     fn detect_this_machine() {

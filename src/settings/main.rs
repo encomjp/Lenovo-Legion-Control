@@ -606,6 +606,10 @@ fn build_ui(app: &adw::Application) {
     nav_list.set_selection_mode(gtk::SelectionMode::Single);
     nav_list.add_css_class("navigation-sidebar");
     nav_list.add_css_class("sidebar-flat");
+    let lighting_subtitle = legion_core::device::detect()
+        .capabilities
+        .lighting_kind
+        .nav_subtitle();
     for (icon, title, tooltip) in [
         (
             include_bytes!("../../data/icons/home.svg").as_slice(),
@@ -625,7 +629,7 @@ fn build_ui(app: &adw::Application) {
         (
             include_bytes!("../../data/icons/lighting.svg"),
             "Lighting",
-            "Keyboard, front and rear bars, logo, per-key",
+            lighting_subtitle,
         ),
         (
             include_bytes!("../../data/icons/battery.svg"),
@@ -1142,9 +1146,13 @@ fn build_ui(app: &adw::Application) {
 
     // Restore Spectrum from disk (HID path — independent of daemon).
     let cfg = legion_core::config::get();
-    legion_core::keyboard::set_rgb_brightness_async(cfg.brightness);
-    legion_core::keyboard::set_logo_async(cfg.logo_on);
-    legion_core::keyboard::restore_lighting_async();
+    if legion_core::device::detect().capabilities.lighting_kind
+        == legion_core::device::LightingKind::Spectrum
+    {
+        legion_core::keyboard::set_rgb_brightness_async(cfg.brightness);
+        legion_core::keyboard::set_logo_async(cfg.logo_on);
+        legion_core::keyboard::restore_lighting_async();
+    }
 
     show_welcome_if_needed(
         &window,
