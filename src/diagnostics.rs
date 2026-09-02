@@ -161,6 +161,21 @@ pub struct DeepReport {
     /// Raw yogafan fan attrs (fan*_input/label) -- cheap proof that yogafan actually tachd.
     #[serde(default)]
     pub yogafan_attrs: Vec<(String, String)>,
+    /// Full DMI/SMBIOS sysfs dump (product family, sku, board name, ec firmware release, etc.)
+    #[serde(default)]
+    pub dmi_dump: Vec<(String, String)>,
+    /// Discovered HID controllers (vendor/product, device name, driver) for keyboard/RGB detection
+    #[serde(default)]
+    pub hid_devices: Vec<(String, String)>,
+    /// Discovered thermal zones (name (type) -> temp) for EC thermistor mapping
+    #[serde(default)]
+    pub thermal_zones: Vec<(String, String)>,
+    /// Discovered platform profile choices from ACPI/WMI
+    #[serde(default)]
+    pub platform_profile_choices: Vec<String>,
+    /// Discovered WMI devices/GUIDs
+    #[serde(default)]
+    pub wmi_devices: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -219,6 +234,21 @@ pub struct HardwareInfo {
     pub memory: MemoryDetail,
     pub storage: StorageDetail,
     pub display: DisplayDetail,
+    #[serde(default)]
+    pub motherboard: Option<MotherboardDetail>,
+    #[serde(default)]
+    pub keyboard_lighting: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct MotherboardDetail {
+    pub board_name: Option<String>,
+    pub board_version: Option<String>,
+    pub product_family: Option<String>,
+    pub product_sku: Option<String>,
+    pub ec_firmware_release: Option<String>,
+    pub bios_date: Option<String>,
+    pub bios_release: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -345,6 +375,8 @@ pub struct BatterySummary {
     pub health_pct: Option<f64>,
     /// Effective firmware limiter state: 60 / 80 / 100.
     pub charge_limit_pct: u32,
+    #[serde(default)]
+    pub charge_types: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -521,6 +553,7 @@ pub fn collect() -> DiagnosticsReport {
         cycles: battery::cycles(),
         health_pct: battery::health_pct(),
         charge_limit_pct: battery::charge_limit_pct(),
+        charge_types: battery::charge_types(),
     };
     // Keep the legacy flattened fields and canonical battery block coherent
     // within this report even if AC state changes during collection.
@@ -900,6 +933,103 @@ fn collect_deep(reason: &str) -> DeepReport {
             .unwrap_or_default()
     });
 
+    // ─── DMI / SMBIOS sysfs inventory (safe whitelist, no serial/UUID) ───
+    for key in [
+        "bios_date",
+        "bios_release",
+        "bios_vendor",
+        "bios_version",
+        "board_name",
+        "board_vendor",
+        "board_version",
+        "chassis_type",
+        "chassis_vendor",
+        "chassis_version",
+        "ec_firmware_release",
+        "product_family",
+        "product_name",
+        "product_sku",
+        "product_version",
+        "sys_vendor",
+    ] {
+        let p = format!("/sys/class/dmi/id/{key}");
+        if let Ok(v) = std::fs::read_to_string(&p) {
+            let v = v.trim();
+            if !v.is_empty() {
+                deep.dmi_dump.push((key.to_string(), v.to_string()));
+            }
+        }
+    }
+
+    // ─── HID devices inventory (Keyboard, Touchpad, RGB controllers) ───
+    if let Ok(entries) = std::fs::read_dir("/sys/bus/hid/devices") {
+        for e in entries.flatten() {
+            let hid_id = e.file_name().to_string_lossy().into_owned();
+            let mut info = Vec::new();
+            if let Ok(uevent) = std::fs::read_to_string(e.path().join("uevent")) {
+                for line in uevent.lines() {
+                    if let Some(name) = line.strip_prefix("HID_NAME=") {
+                        info.push(name.to_string());
+                    } else if let Some(driver) = line.strip_prefix("DRIVER=") {
+                        info.push(format!("driver={driver}"));
+                    }
+                }
+            }
+            let desc = if info.is_empty() {
+                "unknown".to_string()
+            } else {
+                info.join(" | ")
+            };
+            deep.hid_devices.push((hid_id, desc));
+        }
+        deep.hid_devices.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    // ─── ACPI Thermal Zones (SEN1..5, TCPU, acpitz, etc.) ───
+    if let Ok(zones) = std::fs::read_dir("/sys/class/thermal") {
+        for e in zones.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("thermal_zone") {
+                continue;
+            }
+            let ztype = std::fs::read_to_string(e.path().join("type"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+            let temp = std::fs::read_to_string(e.path().join("temp"))
+                .ok()
+                .and_then(|s| s.trim().parse::<i64>().ok())
+                .map(|mc| format!("{:.1}°C", mc as f64 / 1000.0))
+                .unwrap_or_else(|| "N/A".to_string());
+            deep.thermal_zones.push((format!("{name} ({ztype})"), temp));
+        }
+        deep.thermal_zones.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    // ─── Platform profile choices from ACPI / WMI ───
+    for p in [
+        "/sys/class/platform-profile/platform-profile-0/choices",
+        "/sys/firmware/acpi/platform_profile_choices",
+    ] {
+        if let Ok(content) = std::fs::read_to_string(p) {
+            deep.platform_profile_choices = content
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
+            if !deep.platform_profile_choices.is_empty() {
+                break;
+            }
+        }
+    }
+
+    // ─── Discovered WMI devices / GUIDs ───
+    if let Ok(entries) = std::fs::read_dir("/sys/bus/wmi/devices") {
+        for e in entries.flatten() {
+            let g = e.file_name().to_string_lossy().into_owned();
+            deep.wmi_devices.push(g);
+        }
+        deep.wmi_devices.sort();
+    }
+
     deep.capability_digest = capability_digest();
     deep
 }
@@ -1269,12 +1399,34 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         refresh_hz,
     };
 
+    // 6. Motherboard / DMI details
+    let read_dmi = |name: &str| -> Option<String> {
+        std::fs::read_to_string(format!("/sys/class/dmi/id/{name}"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let motherboard = Some(MotherboardDetail {
+        board_name: read_dmi("board_name"),
+        board_version: read_dmi("board_version"),
+        product_family: read_dmi("product_family"),
+        product_sku: read_dmi("product_sku"),
+        ec_firmware_release: read_dmi("ec_firmware_release"),
+        bios_date: read_dmi("bios_date"),
+        bios_release: read_dmi("bios_release"),
+    });
+
+    // 7. Keyboard lighting classification
+    let keyboard_lighting = Some(dev.capabilities.lighting.clone());
+
     HardwareInfo {
         cpu,
         gpu,
         memory,
         storage,
         display,
+        motherboard,
+        keyboard_lighting,
     }
 }
 
