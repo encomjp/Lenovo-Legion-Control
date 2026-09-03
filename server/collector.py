@@ -155,9 +155,16 @@ def gunzip_capped(data: bytes, cap: int) -> bytes:
     Raises ValueError when the cap is exceeded and zlib.error on corrupt data.
     """
     dec = zlib.decompressobj(wbits=31)  # 31 = gzip container
-    chunks: list[bytes] = []
-    out_len = 0
-    piece = data
+    out = dec.decompress(data, cap + 1)
+    if len(out) > cap:
+        raise ValueError("decompressed payload too large")
+    if dec.eof:
+        return out
+    # Slow path: output was capped mid-stream (unconsumed_tail pending) or
+    # the stream needs flush() to complete. Preserves exact capped semantics.
+    chunks: list[bytes] = [out] if out else []
+    out_len = len(out)
+    piece = dec.unconsumed_tail
     while piece:
         part = dec.decompress(piece, cap + 1 - out_len)
         out_len += len(part)
