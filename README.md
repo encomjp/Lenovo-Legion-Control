@@ -1,5 +1,9 @@
 # Legion Control
 
+<p align="center"><img src="lenovo-legion-tool/docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="310"></p>
+
+<p align="center"><sub>Made in the European Union · for everyone</sub></p>
+
 Linux control app for **Lenovo Legion** laptops — fans, power modes, Spectrum RGB, battery, **CPU Tuning** (thermal throttle 70–98°C, Curve Optimizer, stability test — chips on top, hover tips) and tray autostart.
 
 This is the **monorepo root**: research notes, kernel-driver PoCs, and the SVG icon set live here; the Rust application, installer, and GitHub-facing docs live in the nested repo **[`lenovo-legion-tool/`](./lenovo-legion-tool/)**.
