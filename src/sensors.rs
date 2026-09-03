@@ -11,8 +11,8 @@ use std::sync::Mutex;
 
 use crate::battery;
 
-/// Cached mapping of hwmon subsystem names to their base paths.
-static HWMON_CACHE: Mutex<Option<HashMap<String, Vec<PathBuf>>>> = Mutex::new(None);
+/// Cached mapping of hwmon subsystem names to their base paths along with timestamp.
+static HWMON_CACHE: Mutex<Option<(HashMap<String, Vec<PathBuf>>, std::time::Instant)>> = Mutex::new(None);
 
 fn scan_all_hwmon() -> HashMap<String, Vec<PathBuf>> {
     let mut map: HashMap<String, Vec<PathBuf>> = HashMap::new();
@@ -161,19 +161,23 @@ pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
-    if let Some(cache) = guard.as_ref() {
-        if let Some(paths) = cache.get(name) {
-            if paths.iter().all(|p| p.exists()) {
-                return paths.clone();
+    if let Some((cache, cached_at)) = guard.as_ref() {
+        if cached_at.elapsed() < std::time::Duration::from_secs(5) {
+            if let Some(paths) = cache.get(name) {
+                if paths.iter().all(|p| p.exists()) {
+                    return paths.clone();
+                }
+            } else {
+                // Negative cache hit: device was not present in recent scan — avoid rescanning
+                return Vec::new();
             }
         }
     }
     let fresh = scan_all_hwmon();
     let result = fresh.get(name).cloned().unwrap_or_default();
-    *guard = Some(fresh);
+    *guard = Some((fresh, std::time::Instant::now()));
     result
 }
-
 /// Get the first hwmon device matching a name.
 pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
     find_hwmon(name).into_iter().next()

@@ -111,8 +111,22 @@ impl TempFilter {
 }
 
 pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option<u32> {
+    compute_target_bounded(cur_max, temp_mc, cfg, MIN, MAX_FULL)
+}
+
+pub fn compute_target_dynamic(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option<u32> {
+    let (min_freq, max_freq) = read_cpu_freq_bounds();
+    compute_target_bounded(cur_max, temp_mc, cfg, min_freq, max_freq)
+}
+pub fn compute_target_bounded(
+    cur_max: u32,
+    temp_mc: i32,
+    cfg: &ThermalConfig,
+    min_freq: u32,
+    max_freq: u32,
+) -> Option<u32> {
     log::debug!(
-        "thermal: compute_target(cur_max={cur_max}, temp_mc={temp_mc}, enabled={}, max_temp={})",
+        "thermal: compute_target(cur_max={cur_max}, temp_mc={temp_mc}, enabled={}, max_temp={}, min_freq={min_freq}, max_freq={max_freq})",
         cfg.enabled,
         cfg.max_temp
     );
@@ -126,16 +140,16 @@ pub fn compute_target(cur_max: u32, temp_mc: i32, cfg: &ThermalConfig) -> Option
         "thermal: compute_target limits: max_mc={max_mc}, restore_mc={restore_mc}, overshoot={} mc",
         temp_mc - max_mc
     );
-    if temp_mc >= max_mc && cur_max > MIN {
-        let target = cur_max.saturating_sub(down_step(temp_mc - max_mc)).max(MIN);
+    if temp_mc >= max_mc && cur_max > min_freq {
+        let target = cur_max.saturating_sub(down_step(temp_mc - max_mc)).max(min_freq);
         log::debug!(
-            "thermal: compute_target → Some({target}) (throttle: temp ≥ max {max_mc}, floor MIN {MIN})"
+            "thermal: compute_target → Some({target}) (throttle: temp ≥ max {max_mc}, floor min_freq {min_freq})"
         );
         Some(target)
-    } else if temp_mc <= restore_mc && cur_max < MAX_FULL {
-        let target = cur_max.saturating_add(STEP_UP).min(MAX_FULL);
+    } else if temp_mc <= restore_mc && cur_max < max_freq {
+        let target = cur_max.saturating_add(STEP_UP).min(max_freq);
         log::debug!(
-            "thermal: compute_target → Some({target}) (restore: temp ≤ restore {restore_mc}, cap MAX_FULL {MAX_FULL})"
+            "thermal: compute_target → Some({target}) (restore: temp ≤ restore {restore_mc}, cap max_freq {max_freq})"
         );
         Some(target)
     } else {
@@ -278,6 +292,31 @@ pub fn read_cur_max() -> Option<u32> {
     )
 }
 
+pub fn max_freq() -> u32 {
+    read_sysfs_num::<u32>(
+        Path::new("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"),
+        "cpuinfo_max",
+    )
+    .unwrap_or(MAX_FULL)
+}
+
+pub fn read_cpu_freq_bounds() -> (u32, u32) {
+    let max = max_freq();
+    let min = read_sysfs_num::<u32>(
+        Path::new("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq"),
+        "cpuinfo_min",
+    )
+    .map(|m| {
+        let throttle_floor = max.saturating_sub(1_200_000).max(m);
+        throttle_floor.min(max.saturating_sub(200_000))
+    })
+    .unwrap_or(MIN);
+    (min, max)
+}
+
+pub fn restore_full_speed() -> Result<(), String> {
+    write_all_cpus(max_freq())
+}
 pub fn write_all_cpus(freq: u32) -> Result<(), String> {
     let base = Path::new("/sys/devices/system/cpu");
     let entries = match fs::read_dir(base) {
@@ -430,6 +469,32 @@ mod tests {
             Some(MAX_FULL)
         );
     }
+    #[test]
+    fn compute_target_bounded_handles_midrange_cpu() {
+        let cfg = ThermalConfig {
+            enabled: true,
+            max_temp: 85,
+        };
+        // Ryzen 5 5600H: 3.2 GHz floor, 4.2 GHz ceiling
+        let min_freq = 3_200_000;
+        let max_freq = 4_200_000;
+        // Overheating at 86°C -> throttle down from 4.2 GHz
+        assert_eq!(
+            compute_target_bounded(4_200_000, 86_000, &cfg, min_freq, max_freq),
+            Some(4_100_000)
+        );
+        // At floor (3.2 GHz) -> clamps at floor
+        assert_eq!(
+            compute_target_bounded(min_freq, 90_000, &cfg, min_freq, max_freq),
+            None
+        );
+        // Cool (70°C) -> restores up toward 4.2 GHz
+        assert_eq!(
+            compute_target_bounded(3_800_000, 70_000, &cfg, min_freq, max_freq),
+            Some(3_900_000)
+        );
+    }
+
 
     #[test]
     fn compute_target_disabled_holds_below_restore() {

@@ -143,8 +143,8 @@ pub fn smi_query(query: &str) -> Option<String> {
     value
 }
 
-/// Full `nvidia-smi -q` dump (trimmed of the noisy header). Returns None on
-/// AMD-only machines. Cap ~16 KB — deep reports only, never minute pushes.
+/// Full `nvidia-smi -q` dump (trimmed of the noisy header, with hardware serials/UUIDs redacted).
+/// Returns None on AMD-only machines. Cap ~32 KB — deep reports only, never minute pushes.
 pub fn detailed_query() -> Option<String> {
     let raw = smi_run(&["-q"])?;
     // Trim the fixed header block (timestamp etc.) — keep from "Driver" on.
@@ -152,9 +152,31 @@ pub fn detailed_query() -> Option<String> {
         Some(i) => &raw[i..],
         None => raw.as_str(),
     };
+    // Redact hardware identifiers (GPU UUID, serial numbers, part numbers, PDI) to enforce anonymity
+    let sanitized = body
+        .lines()
+        .map(|line| {
+            let lower = line.to_lowercase();
+            if lower.contains("gpu uuid")
+                || lower.contains("serial number")
+                || lower.contains("gpu part number")
+                || lower.contains("gpu pdi")
+            {
+                if let Some((k, _)) = line.split_once(':') {
+                    format!("{k}: [REDACTED]")
+                } else {
+                    "[REDACTED]".to_string()
+                }
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
     const MAX: usize = 32 * 1024;
-    let mut out: String = body.chars().take(MAX).collect();
-    if body.len() > MAX {
+    let mut out: String = sanitized.chars().take(MAX).collect();
+    if sanitized.len() > MAX {
         out.push_str("\n… [truncated]");
     }
     Some(out)
@@ -254,6 +276,68 @@ pub fn read_power_max() -> Option<f64> {
         }
     }
 }
+/// NVIDIA default power limit (W) — the non-boost baseline (e.g. 80 on the
+/// RTX 5080 Legion Pro 7). The max_limit − default_limit delta is the
+/// Dynamic Boost headroom. None on AMD-only machines or when nvidia-smi is
+/// silent.
+pub fn read_power_default() -> Option<f64> {
+    let raw = smi_query("power.default_limit")?;
+    match raw.parse::<f64>() {
+        Ok(v) => {
+            log::debug!("gpu power default_limit: {v} W");
+            Some(v)
+        }
+        Err(e) => {
+            log::warn!("gpu power default_limit parse failed for {raw:?}: {e}");
+            None
+        }
+    }
+}
+
+/// Currently enforced dGPU power limit (W). Plain `power.limit` reports
+/// `[N/A]` while the card idles in a low P-state, so the enforced limit is
+/// the actionable triage value. None when the dGPU is asleep or absent.
+pub fn read_power_enforced() -> Option<f64> {
+    let raw = smi_query("enforced.power.limit")?;
+    match raw.parse::<f64>() {
+        Ok(v) => {
+            log::debug!("gpu power enforced limit: {v} W");
+            Some(v)
+        }
+        Err(e) => {
+            log::warn!("gpu power enforced limit parse failed for {raw:?}: {e}");
+            None
+        }
+    }
+}
+
+/// Current dGPU performance state (`P0`…`P15`), sanitized to the NVIDIA
+/// whitelist — anything else (idle sentinels, localized strings) maps to
+/// None so the report only ever carries strictly typed values.
+pub fn read_pstate() -> Option<String> {
+    sanitize_pstate(&smi_query("pstate")?)
+}
+
+/// Pure sanitizer behind [`read_pstate`]: trim, uppercase, accept only
+/// `P0`–`P15`. Exported for tests.
+pub(crate) fn sanitize_pstate(raw: &str) -> Option<String> {
+    let num: u32 = raw.trim().to_ascii_uppercase().strip_prefix('P')?.parse().ok()?;
+    if num <= 15 {
+        Some(format!("P{num}"))
+    } else {
+        None
+    }
+}
+
+/// Dynamic Boost headroom (W): how far the firmware ceiling sits above the
+/// non-boost baseline. `None` when either limit is unknown or the ceiling
+/// does not exceed the baseline (no boost range to report).
+pub(crate) fn dynamic_boost_headroom(max_w: Option<f64>, default_w: Option<f64>) -> Option<f64> {
+    match (max_w, default_w) {
+        (Some(mx), Some(df)) if mx > df => Some(((mx - df) * 100.0).round() / 100.0),
+        _ => None,
+    }
+}
 
 /// Pure helper: parse a single nvidia-smi CSV value. Trimmed whitespace,
 /// empty string → None, parse failure → None. Extracted for tests.
@@ -305,5 +389,30 @@ mod tests {
         let m4 = parse_metrics_batch("");
         assert_eq!(m4.temp, None);
         assert_eq!(m4.power, None);
+    }
+    #[test]
+    fn sanitize_pstate_accepts_only_p0_through_p15() {
+        assert_eq!(sanitize_pstate("P0"), Some("P0".to_string()));
+        assert_eq!(sanitize_pstate("P8"), Some("P8".to_string()));
+        assert_eq!(sanitize_pstate("P15"), Some("P15".to_string()));
+        assert_eq!(sanitize_pstate("  p0  "), Some("P0".to_string()));
+        assert_eq!(sanitize_pstate("[N/A]"), None);
+        assert_eq!(sanitize_pstate("P16"), None);
+        assert_eq!(sanitize_pstate(""), None);
+        assert_eq!(sanitize_pstate("P"), None);
+        assert_eq!(sanitize_pstate("Q3"), None);
+    }
+
+    #[test]
+    fn boost_headroom_is_max_minus_default_only_when_positive() {
+        // Live Legion Pro 7 shape: 175 W ceiling over an 80 W baseline.
+        assert_eq!(
+            dynamic_boost_headroom(Some(175.0), Some(80.0)),
+            Some(95.0)
+        );
+        assert_eq!(dynamic_boost_headroom(Some(80.0), Some(80.0)), None);
+        assert_eq!(dynamic_boost_headroom(Some(60.0), Some(80.0)), None);
+        assert_eq!(dynamic_boost_headroom(None, Some(80.0)), None);
+        assert_eq!(dynamic_boost_headroom(Some(175.0), None), None);
     }
 }

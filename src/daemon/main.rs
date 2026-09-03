@@ -257,6 +257,17 @@ fn main() {
 
     log::info!("Listening on {}", path.display());
 
+    // LOQ 15AHP10 83JG — silently ensure yogafan is loaded (in-tree, Fedora 44+)
+    // BEFORE device detection so OnceLock binds to the working tachometer backend.
+    if legion_core::fans::needs_yogafan_setup() {
+        log::info!("fans: yogafan missing but WMI tach is 0 — attempting auto modprobe");
+        if legion_core::fans::ensure_yogafan_loaded() {
+            log::info!("fans: yogafan auto-loaded");
+        } else {
+            log::warn!("fans: yogafan auto-load failed — UI will show Unlock prompt");
+        }
+    }
+
     // ── hardware fingerprint ──
     let info = device::detect();
     log::info!(
@@ -297,15 +308,6 @@ fn main() {
         info.capabilities.platform_profiles.join(", "),
         info.capabilities.peak_gpu_w
     );
-    // LOQ 15AHP10 83JG — silently ensure yogafan is loaded (in-tree, Fedora 44+)
-    if legion_core::fans::needs_yogafan_setup() {
-        log::info!("fans: yogafan missing but WMI tach is 0 — attempting auto modprobe");
-        if legion_core::fans::ensure_yogafan_loaded() {
-            log::info!("fans: yogafan auto-loaded");
-        } else {
-            log::warn!("fans: yogafan auto-load failed — UI will show Unlock prompt");
-        }
-    }
     undervolt::start_persistence_worker();
 
     // Adopt the boot-time limiter state so the watchdog maintains it across
@@ -492,7 +494,7 @@ fn main() {
 /// Best-effort hardware cleanup on daemon exit: unthrottle CPUs and return
 /// fans to auto so `systemctl stop` never leaves the machine capped.
 fn restore_hardware_on_shutdown() {
-    match thermal::write_all_cpus(thermal::MAX_FULL) {
+    match thermal::restore_full_speed() {
         Ok(()) => log::info!("shutdown: restored scaling_max_freq to full speed"),
         Err(e) => log::warn!("shutdown: could not restore scaling_max_freq: {e}"),
     }
@@ -702,7 +704,7 @@ fn thermal_governor(
         let cfg_snapshot = cfg.read().unwrap_or_else(|p| p.into_inner()).clone();
         let limit_mc = cfg_snapshot.max_temp as i32 * 1000;
         let smooth_mc = temp_filter.effective(temp_mc, limit_mc);
-        if let Some(target) = thermal::compute_target(cur, smooth_mc, &cfg_snapshot) {
+        if let Some(target) = thermal::compute_target_dynamic(cur, smooth_mc, &cfg_snapshot) {
             match thermal::write_all_cpus(target) {
                 Ok(()) => {
                     log::info!(
@@ -1055,7 +1057,7 @@ fn process_command(
             // Disabling a mid-throttle governor must not leave CPUs capped:
             // restore full speed immediately.
             if was_enabled && !enabled {
-                match thermal::write_all_cpus(thermal::MAX_FULL) {
+                match thermal::restore_full_speed() {
                     Ok(()) => log::info!("thermal governor disabled — restored full speed"),
                     Err(e) => log::warn!("thermal governor disable: restore failed: {e}"),
                 }

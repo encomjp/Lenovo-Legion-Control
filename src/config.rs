@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 const VERSION: u32 = 4;
 
@@ -467,12 +467,28 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
     }
 }
 
-fn store() -> &'static Mutex<AppConfig> {
-    static STORE: OnceLock<Mutex<AppConfig>> = OnceLock::new();
-    STORE.get_or_init(|| {
-        log::trace!("config::store — initializing config store from disk");
-        Mutex::new(with_config_lock(load_from_disk))
+struct CachedConfig {
+    config: AppConfig,
+    last_mtime: Option<std::time::SystemTime>,
+    last_checked: std::time::Instant,
+}
+
+static STORE: std::sync::LazyLock<Mutex<CachedConfig>> = std::sync::LazyLock::new(|| {
+    log::trace!("config::store — initializing config store from disk");
+    let (cfg, mtime) = with_config_lock(|| {
+        let c = load_from_disk();
+        let m = fs::metadata(config_path()).and_then(|meta| meta.modified()).ok();
+        (c, m)
+    });
+    Mutex::new(CachedConfig {
+        config: cfg,
+        last_mtime: mtime,
+        last_checked: std::time::Instant::now(),
     })
+});
+
+fn store() -> &'static Mutex<CachedConfig> {
+    &STORE
 }
 
 fn load_from_disk() -> AppConfig {
@@ -595,7 +611,23 @@ fn write_disk(cfg: &AppConfig) {
 pub fn get() -> AppConfig {
     log::trace!("config::get()");
     match store().lock() {
-        Ok(g) => g.clone(),
+        Ok(mut g) => {
+            let now = std::time::Instant::now();
+            if now.duration_since(g.last_checked) >= std::time::Duration::from_millis(500) {
+                g.last_checked = now;
+                let current_mtime = fs::metadata(config_path()).and_then(|m| m.modified()).ok();
+                if current_mtime != g.last_mtime {
+                    let (cfg, mtime) = with_config_lock(|| {
+                        let c = load_from_disk();
+                        let m = fs::metadata(config_path()).and_then(|meta| meta.modified()).ok();
+                        (c, m)
+                    });
+                    g.config = cfg;
+                    g.last_mtime = mtime;
+                }
+            }
+            g.config.clone()
+        }
         Err(_) => {
             log::warn!("config::get — config mutex poisoned, unwrap_or_default fallback used");
             AppConfig::default()
@@ -616,12 +648,16 @@ pub fn update(f: impl FnOnce(&mut AppConfig)) {
         // Re-read the on-disk state first: another process (daemon/GUI) may
         // have written since our cache was last updated. We are already
         // holding the config lock, so this read is serialized too.
-        *g = load_from_disk();
+        let mut cfg = load_from_disk();
         log::trace!("config::update — invoking caller closure");
-        f(&mut g);
-        g.version = VERSION;
+        f(&mut cfg);
+        cfg.version = VERSION;
         log::debug!("config::update — closure applied, writing updated config");
-        write_disk(&g);
+        write_disk(&cfg);
+        let mtime = fs::metadata(config_path()).and_then(|m| m.modified()).ok();
+        g.config = cfg;
+        g.last_mtime = mtime;
+        g.last_checked = std::time::Instant::now();
     });
 }
 

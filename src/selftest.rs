@@ -462,7 +462,7 @@ pub fn scan_faults() -> Vec<Fault> {
                 format!(
                     "conservation_mode={} but charge_types selection is [{}]",
                     u8::from(cons),
-                    types.split('[').nth(1).unwrap_or("?").trim_end_matches(']')
+                    types.split('[').nth(1).and_then(|s| s.split(']').next()).unwrap_or("?")
                 ),
             ));
         }

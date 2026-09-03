@@ -4,10 +4,15 @@
 //! The report is built from a field whitelist; nothing identifying is ever
 //! collected. Excluded by construction: hostname, username, serial numbers,
 //! MAC addresses, IP addresses, disk serials, per-key colour maps, custom
-//! user strings. Included: hardware model/type/BIOS/CPU/GPU/EC identity,
+//! user strings, audio sink names, EDID bytes, power-supply uevent dumps.
+//! Included: hardware model/type/BIOS/CPU/GPU/EC identity,
 //! distro+kernel, sensor readings, battery health stats (no serial), fan
 //! states, thermal/CO configuration, a small settings digest, a slim log
 //! digest (counts + last error, passed through `redact_home_paths` here),
+//! AC/charging state (whitelisted tokens + watt/volt numbers), cpufreq
+//! policy (governor, EPP, p-state mode, boost flag), display connector/VRR
+//! (sanitized names + booleans, no EDID serials), speaker-amp health
+//! (booleans + one token), dGPU power limits/P-state (numbers + token),
 //! and the self-check
 //! results.
 //!
@@ -63,7 +68,7 @@ pub const DEFAULT_TELEMETRY_KEY: &str =
 /// via override or configured endpoint.
 pub const DEFAULT_TAILSCALE_ENDPOINT: &str = "http://127.0.0.1:8787/v1/diagnostics";
 
-pub const REPORT_SCHEMA_VERSION: u32 = 3;
+pub const REPORT_SCHEMA_VERSION: u32 = 4;
 
 /// Deep-report cadence: full sensor dump sent on daemon launch, every hour,
 /// and whenever the capability digest changes (new fan channels, amp bound,
@@ -114,6 +119,13 @@ pub struct DiagnosticsReport {
     /// Detailed hardware inventory (CPU, GPU, RAM, storage, display).
     #[serde(default)]
     pub hardware: HardwareInfo,
+    /// Live power & charging state (AC adapter presence, charge rate).
+    /// Minute-level — the `battery` block above carries the slow-moving
+    /// health stats (cycles, design capacity, limiter).
+    pub power: PowerInfo,
+    /// Speaker-amp health for the Cirrus/Realtek fleet (typed booleans plus
+    /// a whitelisted health token — never sink names or mixer free text).
+    pub audio: AudioDigest,
     /// Deep diagnostic block — present only on launch / hourly /
     /// capability-change reports. Null on the 1-minute heartbeat pushes.
     #[serde(default)]
@@ -261,6 +273,23 @@ pub struct CpuDetail {
     pub max_clock_mhz: Option<u32>,
     pub microcode: String,
     pub governor: String,
+    /// `energy_performance_preference` for cpu0 (whitelisted: performance,
+    /// balance_performance, balance_power, power, default — else "other").
+    /// None when the cpufreq node is unreadable (e.g. custom kernels).
+    #[serde(default)]
+    pub energy_performance_preference: Option<String>,
+    /// cpufreq scaling driver (e.g. `amd-pstate-epp`, `intel_pstate`).
+    /// Charset-sanitized kernel name — never identifying.
+    #[serde(default)]
+    pub scaling_driver: Option<String>,
+    /// P-state backend mode: `amd-pstate:active|passive|guided|disable`,
+    /// `intel-pstate:active|passive|off`, or `none` (acpi-cpufreq/unknown).
+    #[serde(default)]
+    pub pstate_mode: Option<String>,
+    /// CPU frequency boost (turbo) toggle from
+    /// `/sys/devices/system/cpu/cpufreq/boost`. None when the knob is absent.
+    #[serde(default)]
+    pub boost_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -277,6 +306,23 @@ pub struct GpuDetail {
     /// this boot), "present" (non-NVIDIA), or "absent" (no discrete GPU).
     #[serde(default)]
     pub state: Option<String>,
+    /// Currently enforced dGPU power limit (W, `enforced.power.limit`).
+    /// None while the dGPU sleeps or on AMD-only machines.
+    #[serde(default)]
+    pub power_limit_w: Option<f64>,
+    /// Firmware ceiling (W, `power.max_limit`, e.g. 175 on RTX 5080 Pro 7).
+    #[serde(default)]
+    pub power_max_w: Option<f64>,
+    /// Non-boost baseline (W, `power.default_limit`, e.g. 80).
+    #[serde(default)]
+    pub power_default_w: Option<f64>,
+    /// Dynamic Boost headroom (W) = max − default when the ceiling exceeds
+    /// the baseline. Lets the fleet see the boost range at a glance.
+    #[serde(default)]
+    pub dynamic_boost_headroom_w: Option<f64>,
+    /// Current dGPU P-state (`P0`…`P15`, whitelisted). None when asleep.
+    #[serde(default)]
+    pub pstate: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -305,6 +351,68 @@ pub struct NvmeDrive {
 pub struct DisplayDetail {
     pub resolution: Option<String>, // e.g. 2560x1600
     pub refresh_hz: Option<u32>,    // e.g. 240
+    /// Chosen DRM connector short name (e.g. `eDP-1`, `HDMI-A-1`): the
+    /// internal panel when connected, else the first connected output.
+    /// Charset-sanitized (`[A-Za-z0-9-]`, ≤16 chars) — never EDID bytes.
+    #[serde(default)]
+    pub connector: Option<String>,
+    /// Variable-refresh-rate switch state from the connector's
+    /// `vrr_enabled` sysfs knob. None when the kernel does not expose it
+    /// (no guessing from EDID or model tables).
+    #[serde(default)]
+    pub vrr_capable: Option<bool>,
+}
+
+/// Live power & charging state. All values are anonymous by construction:
+/// adapter presence/type as whitelisted tokens, electrical readings as
+/// plain numbers. No uevent dumps (those carry battery serial numbers).
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct PowerInfo {
+    /// True when an AC-type supply (barrel `Mains` or USB-C `USB`) reports
+    /// `online == 1`. None when no AC supply node exists.
+    #[serde(default)]
+    pub ac_online: Option<bool>,
+    /// Whitelisted supply type: `Mains`, `USB`, or `Other`. None when no AC
+    /// supply node exists.
+    #[serde(default)]
+    pub ac_type: Option<String>,
+    /// Whitelisted battery status: `Charging`, `Discharging`, `Full`,
+    /// `Not charging`, or `Unknown`.
+    #[serde(default)]
+    pub charge_state: Option<String>,
+    /// Instantaneous battery power (`power_now`, W). 0 while full on AC.
+    #[serde(default)]
+    pub charge_rate_w: Option<f64>,
+    /// Battery terminal voltage (V). Mirrors `battery.voltage_v` for
+    /// fleet queries that slice on the power block.
+    #[serde(default)]
+    pub voltage_v: Option<f64>,
+}
+
+/// Speaker-amp health from `audio::diagnose`, reduced to strictly typed
+/// values. The diagnosis also sees sink names and mixer free text — those
+/// NEVER enter this struct (only booleans plus one whitelisted token).
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct AudioDigest {
+    /// `ok` | `soft-issue` | `hardware-broken` | `not-applicable`.
+    pub health: String,
+    /// AW88399-class amp described in ACPI (`AWDZ8399` node present).
+    pub amp_present: bool,
+    /// Amp driver actually bound (sound works through the smart amp).
+    pub amp_bound: bool,
+    /// Amp kernel modules loaded.
+    pub modules_loaded: bool,
+    /// Amp firmware blob present.
+    pub firmware_ok: bool,
+    /// Soft-recovery action available (upstream also allows proactive resets
+    /// while healthy — gate on `health != "ok"` to see if a fix is needed).
+    pub fixable: bool,
+    /// Onboard speakers currently muted at the ALSA layer.
+    pub speakers_muted: bool,
+    /// Bass-speaker switch off (tinny-sound canary).
+    pub bass_off: bool,
+    /// Default PipeWire sink is not the internal analog output.
+    pub wrong_default_sink: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -403,6 +511,12 @@ pub struct ThermalDigest {
 pub struct ProfilesDigest {
     pub current: String,
     pub choices: Vec<String>,
+    /// Raw legacy ACPI view from `/sys/firmware/acpi/platform_profile_choices`
+    /// (whitelisted tokens). `choices` above is the handler-resolved view
+    /// (which may add `custom`); comparing the two isolates handler-vs-EC
+    /// disagreements across the fleet.
+    #[serde(default)]
+    pub acpi_choices: Vec<String>,
 }
 
 /// Only preference *kinds* — never user content (no named profiles, no
@@ -633,6 +747,24 @@ pub fn collect() -> DiagnosticsReport {
 
     let system_info = read_system_info();
     let hardware = read_hardware_info(&s);
+    // Live power + speaker-amp digests. `battery_summary` is moved into the
+    // report below, so the power block borrows it here while it is still
+    // owned (voltage/status stay coherent within this report).
+    let power = read_power_info(&battery_summary);
+    let audio_digest = read_audio_digest();
+    log::debug!(
+        "diag power: ac_online {:?} ({:?}) · state {:?} · rate {:?} W",
+        power.ac_online,
+        power.ac_type,
+        power.charge_state,
+        power.charge_rate_w
+    );
+    log::debug!(
+        "diag audio: health={} bound={} fixable={}",
+        audio_digest.health,
+        audio_digest.amp_bound,
+        audio_digest.fixable
+    );
 
     let report = DiagnosticsReport {
         schema_version: REPORT_SCHEMA_VERSION,
@@ -650,6 +782,7 @@ pub fn collect() -> DiagnosticsReport {
         profiles: ProfilesDigest {
             current: profile::current(),
             choices: profile::choices(),
+            acpi_choices: read_acpi_platform_choices(),
         },
         curve_optimizer: undervolt::status(),
         settings: SettingsDigest {
@@ -662,6 +795,8 @@ pub fn collect() -> DiagnosticsReport {
         self_checks: run_self_checks(),
         system_info,
         hardware,
+        power,
+        audio: audio_digest,
         deep: None,
     };
 
@@ -844,6 +979,11 @@ fn collect_deep(reason: &str) -> DeepReport {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for e in entries.flatten() {
                 let fname = e.file_name().to_string_lossy().into_owned();
+                let fname_lower = fname.to_lowercase();
+                // Enforce privacy contract: never collect battery serial numbers or raw uevents
+                if fname_lower.contains("serial") || fname_lower == "uevent" {
+                    continue;
+                }
                 let val = std::fs::read_to_string(e.path())
                     .map(|v| v.trim().to_string())
                     .unwrap_or_else(|e| format!("<{}>", e.kind() as i32));
@@ -1257,6 +1397,8 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         .trim()
         .to_string();
 
+    let cpu_power = read_cpu_power_extras();
+
     let cpu = CpuDetail {
         name: cpu_name,
         vendor: cpu_vendor,
@@ -1266,6 +1408,10 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         max_clock_mhz,
         microcode,
         governor,
+        energy_performance_preference: cpu_power.energy_performance_preference,
+        scaling_driver: cpu_power.scaling_driver,
+        pstate_mode: cpu_power.pstate_mode,
+        boost_enabled: cpu_power.boost_enabled,
     };
 
     // 2. GPU detection
@@ -1282,6 +1428,10 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         None
     };
     let state = crate::dgpu::discrete_state();
+    // One nvidia-smi call per limit (each spawns a subprocess); the max and
+    // default readings are shared with the headroom math below.
+    let gpu_power_max = crate::dgpu::read_power_max();
+    let gpu_power_default = crate::dgpu::read_power_default();
 
     let gpu = GpuDetail {
         discrete_name,
@@ -1293,6 +1443,14 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
         // active | inactive | off | present | absent lets the portal render an
         // honest dGPU status instead of a bare -1 sentinel.
         state: Some(state.to_string()),
+        power_limit_w: crate::dgpu::read_power_enforced(),
+        power_max_w: gpu_power_max,
+        power_default_w: gpu_power_default,
+        dynamic_boost_headroom_w: crate::dgpu::dynamic_boost_headroom(
+            gpu_power_max,
+            gpu_power_default,
+        ),
+        pstate: crate::dgpu::read_pstate(),
     };
 
     // 3. Memory totals from /proc/meminfo
@@ -1365,6 +1523,8 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
     let mut resolution = None;
     let mut refresh_hz = None;
     let mut fallback_res = None;
+    let mut fallback_dir: Option<std::path::PathBuf> = None;
+    let mut chosen_dir: Option<std::path::PathBuf> = None;
     if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -1384,19 +1544,36 @@ fn read_hardware_info(_sensors: &sensors::SensorReadings) -> HardwareInfo {
             if name.contains("eDP") {
                 resolution = Some(mode);
                 refresh_hz = parse_display_refresh_hz(&entry.path().join("edid"));
+                chosen_dir = Some(entry.path());
                 break;
             }
             if fallback_res.is_none() {
                 fallback_res = Some(mode);
+                fallback_dir = Some(entry.path());
             }
         }
     }
     if resolution.is_none() {
         resolution = fallback_res;
+        chosen_dir = fallback_dir;
     }
+    // Connector short name (`card2-eDP-1` → `eDP-1`), sanitized so only
+    // `[A-Za-z0-9-]` survives; VRR read straight from the chosen
+    // connector's `vrr_enabled` knob (None when the kernel hides it).
+    let connector = chosen_dir
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .and_then(sanitize_connector_name);
+    let vrr_capable = chosen_dir
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p.join("vrr_enabled")).ok())
+        .and_then(|raw| parse_vrr_enabled(&raw));
     let display = DisplayDetail {
         resolution,
         refresh_hz,
+        connector,
+        vrr_capable,
     };
 
     // 6. Motherboard / DMI details
@@ -1455,6 +1632,258 @@ fn read_system_info() -> SystemInfo {
         load_avg_1m,
         disk_free_mb,
         mem_available_mb,
+    }
+}
+
+/// Small typed snapshot of the cpufreq policy knobs triage needs next to
+/// `CpuDetail.governor`. Built by [`read_cpu_power_extras`].
+struct CpuPowerExtras {
+    energy_performance_preference: Option<String>,
+    scaling_driver: Option<String>,
+    pstate_mode: Option<String>,
+    boost_enabled: Option<bool>,
+}
+
+/// Whitelisted `energy_performance_preference` values (amd-pstate-epp and
+/// intel_pstate agree on this vocabulary). Anything else — including sysfs
+/// read errors surfaced as text — collapses to `"other"`, so the report
+/// only ever carries a closed token set.
+fn sanitize_epp(raw: &str) -> String {
+    match raw.trim() {
+        "performance" | "balance_performance" | "balance_power" | "power" | "default" => {
+            raw.trim().to_string()
+        }
+        _ => "other".to_string(),
+    }
+}
+
+/// Charset-sanitized cpufreq driver name (`amd-pstate-epp`, `intel_pstate`,
+/// `acpi-cpufreq` …). Keeps `[A-Za-z0-9_+.-]`, caps at 32 chars; None when
+/// nothing survives (empty/unreadable node).
+fn sanitize_scaling_driver(raw: &str) -> Option<String> {
+    let kept: String = raw
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-' | '.'))
+        .take(32)
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept)
+    }
+}
+
+/// P-state backend mode label. Prefers the AMD node, then the Intel one;
+/// `none` when neither exists (acpi-cpufreq machines, VMs, containers).
+/// Both status nodes carry closed vocabularies, re-checked here so a future
+/// kernel string can never leak through verbatim.
+fn read_pstate_mode() -> Option<String> {
+    let amd = std::fs::read_to_string("/sys/devices/system/cpu/amd_pstate/status")
+        .ok()
+        .map(|s| s.trim().to_string());
+    if let Some(status) = amd {
+        let label = match status.as_str() {
+            "active" | "passive" | "guided" | "disable" => status,
+            _ => "unknown".to_string(),
+        };
+        return Some(format!("amd-pstate:{label}"));
+    }
+    let intel = std::fs::read_to_string("/sys/devices/system/cpu/intel_pstate/status")
+        .ok()
+        .map(|s| s.trim().to_string());
+    if let Some(status) = intel {
+        let label = match status.as_str() {
+            "active" | "passive" | "off" => status,
+            _ => "unknown".to_string(),
+        };
+        return Some(format!("intel-pstate:{label}"));
+    }
+    Some("none".to_string())
+}
+
+/// Read the cpufreq policy extras for [`CpuDetail`]. All sysfs, all optional —
+/// a missing node (container, stripped kernel) yields None, never an error.
+fn read_cpu_power_extras() -> CpuPowerExtras {
+    let energy_performance_preference =
+        std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference")
+            .ok()
+            .map(|raw| sanitize_epp(&raw));
+    let scaling_driver =
+        std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver")
+            .ok()
+            .and_then(|raw| sanitize_scaling_driver(&raw));
+    CpuPowerExtras {
+        energy_performance_preference,
+        scaling_driver,
+        pstate_mode: read_pstate_mode(),
+        boost_enabled: crate::cpu::boost_enabled(),
+    }
+}
+
+/// Whitelisted battery status tokens from
+/// `/sys/class/power_supply/BAT*/status`. Anything unrecognised collapses to
+/// `Unknown` — the report vocabulary stays closed.
+fn sanitize_charge_state(raw: &str) -> String {
+    match raw.trim() {
+        "Charging" | "Discharging" | "Full" | "Not charging" | "Unknown" => raw.trim().to_string(),
+        _ => "Unknown".to_string(),
+    }
+}
+
+/// Whitelisted AC-supply types. Barrel adapters report `Mains`, USB-C PD
+/// sources `USB`; anything else becomes the fixed token `Other` (no raw
+/// sysfs text ever reaches the report).
+fn sanitize_ac_type(raw: &str) -> String {
+    match raw.trim() {
+        "Mains" | "USB" => raw.trim().to_string(),
+        _ => "Other".to_string(),
+    }
+}
+
+/// Scan `/sys/class/power_supply` for an AC-type source (barrel `Mains`
+/// preferred, USB-C `USB` as fallback). Returns `(online, type)`; `(None,
+/// None)` when no AC node exists (battery-only VMs, containers).
+/// Only `online` + `type` are read — never `uevent` (which on some machines
+/// embeds battery serial numbers).
+fn read_ac_adapter() -> (Option<bool>, Option<String>) {
+    let mut fallback: Option<(bool, String)> = None;
+    let entries = std::fs::read_dir("/sys/class/power_supply").ok();
+    for entry in entries.into_iter().flatten().flatten() {
+        let dir = entry.path();
+        let kind = std::fs::read_to_string(dir.join("type"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if kind != "Mains" && kind != "USB" {
+            continue;
+        }
+        let online = std::fs::read_to_string(dir.join("online"))
+            .ok()
+            .and_then(|s| match s.trim() {
+                "1" => Some(true),
+                "0" => Some(false),
+                _ => None,
+            });
+        let typed = sanitize_ac_type(&kind);
+        // Mains (barrel) wins over USB; an online source wins over offline.
+        let rank = (i32::from(kind == "Mains"), i32::from(online == Some(true)));
+        let best_rank = fallback
+            .as_ref()
+            .map(|(on, ty)| (i32::from(ty == "Mains"), i32::from(*on)));
+        if best_rank.is_none_or(|b| rank > b) {
+            fallback = Some((online.unwrap_or(false), typed));
+        }
+    }
+    match fallback {
+        Some((online, ty)) => (Some(online), Some(ty)),
+        None => (None, None),
+    }
+}
+
+/// Round a Watt reading to milliwatt precision so sysfs integer division
+/// artefacts (`17.141000000`) never bloat the JSON or break fleet grouping.
+fn round_mw(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
+
+/// Build the live [`PowerInfo`] block. Voltage/status reuse the already read
+/// [`BatterySummary`] so the two blocks stay coherent within one report;
+/// only the instantaneous rate is read fresh here.
+fn read_power_info(battery: &BatterySummary) -> PowerInfo {
+    let (ac_online, ac_type) = read_ac_adapter();
+    PowerInfo {
+        ac_online,
+        ac_type,
+        charge_state: battery.status.as_deref().map(sanitize_charge_state),
+        charge_rate_w: crate::battery::power_w().map(round_mw),
+        voltage_v: battery.voltage_v,
+    }
+}
+
+/// Map the audio health enum to its closed report token. Pure — unit-tested.
+fn audio_health_label(health: crate::audio::Health) -> &'static str {
+    match health {
+        crate::audio::Health::Ok => "ok",
+        crate::audio::Health::SoftIssue => "soft-issue",
+        crate::audio::Health::HardwareBroken => "hardware-broken",
+        crate::audio::Health::NotApplicable => "not-applicable",
+    }
+}
+
+/// Reduce `audio::diagnose()` to the typed [`AudioDigest`]. Sink names and
+/// mixer free text are deliberately dropped — only booleans plus the
+/// whitelisted health token leave the machine.
+fn read_audio_digest() -> AudioDigest {
+    let d = crate::audio::diagnose();
+    AudioDigest {
+        health: audio_health_label(d.health).to_string(),
+        amp_present: d.amp_acpi,
+        amp_bound: d.amp_bound,
+        modules_loaded: d.amp_modules,
+        firmware_ok: d.firmware_ok,
+        fixable: d.fixable,
+        speakers_muted: d.speakers_muted,
+        bass_off: d.bass_off,
+        wrong_default_sink: d.wrong_default_sink,
+    }
+}
+
+/// Raw ACPI platform-profile view from
+/// `/sys/firmware/acpi/platform_profile_choices`, token-sanitized
+/// (`[A-Za-z0-9_+-]`, ≤32 chars, ≤16 entries). Empty when the legacy node is
+/// absent (newer kernels only expose the per-handler class node, which
+/// `profiles.choices` already covers).
+fn read_acpi_platform_choices() -> Vec<String> {
+    let raw = std::fs::read_to_string("/sys/firmware/acpi/platform_profile_choices")
+        .unwrap_or_default();
+    raw.split_whitespace()
+        .filter_map(|tok| {
+            let kept: String = tok
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-' | '.'))
+                .take(32)
+                .collect();
+            if kept.is_empty() {
+                None
+            } else {
+                Some(kept)
+            }
+        })
+        .take(16)
+        .collect()
+}
+
+/// Strip the kernel card prefix from a DRM connector dir name
+/// (`card2-eDP-1` → `eDP-1`) and keep only `[A-Za-z0-9-]` (≤16 chars).
+/// None when nothing usable survives — never a raw path fragment.
+fn sanitize_connector_name(dir_name: &str) -> Option<String> {
+    let short = match dir_name.split_once('-') {
+        Some((head, rest))
+            if head.starts_with("card") && head[4..].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            rest
+        }
+        _ => dir_name,
+    };
+    let kept: String = short
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(16)
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept)
+    }
+}
+
+/// Parse a `vrr_enabled` sysfs knob (`0`/`1`, possibly newline-terminated).
+/// Pure — unit-tested. Anything else is None (unknown, never guessed).
+fn parse_vrr_enabled(raw: &str) -> Option<bool> {
+    match raw.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
     }
 }
 
@@ -1973,13 +2402,31 @@ fn dmi_product_uuid() -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| s.len() >= 36)
 }
+fn hash_to_pseudonym(salt: &str, input: &str) -> String {
+    // 128-bit FNV-1a hash for deterministic, irreversible pseudonymization
+    const FNV_OFFSET_BASIS: u128 = 0x6c62272e07bb014262b821756295c58d;
+    const FNV_PRIME: u128 = 0x000000000100000000000000000001b3;
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in salt.as_bytes().iter().chain(input.as_bytes()) {
+        hash ^= *byte as u128;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    let mut b = hash.to_be_bytes();
+    b[6] = (b[6] & 0x0F) | 0x40; // UUID v4 format
+    b[8] = (b[8] & 0x3F) | 0x80; // UUID variant 1
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
 
 /// Mint-or-load the pseudonymous machine id (shared by both send paths).
 /// Resolution order (converges daemon + GUI which have different $HOME):
 ///   1. shared store /var/lib/legion-control/machine-id (canonical, survives
 ///      reinstalls, shared between root daemon and user GUI)
 ///   2. settings.json (legacy, for existing installs — backfills the store)
-///   3. DMI product UUID (deterministic per machine, survives wipes)
+///   3. DMI product UUID (pseudonymized deterministically, survives wipes)
 ///   4. fresh random UUID v4 (persisted to both the store and settings)
 fn ensure_machine_id() -> String {
     // Canonical shared store wins — daemon and GUI converge here.
@@ -1996,10 +2443,11 @@ fn ensure_machine_id() -> String {
         write_machine_id_file(&cfg.machine_id);
         return cfg.machine_id.clone();
     }
-    if let Some(id) = dmi_product_uuid() {
+    if let Some(raw_uuid) = dmi_product_uuid() {
+        let id = hash_to_pseudonym("legion-control-machine-id:", &raw_uuid);
         write_machine_id_file(&id);
         config::update(|c| c.diagnostics.machine_id = id.clone());
-        log::info!("machine-id: derived from DMI product UUID");
+        log::info!("machine-id: derived pseudonym from DMI product UUID");
         return id;
     }
     // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
@@ -2673,5 +3121,261 @@ core id\t\t: 1
             4,
             "failed to distinguish cores across physical IDs/CCDs"
         );
+    }
+    /// Schema v4 vocabulary tests: charge-state and AC-type sanitizers only
+    /// ever emit closed token sets — hostile sysfs text collapses.
+    #[test]
+    fn sanitize_charge_state_and_ac_type_use_closed_vocabularies() {
+        for good in [
+            "Charging",
+            "Discharging",
+            "Full",
+            "Not charging",
+            "Unknown",
+        ] {
+            assert_eq!(sanitize_charge_state(good), good);
+            assert_eq!(sanitize_charge_state(&format!("{good}\n")), good);
+        }
+        assert_eq!(sanitize_charge_state("charging"), "Unknown");
+        assert_eq!(sanitize_charge_state(""), "Unknown");
+        assert_eq!(sanitize_charge_state("Full\nEVIL=x"), "Unknown");
+        assert_eq!(sanitize_ac_type("Mains"), "Mains");
+        assert_eq!(sanitize_ac_type("USB"), "USB");
+        assert_eq!(sanitize_ac_type("Battery"), "Other");
+        assert_eq!(sanitize_ac_type(""), "Other");
+        assert_eq!(sanitize_ac_type("Mains\nserial=123"), "Other");
+    }
+
+    /// EPP + scaling-driver sanitizers: known policy tokens pass through,
+    /// everything else is contained (no raw kernel text in the report).
+    #[test]
+    fn sanitize_epp_and_driver_contain_unknown_values() {
+        for good in [
+            "performance",
+            "balance_performance",
+            "balance_power",
+            "power",
+            "default",
+        ] {
+            assert_eq!(sanitize_epp(good), good);
+        }
+        assert_eq!(sanitize_epp("powersave"), "other");
+        assert_eq!(sanitize_epp(""), "other");
+        assert_eq!(sanitize_epp("performance\nx"), "other");
+        assert_eq!(
+            sanitize_scaling_driver("amd-pstate-epp"),
+            Some("amd-pstate-epp".to_string())
+        );
+        assert_eq!(
+            sanitize_scaling_driver("intel_pstate"),
+            Some("intel_pstate".to_string())
+        );
+        assert_eq!(sanitize_scaling_driver(""), None);
+        assert_eq!(sanitize_scaling_driver("  \n"), None);
+        // Hostile characters are stripped, alphanumerics survive.
+        assert_eq!(
+            sanitize_scaling_driver("acpi-cpufreq\nINJECT=x; rm -rf /"),
+            Some("acpi-cpufreqINJECTxrm-rf".to_string())
+        );
+    }
+
+    /// Connector sanitizer: kernel card prefix stripped, charset restricted,
+    /// empty results become None (never a raw path fragment).
+    #[test]
+    fn sanitize_connector_name_strips_card_prefix_and_charset() {
+        assert_eq!(
+            sanitize_connector_name("card2-eDP-1"),
+            Some("eDP-1".to_string())
+        );
+        assert_eq!(
+            sanitize_connector_name("card1-HDMI-A-1"),
+            Some("HDMI-A-1".to_string())
+        );
+        assert_eq!(
+            sanitize_connector_name("card0-DP-2"),
+            Some("DP-2".to_string())
+        );
+        assert_eq!(sanitize_connector_name("card9-"), None);
+        assert_eq!(sanitize_connector_name(""), None);
+        // Non-card names (unit-test fixtures) pass through the charset filter.
+        assert_eq!(
+            sanitize_connector_name("eDP-1"),
+            Some("eDP-1".to_string())
+        );
+        assert_eq!(sanitize_connector_name("../../etc"), Some("etc".to_string()));
+    }
+
+    /// VRR knob parser: strict 0/1, everything else is unknown (None).
+    #[test]
+    fn parse_vrr_enabled_accepts_only_zero_or_one() {
+        assert_eq!(parse_vrr_enabled("1"), Some(true));
+        assert_eq!(parse_vrr_enabled("1\n"), Some(true));
+        assert_eq!(parse_vrr_enabled("0"), Some(false));
+        assert_eq!(parse_vrr_enabled("0\n"), Some(false));
+        assert_eq!(parse_vrr_enabled(""), None);
+        assert_eq!(parse_vrr_enabled("enabled"), None);
+        assert_eq!(parse_vrr_enabled("2"), None);
+    }
+
+    /// Audio health mapping covers every enum variant with a fixed token —
+    /// adding a variant without extending this test fails loudly.
+    #[test]
+    fn audio_health_label_covers_all_variants() {
+        assert_eq!(audio_health_label(crate::audio::Health::Ok), "ok");
+        assert_eq!(
+            audio_health_label(crate::audio::Health::SoftIssue),
+            "soft-issue"
+        );
+        assert_eq!(
+            audio_health_label(crate::audio::Health::HardwareBroken),
+            "hardware-broken"
+        );
+        assert_eq!(
+            audio_health_label(crate::audio::Health::NotApplicable),
+            "not-applicable"
+        );
+    }
+
+    /// ACPI platform-choices reader: only the legacy node, token-sanitized.
+    /// On this fleet the node exists; the assertion is structural (closed
+    /// charset, bounded count) so it holds on any kernel.
+    #[test]
+    fn acpi_platform_choices_are_sanitized_tokens() {
+        let choices = read_acpi_platform_choices();
+        assert!(choices.len() <= 16, "unbounded choices: {choices:?}");
+        for c in &choices {
+            assert!(!c.is_empty());
+            assert!(c.len() <= 32);
+            assert!(
+                c.chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '+' | '-' | '.')),
+                "unsanitized choice token: {c:?}"
+            );
+        }
+        // Live cross-check: when the legacy node exists it must agree with
+        // the raw file content (modulo sanitization).
+        if let Ok(raw) = std::fs::read_to_string("/sys/firmware/acpi/platform_profile_choices")
+        {
+            let expected = raw.split_whitespace().count().min(16);
+            assert_eq!(choices.len(), expected);
+        }
+    }
+
+    /// Schema v4 serializes the new blocks with strictly typed values, and
+    /// the privacy invariants still hold: no MAC-shaped tokens, no home
+    /// paths, no serial-looking free text in the new sections.
+    #[test]
+    fn schema_v4_report_carries_typed_telemetry_blocks() {
+        crate::logging::init("test");
+        let report = collect();
+        assert_eq!(report.schema_version, REPORT_SCHEMA_VERSION);
+        assert_eq!(REPORT_SCHEMA_VERSION, 4);
+        let v = serde_json::to_value(&report).expect("serializable");
+
+        // Power block: whitelisted tokens + numbers only.
+        let power = &v["power"];
+        assert!(power.is_object(), "power block missing");
+        if let Some(state) = power["charge_state"].as_str() {
+            assert!(
+                ["Charging", "Discharging", "Full", "Not charging", "Unknown"]
+                    .contains(&state),
+                "open charge_state vocabulary: {state:?}"
+            );
+        }
+        if let Some(ty) = power["ac_type"].as_str() {
+            assert!(
+                ["Mains", "USB", "Other"].contains(&ty),
+                "open ac_type vocabulary: {ty:?}"
+            );
+        }
+
+        // Audio block: closed health token + booleans, no sink-name strings.
+        let audio = &v["audio"];
+        let health = audio["health"].as_str().expect("audio.health missing");
+        assert!(
+            ["ok", "soft-issue", "hardware-broken", "not-applicable"].contains(&health),
+            "open audio health vocabulary: {health:?}"
+        );
+        for key in [
+            "amp_present",
+            "amp_bound",
+            "modules_loaded",
+            "firmware_ok",
+            "fixable",
+            "speakers_muted",
+            "bass_off",
+            "wrong_default_sink",
+        ] {
+            assert!(
+                audio[key].is_boolean(),
+                "audio.{key} must be a boolean, got: {}",
+                audio[key]
+            );
+        }
+        let audio_json = serde_json::to_string(audio).unwrap();
+        assert!(!audio_json.contains("/home/"), "audio block leaked path");
+
+        // CPU extras: closed EPP vocabulary, sanitized driver, p-state label.
+        let cpu = &v["hardware"]["cpu"];
+        if let Some(epp) = cpu["energy_performance_preference"].as_str() {
+            assert!(
+                [
+                    "performance",
+                    "balance_performance",
+                    "balance_power",
+                    "power",
+                    "default",
+                    "other"
+                ]
+                .contains(&epp),
+                "open EPP vocabulary: {epp:?}"
+            );
+        }
+        if let Some(mode) = cpu["pstate_mode"].as_str() {
+            assert!(
+                mode == "none"
+                    || mode.starts_with("amd-pstate:")
+                    || mode.starts_with("intel-pstate:"),
+                "unexpected pstate_mode shape: {mode:?}"
+            );
+        }
+
+        // Display: sanitized connector, no EDID bytes anywhere.
+        if let Some(conn) = v["hardware"]["display"]["connector"].as_str() {
+            assert!(
+                conn.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-'),
+                "unsanitized connector: {conn:?}"
+            );
+            assert!(conn.len() <= 16);
+        }
+        let json = serde_json::to_string(&report).expect("serializable");
+        assert!(!json.contains("EDID"), "raw EDID text leaked");
+
+        // Profiles carry both the handler view and the raw ACPI view.
+        assert!(v["profiles"]["choices"].is_array());
+        assert!(v["profiles"]["acpi_choices"].is_array());
+
+        // dGPU power: numbers or null, P-state whitelisted.
+        let gpu = &v["hardware"]["gpu"];
+        for key in [
+            "power_limit_w",
+            "power_max_w",
+            "power_default_w",
+            "dynamic_boost_headroom_w",
+        ] {
+            assert!(
+                gpu[key].is_null() || gpu[key].is_number(),
+                "gpu.{key} must be numeric or null, got: {}",
+                gpu[key]
+            );
+        }
+        if let Some(pstate) = gpu["pstate"].as_str() {
+            let n: u32 = pstate
+                .strip_prefix('P')
+                .and_then(|n| n.parse().ok())
+                .expect("pstate outside P0..=P15");
+            assert!(n <= 15);
+        }
     }
 }
