@@ -96,6 +96,7 @@ def init_db() -> None:
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA mmap_size = 268435456")
     conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA wal_autocheckpoint = 4000")
     conn.execute(SCHEMA)
     conn.commit()
 
