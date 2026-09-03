@@ -51,39 +51,76 @@ SCHEMA = (
     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
     "ts TEXT NOT NULL, payload TEXT NOT NULL)"
 )
+_INSERT_SQL = "INSERT INTO reports (ts, payload) VALUES (?, ?)"
+_ALLOWED_SCHEMAS = (1, 2, 3, 4)
 
 _seen: dict[str, list[float]] = {}
 _seen_lock = threading.Lock()
 
+_local = threading.local()
+_last_sec = 0
+_last_ts_str = ""
+
+
+def _current_timestamp() -> str:
+    """Return current UTC second as ISO-8601, caching per second."""
+    global _last_sec, _last_ts_str
+    now_sec = int(time.time())
+    if now_sec != _last_sec:
+        _last_sec = now_sec
+        _last_ts_str = datetime.fromtimestamp(now_sec, timezone.utc).isoformat(timespec="seconds")
+    return _last_ts_str
+
+
+def _new_connection() -> sqlite3.Connection:
+    """Open a fresh SQLite connection for the calling thread."""
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
 
 def connect() -> sqlite3.Connection:
-    """Return a thread-safe connection with WAL mode and busy timeout configured."""
-    conn = sqlite3.connect(DB_PATH, timeout=5.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    """Return the calling thread's cached connection, reopening if needed.
+
+    Connections are reused across requests on the same thread instead of
+    opening (and re-running PRAGMAs on) a brand-new connection per request.
+    Callers MUST NOT close the returned connection; it stays cached in
+    thread-local storage. A liveness probe reopens it if it was closed
+    externally (e.g. direct ``collector.connect().close()`` in tests).
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except sqlite3.Error:
+            pass  # closed or unusable — fall through and reopen
+    conn = _new_connection()
+    _local.conn = conn
     return conn
 
 
 def init_db() -> None:
     """Create the table once at startup with WAL mode enabled."""
     conn = connect()
-    try:
-        conn.execute(SCHEMA)
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute("PRAGMA page_size = 8192")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size = 268435456")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA wal_autocheckpoint = 4000")
+    conn.execute(SCHEMA)
+    conn.commit()
 
 
 def prune_old_reports() -> int:
     """Delete reports older than RETENTION_DAYS."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
     conn = connect()
-    try:
-        cur = conn.execute("DELETE FROM reports WHERE ts < ?", (cutoff,))
-        conn.commit()
-        return cur.rowcount
-    finally:
-        conn.close()
+    cur = conn.execute("DELETE FROM reports WHERE ts < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount
 
 
 def _check_key(request: Request) -> None:
@@ -118,19 +155,33 @@ def gunzip_capped(data: bytes, cap: int) -> bytes:
     Raises ValueError when the cap is exceeded and zlib.error on corrupt data.
     """
     dec = zlib.decompressobj(wbits=31)  # 31 = gzip container
-    out = bytearray()
-    piece = data
-    while piece:
-        out += dec.decompress(piece, cap + 1 - len(out))
-        if len(out) > cap:
-            raise ValueError("decompressed payload too large")
-        piece = dec.unconsumed_tail
-    out += dec.flush()
+    out = dec.decompress(data, cap + 1)
     if len(out) > cap:
+        raise ValueError("decompressed payload too large")
+    if dec.eof:
+        return out
+    # Slow path: output was capped mid-stream (unconsumed_tail pending) or
+    # the stream needs flush() to complete. Preserves exact capped semantics.
+    chunks: list[bytes] = [out] if out else []
+    out_len = len(out)
+    piece = dec.unconsumed_tail
+    while piece:
+        part = dec.decompress(piece, cap + 1 - out_len)
+        out_len += len(part)
+        if out_len > cap:
+            raise ValueError("decompressed payload too large")
+        if part:
+            chunks.append(part)
+        piece = dec.unconsumed_tail
+    tail = dec.flush()
+    out_len += len(tail)
+    if out_len > cap:
         raise ValueError("decompressed payload too large")
     if not dec.eof:
         raise zlib.error("incomplete or truncated gzip stream")
-    return bytes(out)
+    if tail:
+        chunks.append(tail)
+    return b"".join(chunks)
 
 
 async def _retention_worker() -> None:
@@ -165,13 +216,10 @@ app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
 @app.get("/health")
 async def health() -> dict:
     conn = connect()
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM reports"
-        ).fetchone()
-        count, last_id = (row[0], row[1]) if row else (0, 0)
-    finally:
-        conn.close()
+    row = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM reports"
+    ).fetchone()
+    count, last_id = (row[0], row[1]) if row else (0, 0)
     return {"ok": True, "count": count, "last_id": last_id}
 
 
@@ -180,9 +228,11 @@ async def submit_report(request: Request) -> dict:
     """Validate one diagnostics report and append it to the database."""
     _check_key(request)
 
-    ip = request.client.host if request.client else "unknown"
-    if _rate_limited(ip):
-        raise HTTPException(status_code=429, detail="slow down")
+    if RATE_LIMIT_PER_MIN > 0:
+        client = request.client
+        ip = client.host if client else "unknown"
+        if _rate_limited(ip):
+            raise HTTPException(status_code=429, detail="slow down")
 
     declared = request.headers.get("content-length", "")
     if declared:
@@ -192,15 +242,25 @@ async def submit_report(request: Request) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="bad content-length") from exc
 
-    body = b""
+    chunks: list[bytes] = []
+    body_len = 0
     async for chunk in request.stream():
-        body += chunk
-        if len(body) > MAX_BODY_BYTES:
+        chunks.append(chunk)
+        body_len += len(chunk)
+        if body_len > MAX_BODY_BYTES:
             raise HTTPException(status_code=413, detail="payload too large")
+    body = b"".join(chunks)
 
     # The client may gzip the payload (Content-Encoding: gzip) — the ASGI
     # stack does not decode request bodies, so do it here.
-    encoding = (request.headers.get("content-encoding") or "").strip().lower()
+    # Fast path: real clients already send a normalized token, so skip the
+    # per-request strip().lower() allocs; normalize only on a miss (e.g.
+    # "  GZip  ") and keep the 415 message on the normalized value.
+    _raw_encoding = request.headers.get("content-encoding") or ""
+    if _raw_encoding in ("", "identity", "gzip", "x-gzip"):
+        encoding = _raw_encoding
+    else:
+        encoding = _raw_encoding.strip().lower()
     if encoding in ("", "identity"):
         raw = body
     elif encoding in ("gzip", "x-gzip"):
@@ -216,28 +276,25 @@ async def submit_report(request: Request) -> dict:
         )
 
     try:
-        doc = json.loads(raw)
-    except (ValueError, RecursionError) as exc:  # JSONDecodeError / deep recursion
-        raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
-
-    if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3, 4):
-        raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
-
-    try:
         payload = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="payload must be UTF-8") from None
 
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    conn = connect()
     try:
-        conn.execute(
-            "INSERT INTO reports (ts, payload) VALUES (?, ?)",
-            (ts, payload),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        doc = json.loads(payload)
+    except (ValueError, RecursionError) as exc:  # JSONDecodeError / deep recursion
+        raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
+
+    if not isinstance(doc, dict) or doc.get("schema_version") not in _ALLOWED_SCHEMAS:
+        raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
+
+    ts = _current_timestamp()
+    conn = connect()
+    conn.execute(
+        _INSERT_SQL,
+        (ts, payload),
+    )
+    conn.commit()
     return {"ok": True}
 
 
