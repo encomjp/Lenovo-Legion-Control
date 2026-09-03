@@ -192,3 +192,184 @@ def test_gunzip_capped_rejects_truncated_data():
     truncated = gzip.compress(b"abc")[:10]
     with pytest.raises(zlib.error):
         collector.gunzip_capped(truncated, 100)
+
+
+# ── security, rate limit & retention tests ──────────────────────────────
+
+
+def test_auth_key_enforcement(client, monkeypatch):
+    secret = "test-secret-key-12345"
+    monkeypatch.setattr(collector, "TELEMETRY_KEY", secret)
+
+    payload = json.dumps(_report("auth-machine")).encode()
+
+    # Missing key -> 401
+    r = _post(client, payload)
+    assert r.status_code == 401
+
+    # Wrong key -> 401
+    r = _post(client, payload, **{"X-Legion-Telemetry-Key": "wrong-secret"})
+    assert r.status_code == 401
+
+    # Correct key -> 200
+    r = _post(client, payload, **{"X-Legion-Telemetry-Key": secret})
+    assert r.status_code == 200
+
+
+def test_rate_limiting(client, monkeypatch):
+    monkeypatch.setattr(collector, "RATE_LIMIT_PER_MIN", 3)
+    # Clear seen tracker
+    with collector._seen_lock:
+        collector._seen.clear()
+
+    payload = json.dumps(_report("ratelimit-machine")).encode()
+    for _ in range(3):
+        r = _post(client, payload)
+        assert r.status_code == 200
+
+    # 4th request exceeds rate limit
+    r = _post(client, payload)
+    assert r.status_code == 429
+    assert "slow down" in r.text
+
+
+def test_prune_old_reports():
+    conn = collector.connect()
+    # Insert an old report (100 days ago) and a fresh report
+    old_ts = "2020-01-01T00:00:00+00:00"
+    fresh_ts = "2099-01-01T00:00:00+00:00"
+    conn.execute("INSERT INTO reports (ts, payload) VALUES (?, ?)", (old_ts, "{}"))
+    conn.execute("INSERT INTO reports (ts, payload) VALUES (?, ?)", (fresh_ts, "{}"))
+    conn.commit()
+    conn.close()
+
+    deleted = collector.prune_old_reports()
+    assert deleted >= 1
+
+    conn = collector.connect()
+    remaining = conn.execute("SELECT ts FROM reports WHERE ts = ?", (old_ts,)).fetchall()
+    conn.close()
+    assert len(remaining) == 0
+
+
+def test_schema_versions_1_2_3_4_all_accepted(client):
+    for v in (1, 2, 3, 4):
+        doc = _report(f"schema-v{v}-machine")
+        doc["schema_version"] = v
+        r = _post(client, json.dumps(doc).encode())
+        assert r.status_code == 200
+
+
+def _report_v4(machine_id: str) -> dict:
+    """Schema v4 report mirroring the client's actual emission shape."""
+    doc = _report(machine_id)
+    doc["schema_version"] = 4
+    doc["power"] = {
+        "ac_online": True,
+        "ac_type": "Mains",
+        "charge_state": "Full",
+        "charge_rate_w": 0.0,
+        "voltage_v": 17.142,
+    }
+    doc["audio"] = {
+        "health": "ok",
+        "amp_present": True,
+        "amp_bound": True,
+        "modules_loaded": True,
+        "firmware_ok": True,
+        "fixable": True,
+        "speakers_muted": False,
+        "bass_off": False,
+        "wrong_default_sink": False,
+    }
+    doc["hardware"] = {
+        "cpu": {
+            "governor": "performance",
+            "energy_performance_preference": "performance",
+            "scaling_driver": "amd-pstate-epp",
+            "pstate_mode": "amd-pstate:active",
+            "boost_enabled": True,
+        },
+        "gpu": {
+            "power_limit_w": 175.0,
+            "power_max_w": 175.0,
+            "power_default_w": 80.0,
+            "dynamic_boost_headroom_w": 95.0,
+            "pstate": "P0",
+        },
+        "display": {"connector": "eDP-1", "vrr_capable": None, "refresh_hz": None},
+    }
+    doc["profiles"] = {
+        "current": "performance",
+        "choices": ["low-power", "balanced", "performance"],
+        "acpi_choices": ["low-power", "balanced", "performance"],
+    }
+    return doc
+
+
+def test_schema_v4_full_telemetry_payload_accepted(client):
+    """A v4 report carrying every new block stores verbatim."""
+    marker = "v4-full-telemetry-machine"
+    plain = json.dumps(_report_v4(marker)).encode()
+    before = _row_count()
+    r = _post(client, plain, **{"Content-Type": "application/json"})
+    assert r.status_code == 200, r.text
+    assert _row_count() == before + 1
+    rows = _payloads_like(marker)
+    assert rows, "v4 report was not stored"
+    stored = json.loads(rows[0])
+    assert stored["schema_version"] == 4
+    # New blocks survive the round trip intact.
+    assert stored["power"]["ac_type"] == "Mains"
+    assert stored["audio"]["health"] == "ok"
+    assert stored["hardware"]["gpu"]["dynamic_boost_headroom_w"] == 95.0
+    assert stored["hardware"]["display"]["connector"] == "eDP-1"
+    assert stored["profiles"]["acpi_choices"][0] == "low-power"
+
+
+def test_schema_v4_closed_vocabularies(client):
+    """Whitelisted v4 tokens hold only closed values — no identifier-shaped
+    strings ride along in the new blocks."""
+    rows = _payloads_like("v4-full-telemetry-machine")
+    assert rows, "run test_schema_v4_full_telemetry_payload_accepted first"
+    stored = json.loads(rows[0])
+    assert stored["power"]["charge_state"] in (
+        "Charging",
+        "Discharging",
+        "Full",
+        "Not charging",
+        "Unknown",
+    )
+    assert stored["power"]["ac_type"] in ("Mains", "USB", "Other")
+    assert stored["audio"]["health"] in (
+        "ok",
+        "soft-issue",
+        "hardware-broken",
+        "not-applicable",
+    )
+    pstate = stored["hardware"]["gpu"]["pstate"]
+    assert pstate is None or (
+        pstate.startswith("P") and pstate[1:].isdigit() and int(pstate[1:]) <= 15
+    )
+    connector = stored["hardware"]["display"]["connector"]
+    assert connector is None or all(
+        ch.isalnum() or ch == "-" for ch in connector
+    )
+
+
+def test_schema_v4_gzipped_push_is_accepted(client):
+    plain = json.dumps(_report_v4("v4-gzipped-machine")).encode()
+    before = _row_count()
+    r = _post(
+        client,
+        gzip.compress(plain),
+        **{"Content-Encoding": "gzip", "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200, r.text
+    assert _row_count() == before + 1
+
+
+def test_schema_v5_is_rejected(client):
+    bad = json.dumps({"schema_version": 5}).encode()
+    r = _post(client, bad, **{"Content-Type": "application/json"})
+    assert r.status_code == 400, r.text

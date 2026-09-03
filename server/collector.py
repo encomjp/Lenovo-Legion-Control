@@ -1,40 +1,50 @@
 """Alpha telemetry collector for Legion Control.
 
-Accepts one anonymized diagnostics JSON per alpha-client report and appends
-it verbatim to a local SQLite database (./diagnostics.db). Each row is a UTC
-ISO-8601 timestamp plus the raw JSON string; nothing else is stored or
-derived server-side.
+Accepts anonymized diagnostics JSON reports from opt-in Legion Control builds
+(`POST /v1/diagnostics`) and appends them verbatim to a local SQLite database
+(`diagnostics.db`). Each row contains a UTC ISO-8601 timestamp plus the raw
+JSON string.
 
-The client (lenovo-legion-tool/src/diagnostics.rs::send) gzips its payload
-when that shrinks it and sets `Content-Encoding: gzip` — uvicorn/Starlette do
-NOT decode request bodies, so this endpoint decompresses gzip bodies itself
-(output hard-capped at MAX_BODY_BYTES as a decompression-bomb guard).
-
-Payload contents are anonymous by client contract (see
-lenovo-legion-tool/src/diagnostics.rs): hardware model/type/BIOS/CPU/GPU/EC
-identity, distro/kernel, sensors, fan states, battery health stats (no
-serial), thermal/Curve-Optimizer settings, a settings digest, a sanitized
-daemon log tail and self-check results — never hostname, username, serial
-numbers, MAC/IP addresses or per-key colour maps.
-
-Retention is the operator's responsibility: delete or regulate old rows in
-the database yourself (see README.md).
-
-The default bind address is the developer's Tailscale IP (127.0.0.1),
-which keeps this endpoint private to the tailnet during alpha.
+Privacy & Security Hardening:
+- Payload contents are anonymous by client contract (see
+  lenovo-legion-tool/src/diagnostics.rs): hardware model/type/BIOS/CPU/GPU/EC
+  identity, distro/kernel, sensors, fan states, battery health stats (no
+  serial), thermal/Curve-Optimizer settings, settings digest, and sanitized
+  daemon log tail — never hostname, username, serial numbers, MAC/IP
+  addresses or per-key colour maps.
+- Shared-secret authentication via header `X-Legion-Telemetry-Key` when
+  `LEGION_TELEMETRY_KEY` environment variable is set (constant-time compare).
+- Sliding-window rate limiting per client IP (default 30/min, configurable via
+  `LEGION_TELEMETRY_RATE_PER_MIN`).
+- Gzip stream decompression with bomb guard cap (`MAX_BODY_BYTES = 512 KiB`)
+  supporting `Content-Encoding: gzip` and `x-gzip`.
+- Supported schema versions: 1, 2, 3, and 4 (v4 adds power, CPU-freq, display, audio-amp, and dGPU-limit blocks).
+- SQLite WAL mode + busy_timeout with thread-safe connections.
+- Automated hourly retention pruning for reports older than `RETENTION_DAYS` (default 90).
+- Modern FastAPI lifespan context manager.
 """
 
+import asyncio
+import hmac
 import json
 import os
 import sqlite3
+import threading
+import time
 import zlib
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 
 MAX_BODY_BYTES = 512 * 1024
-DB_PATH = os.environ.get("LEGION_TELEMETRY_DB", "./diagnostics.db")
+DB_PATH = os.environ.get(
+    "LEGION_TELEMETRY_DB",
+    os.path.join(os.path.dirname(__file__), "diagnostics.db"),
+)
+TELEMETRY_KEY = os.environ.get("LEGION_TELEMETRY_KEY", "")
+RETENTION_DAYS = int(os.environ.get("LEGION_TELEMETRY_RETENTION_DAYS", "90"))
+RATE_LIMIT_PER_MIN = int(os.environ.get("LEGION_TELEMETRY_RATE_PER_MIN", "30"))
 
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS reports ("
@@ -42,14 +52,20 @@ SCHEMA = (
     "ts TEXT NOT NULL, payload TEXT NOT NULL)"
 )
 
+_seen: dict[str, list[float]] = {}
+_seen_lock = threading.Lock()
+
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    """Return a thread-safe connection with WAL mode and busy timeout configured."""
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def init_db() -> None:
-    """Create the table once at startup instead of on every request."""
+    """Create the table once at startup with WAL mode enabled."""
     conn = connect()
     try:
         conn.execute(SCHEMA)
@@ -58,16 +74,40 @@ def init_db() -> None:
         conn.close()
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """Run init_db at startup (replaces the deprecated on_event hook)."""
-    init_db()
-    yield
-    # No shutdown cleanup: connections are opened per-request and closed in
-    # finally blocks.
+def prune_old_reports() -> int:
+    """Delete reports older than RETENTION_DAYS."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
+    conn = connect()
+    try:
+        cur = conn.execute("DELETE FROM reports WHERE ts < ?", (cutoff,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
 
-app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
+def _check_key(request: Request) -> None:
+    """Validate shared secret header if LEGION_TELEMETRY_KEY is configured."""
+    if not TELEMETRY_KEY:
+        return  # no key configured — tailnet or network boundary is the gate
+    got = request.headers.get("x-legion-telemetry-key", "")
+    if not hmac.compare_digest(got, TELEMETRY_KEY):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def _rate_limited(client_ip: str) -> bool:
+    """Sliding-window rate limiter per client IP."""
+    if RATE_LIMIT_PER_MIN <= 0:
+        return False
+    now = time.monotonic()
+    with _seen_lock:
+        window = [t for t in _seen.get(client_ip, []) if now - t < 60.0]
+        if len(window) >= RATE_LIMIT_PER_MIN:
+            _seen[client_ip] = window
+            return True
+        window.append(now)
+        _seen[client_ip] = window
+        return False
 
 
 def gunzip_capped(data: bytes, cap: int) -> bytes:
@@ -93,12 +133,65 @@ def gunzip_capped(data: bytes, cap: int) -> bytes:
     return bytes(out)
 
 
+async def _retention_worker() -> None:
+    """Background task to periodically prune expired reports."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            prune_old_reports()
+        except Exception:
+            pass
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Run init_db at startup and run background retention pruning."""
+    init_db()
+    prune_old_reports()
+    worker_task = asyncio.create_task(_retention_worker())
+    try:
+        yield
+    finally:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
+
+
+@app.get("/health")
+async def health() -> dict:
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM reports"
+        ).fetchone()
+        count, last_id = (row[0], row[1]) if row else (0, 0)
+    finally:
+        conn.close()
+    return {"ok": True, "count": count, "last_id": last_id}
+
+
 @app.post("/v1/diagnostics")
 async def submit_report(request: Request) -> dict:
     """Validate one diagnostics report and append it to the database."""
+    _check_key(request)
+
+    ip = request.client.host if request.client else "unknown"
+    if _rate_limited(ip):
+        raise HTTPException(status_code=429, detail="slow down")
+
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="payload too large")
+    if declared:
+        try:
+            if int(declared) > MAX_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="payload too large")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="bad content-length") from exc
+
     body = b""
     async for chunk in request.stream():
         body += chunk
@@ -124,14 +217,17 @@ async def submit_report(request: Request) -> dict:
 
     try:
         doc = json.loads(raw)
-    except ValueError as exc:  # JSONDecodeError / undecodable bytes
+    except (ValueError, RecursionError) as exc:  # JSONDecodeError / deep recursion
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
-    if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3):
-        raise HTTPException(status_code=400, detail="schema_version must be 1, 2, or 3")
+
+    if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3, 4):
+        raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
+
     try:
         payload = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="payload must be UTF-8") from None
+
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect()
     try:
@@ -145,21 +241,9 @@ async def submit_report(request: Request) -> dict:
     return {"ok": True}
 
 
-@app.get("/health")
-async def health() -> dict:
-    conn = connect()
-    try:
-        (count,) = conn.execute("SELECT COUNT(*) FROM reports").fetchone()
-    finally:
-        conn.close()
-    return {"ok": True, "count": count}
-
-
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        app,
-        host=os.environ.get("LEGION_TELEMETRY_HOST", "127.0.0.1"),
-        port=int(os.environ.get("LEGION_TELEMETRY_PORT", "8787")),
-    )
+    host = os.environ.get("LEGION_TELEMETRY_HOST", "127.0.0.1")
+    port = int(os.environ.get("LEGION_TELEMETRY_PORT", "8787"))
+    uvicorn.run(app, host=host, port=port)

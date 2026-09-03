@@ -4,6 +4,16 @@ Generated from the git histories of the **two private source repositories** that
 
 > **Note:** Short SHAs are **per-repo** — a SHA only resolves inside its own repository (run `git log` from that repo's root), not across the two.
 
+## 0.2.12 - 2026-09-03
+
+Release notes: [`lenovo-legion-tool/docs/changelog/v0.2.12.md`](lenovo-legion-tool/docs/changelog/v0.2.12.md).
+
+- Telemetry schema v4 (power/charging, CPU EPP/governor/boost, profile choices, display/VRR, amp health, dGPU limits); collector accepts schemas 1–4.
+- Unified hardened collector (streaming gzip 512 KiB bomb guard, shared-secret auth, IP rate limiting, WAL + hourly retention).
+- Privacy: battery/GPU serial redaction, FNV-1a SMBIOS UUID pseudonymization.
+- Fixes: dynamic CPU freq bounds, yogafan init order, bracket parser, hwmon cache TTL.
+
+
 # legion-tool (app)
 
 Branch `master` — the Rust application (daemon, CLI, settings GUI, KDE widget), packaging, and user docs.
