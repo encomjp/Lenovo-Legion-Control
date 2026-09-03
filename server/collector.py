@@ -51,6 +51,7 @@ SCHEMA = (
     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
     "ts TEXT NOT NULL, payload TEXT NOT NULL)"
 )
+_INSERT_SQL = "INSERT INTO reports (ts, payload) VALUES (?, ?)"
 
 _seen: dict[str, list[float]] = {}
 _seen_lock = threading.Lock()
@@ -92,6 +93,8 @@ def init_db() -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size = 268435456")
+    conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute(SCHEMA)
     conn.commit()
 
@@ -257,7 +260,7 @@ async def submit_report(request: Request) -> dict:
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect()
     conn.execute(
-        "INSERT INTO reports (ts, payload) VALUES (?, ?)",
+        _INSERT_SQL,
         (ts, payload),
     )
     conn.commit()
