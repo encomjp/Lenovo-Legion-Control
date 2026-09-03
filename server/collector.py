@@ -52,6 +52,7 @@ SCHEMA = (
     "ts TEXT NOT NULL, payload TEXT NOT NULL)"
 )
 _INSERT_SQL = "INSERT INTO reports (ts, payload) VALUES (?, ?)"
+_ALLOWED_SCHEMAS = (1, 2, 3, 4)
 
 _seen: dict[str, list[float]] = {}
 _seen_lock = threading.Lock()
@@ -229,7 +230,14 @@ async def submit_report(request: Request) -> dict:
 
     # The client may gzip the payload (Content-Encoding: gzip) — the ASGI
     # stack does not decode request bodies, so do it here.
-    encoding = (request.headers.get("content-encoding") or "").strip().lower()
+    # Fast path: real clients already send a normalized token, so skip the
+    # per-request strip().lower() allocs; normalize only on a miss (e.g.
+    # "  GZip  ") and keep the 415 message on the normalized value.
+    _raw_encoding = request.headers.get("content-encoding") or ""
+    if _raw_encoding in ("", "identity", "gzip", "x-gzip"):
+        encoding = _raw_encoding
+    else:
+        encoding = _raw_encoding.strip().lower()
     if encoding in ("", "identity"):
         raw = body
     elif encoding in ("gzip", "x-gzip"):
@@ -254,7 +262,7 @@ async def submit_report(request: Request) -> dict:
     except (ValueError, RecursionError) as exc:  # JSONDecodeError / deep recursion
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
 
-    if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3, 4):
+    if not isinstance(doc, dict) or doc.get("schema_version") not in _ALLOWED_SCHEMAS:
         raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
 
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
