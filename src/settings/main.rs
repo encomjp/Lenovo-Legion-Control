@@ -1002,7 +1002,13 @@ fn build_ui(app: &adw::Application) {
                 "Tuning",
             ),
             (
-                build_cpu_power_page(&toast_overlay, &show_page),
+                build_cpu_power_page(
+                    &toast_overlay,
+                    &show_page,
+                    &apply_queue,
+                    &mode_drop_slot,
+                    &profile_choices_slot,
+                ),
                 "power",
                 "Power",
             ),

@@ -95,6 +95,24 @@ pub(crate) fn build_cooling_overview_page(
             Some("Fan channels missing — check legion-control service"),
         ));
     }
+    let manual_supported = legion_core::fans::control_backend_name().is_some();
+    if !manual_supported {
+        let note = pref_group("Manual control unavailable", None);
+        tip(
+            &note,
+            "This model exposes fan tachometers but no firmware write path for manual targets",
+        );
+        note.add(&property_row(
+            "Managed by Lenovo EC firmware",
+            "Manual fan control is not supported on this model (managed by Lenovo EC firmware)",
+            Some("Fan RPM is shown live above; the EC firmware owns the fan curve"),
+        ));
+        page.append(&overview);
+        page.append(&note);
+        gate.track(&overview);
+        gate.track(&note);
+        return page;
+    }
     let reset = pref_group("Automatic mode", None);
     let btn = primary_button_tip(
         "All fans automatic",
@@ -145,6 +163,51 @@ pub(crate) fn fan_card(
         &rpm_l,
         "Live RPM from the EC — may show Auto or 0 while firmware is driving the fan",
     );
+
+    // Models without a fan-target write backend (e.g. Y7000P 16IRX9 / 83DG)
+    // are EC-owned: show RPM read-only instead of a manual switch/slider
+    // that could only ever fail with "no fan backend/device for target write".
+    if legion_core::fans::control_backend_name().is_none() {
+        let mode_row = adw::ActionRow::builder()
+            .title("Auto (EC controlled)")
+            .activatable(false)
+            .build();
+        tip(
+            &mode_row,
+            "The EC firmware owns the fan curve on this model — no manual target write path is exposed",
+        );
+        mode_row.add_suffix(&rpm_l);
+        group.add(&mode_row);
+        let note_row = adw::ActionRow::builder()
+            .title("Manual control unavailable")
+            .subtitle("Manual fan control is not supported on this model (managed by Lenovo EC firmware)")
+            .activatable(false)
+            .build();
+        tip(
+            &note_row,
+            "Fan tachometer is read-only here; the EC firmware drives the curve",
+        );
+        group.add(&note_row);
+        // Keep the RPM label live even in read-only mode.
+        glib::timeout_add_local(Duration::from_secs(2), move || {
+            let (tx, rx) = mpsc::channel();
+            let fan = fan;
+            std::thread::spawn(move || {
+                let _ = tx.send(legion_core::fans::rpm_label(fan));
+            });
+            let rpm_l_c = rpm_l.clone();
+            glib::timeout_add_local(Duration::from_millis(50), move || match rx.try_recv() {
+                Ok(text) => {
+                    rpm_l_c.set_text(&text);
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(_) => glib::ControlFlow::Break,
+            });
+            glib::ControlFlow::Continue
+        });
+        return group;
+    }
 
     let auto = legion_core::fans::read_target(fan).unwrap_or(0) == 0;
     let sw = adw::SwitchRow::builder()

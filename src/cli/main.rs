@@ -1122,7 +1122,22 @@ fn normalize_profile(name: &str) -> String {
 
 fn print_sensors(resp: Result<DaemonResponse, String>) {
     match resp {
-        Ok(DaemonResponse::Sensors(s)) => {
+        Ok(DaemonResponse::Sensors(mut s)) => {
+            // Daemon cgroup can block NVML (nvidia-caps) even when the
+            // GPU is awake — read nvidia-smi from this user process.
+            // Same fallback as the GUI app (settings/overview.rs).
+            if s.dgpu_temp < 0.0 {
+                let local = legion_core::dgpu::read_metrics_batch();
+                if let Some(t) = local.temp.filter(|t| *t > 0.0) {
+                    s.dgpu_temp = t;
+                    if s.dgpu_power < 0.0 {
+                        s.dgpu_power = local.power.unwrap_or(s.dgpu_power);
+                    }
+                    if s.dgpu_clock < 0.0 {
+                        s.dgpu_clock = local.clock.unwrap_or(s.dgpu_clock);
+                    }
+                }
+            }
             let cpu_power = match send_command(DaemonCommand::GetCpuPower) {
                 Ok(DaemonResponse::CpuPower(w)) if w > 0.5 => Some(w),
                 _ => None,

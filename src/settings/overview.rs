@@ -323,6 +323,10 @@ pub(crate) fn build_overview(
     let profile_guard_poll = profile_guard.clone();
     let last_ok_poll = last_ok.clone();
     let last_firmware_mode = Rc::new(RefCell::new(current));
+    // Fn+Q can flip the EC into/out of Custom without touching this GUI —
+    // reveal or hide the Custom sliders immediately on the next poll tick.
+    let ppt_box_poll = ppt_group_slot.clone();
+    let ppt_scales_poll = ppt_scales_slot.clone();
     let _ = legion_core::sensors::sample_cpu_usage_pct();
 
     // Data collected off the main thread each tick. IPC and nvidia-smi can
@@ -384,9 +388,6 @@ pub(crate) fn build_overview(
     // Drain poll results on the main thread and update the widgets.
     glib::timeout_add_local(Duration::from_millis(200), move || {
         while let Ok(poll) = dash_rx.try_recv() {
-            // Fn+Q changes happen outside this process.  Poll the daemon's
-            // hardware-authoritative profile and update the row without allowing
-            // the programmatic selection change to emit a SetProfile command.
             if let Some(firmware_mode) = poll.firmware_mode {
                 let changed = *last_firmware_mode.borrow() != firmware_mode;
                 if changed {
@@ -401,9 +402,15 @@ pub(crate) fn build_overview(
                         profile_guard_poll.set(false);
                         legion_core::config::remember_platform_profile(&firmware_mode);
                     }
+                    // Fn+Q straight to Custom must reveal the sliders without
+                    // waiting for a GUI dropdown touch.
+                    if let Some(ppt_box) = ppt_box_poll.borrow().as_ref() {
+                        ppt_box.set_visible(
+                            firmware_mode == "custom" && !ppt_scales_poll.borrow().is_empty(),
+                        );
+                    }
                 }
             }
-
             if let Some(s) = poll.sensors {
                 let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_temp };
                 cpu_v.set_text(&format!("{c:.0} °C"));

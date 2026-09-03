@@ -14,8 +14,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 10
-        color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
+        radius: 12
+        color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.32)
         border.width: 1
         border.color: Qt.rgba(1, 1, 1, 0.09)
     }
@@ -25,11 +25,11 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.rightMargin: Kirigami.Units.largeSpacing
-        anchors.topMargin: Kirigami.Units.smallSpacing + 4
-        anchors.bottomMargin: Kirigami.Units.smallSpacing + 4
-        spacing: 6
+        anchors.leftMargin: Kirigami.Units.largeSpacing - 4
+        anchors.rightMargin: Kirigami.Units.largeSpacing - 4
+        anchors.topMargin: Kirigami.Units.smallSpacing + 1
+        anchors.bottomMargin: Kirigami.Units.smallSpacing + 2
+        spacing: 5
 
         RowLayout {
             id: headerRow

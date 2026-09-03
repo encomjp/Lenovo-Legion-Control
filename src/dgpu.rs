@@ -100,9 +100,10 @@ fn smi_run(args: &[&str]) -> Option<String> {
         Ok(Ok(output)) => {
             let elapsed_ms = started.elapsed().as_millis();
             log::debug!(
-                "nvidia-smi failed: exit={:?}, stdout {} B, stderr {} B ({:?}), {elapsed_ms} ms",
+                "nvidia-smi failed: exit={:?}, stdout {} B ({:?}), stderr {} B ({:?}), {elapsed_ms} ms",
                 output.status.code(),
                 output.stdout.len(),
+                String::from_utf8_lossy(&output.stdout).trim(),
                 output.stderr.len(),
                 String::from_utf8_lossy(&output.stderr).trim(),
             );

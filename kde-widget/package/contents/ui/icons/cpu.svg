@@ -1,3 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <path fill="#ffffff" d="M9 2h2v2.5h2V2h2v2.5h.75A2.75 2.75 0 0 1 18.5 7.25V8H21v2h-2.5v2H21v2h-2.5v.75a2.75 2.75 0 0 1-2.75 2.75H15V21h-2v-2.5h-2V21H9v-2.5h-.75A2.75 2.75 0 0 1 5.5 15.75V15H3v-2h2.5v-2H3V9h2.5v-.75A2.75 2.75 0 0 1 8.25 5.5H9zm-.25 5.5A1.25 1.25 0 0 0 7.5 8.75v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25zm1.75 2h4v4h-4z"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="M8.5 7h7c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5h-7c-.83 0-1.5-.67-1.5-1.5v-7C7 7.67 7.67 7 8.5 7zm1.7 3.2v3.6h3.6v-3.6h-3.6z"/>
+  <g fill="#ffffff">
+    <rect x="9" y="2.2" width="1.6" height="3" rx="0.6"/>
+    <rect x="11.2" y="2.2" width="1.6" height="3" rx="0.6"/>
+    <rect x="13.4" y="2.2" width="1.6" height="3" rx="0.6"/>
+    <rect x="9" y="18.8" width="1.6" height="3" rx="0.6"/>
+    <rect x="11.2" y="18.8" width="1.6" height="3" rx="0.6"/>
+    <rect x="13.4" y="18.8" width="1.6" height="3" rx="0.6"/>
+    <rect x="2.2" y="9" width="3" height="1.6" rx="0.6"/>
+    <rect x="2.2" y="11.2" width="3" height="1.6" rx="0.6"/>
+    <rect x="2.2" y="13.4" width="3" height="1.6" rx="0.6"/>
+    <rect x="18.8" y="9" width="3" height="1.6" rx="0.6"/>
+    <rect x="18.8" y="11.2" width="3" height="1.6" rx="0.6"/>
+    <rect x="18.8" y="13.4" width="3" height="1.6" rx="0.6"/>
+  </g>
 </svg>

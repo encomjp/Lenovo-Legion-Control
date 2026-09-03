@@ -33,7 +33,6 @@ PlasmoidItem {
 
     readonly property color accentRed: "#c8102e"
     readonly property color benchAmber: "#d9981a"
-    readonly property color benchSteel: "#6b7280"
     readonly property string cpuDisplayName: compactHardwareName(cpuName, "CPU")
     readonly property string gpuDisplayName: compactHardwareName(gpuName, "GPU")
     readonly property string profileDisplay: profileTitle(profile)
@@ -150,17 +149,19 @@ PlasmoidItem {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 20
         Layout.preferredWidth: Kirigami.Units.gridUnit * 24
         Layout.maximumWidth: Kirigami.Units.gridUnit * 28
-        Layout.minimumHeight: fullCol.implicitHeight + Kirigami.Units.largeSpacing * 2
-        Layout.preferredHeight: fullCol.implicitHeight + Kirigami.Units.largeSpacing * 2
+        Layout.minimumHeight: fullCol.implicitHeight + footBar.height + Kirigami.Units.largeSpacing * 2
+        Layout.preferredHeight: fullCol.implicitHeight + footBar.height + Kirigami.Units.largeSpacing * 2
         implicitWidth: Kirigami.Units.gridUnit * 24
-        implicitHeight: fullCol.implicitHeight + Kirigami.Units.largeSpacing * 2
+        implicitHeight: fullCol.implicitHeight + footBar.height + Kirigami.Units.largeSpacing * 2
 
         readonly property real pagePadding: Math.max(12, Math.min(18, width * 0.04))
-        readonly property real gaugeSize: Math.max(64, Math.min(80, (width - pagePadding * 2 - 28) / 2))
 
         QQC2.ScrollView {
             id: fullScroll
-            anchors.fill: parent
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: footBar.top
             clip: true
             contentWidth: availableWidth
             QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
@@ -168,9 +169,9 @@ PlasmoidItem {
             ColumnLayout {
                 id: fullCol
                 width: Math.max(0, fullScroll.availableWidth)
-                spacing: 10
+                spacing: 11
 
-            // ── Header — same title/subtitle rhythm as the app ──
+            // ── Header — app mark + title + daemon status ──
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
@@ -178,14 +179,14 @@ PlasmoidItem {
                 Layout.rightMargin: fullRoot.pagePadding
                 spacing: 9
 
-                Kirigami.Icon {
-                    source: Qt.resolvedUrl("icons/cpu.svg")
-                    isMask: true
-                    color: Kirigami.Theme.textColor
-                    implicitWidth: 18
-                    implicitHeight: 18
+                Image {
+                    source: Qt.resolvedUrl("icons/app-mark.svg")
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
                     Layout.alignment: Qt.AlignVCenter
-                    opacity: 0.88
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
                 }
                 Text {
                     text: "LEGION CONTROL"
@@ -196,88 +197,43 @@ PlasmoidItem {
                     Layout.alignment: Qt.AlignVCenter
                 }
                 Item { Layout.fillWidth: true }
+                Rectangle {
+                    Layout.preferredWidth: 8
+                    Layout.preferredHeight: 8
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: 4
+                    color: root.daemonOnline ? "#2ecc71" : "#e67e22"
+                    Behavior on color { ColorAnimation { duration: 220 } }
+                }
             }
 
-            // ── Metric chips — the same compact readout language as Home ──
+            // ── Performance cards — merged CPU/GPU telemetry (replaces gauges + SYSTEM table) ──
             RowLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: fullRoot.pagePadding
                 Layout.rightMargin: fullRoot.pagePadding
-                spacing: 8
+                spacing: 10
                 visible: root.showGauges
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (root.showSparklines ? 26 : 0)
-                    radius: 10
-                    clip: true
-                    color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
-                    border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, 0.09)
-                    Rectangle {
-                        width: 3
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        color: root.accentRed
-                    }
-                    Gauge {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.top: parent.top
-                        anchors.topMargin: 8
-                        size: fullRoot.gaugeSize
-                        value: parseFloat(root.cpuTemp)
-                        label: "CPU"; unit: "°C"; minValue: 20; maxValue: 100
-                    }
-                    Sparkline {
-                        id: sparkline
-                        visible: root.showSparklines && root.tempHistory.length > 3
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        anchors.bottomMargin: 6
-                        height: 18
-                        points: root.tempHistory
-                        lineColor: Qt.rgba(root.accentRed.r, root.accentRed.g, root.accentRed.b, 0.75)
-                    }
+                PerfCard {
+                    iconSource: Qt.resolvedUrl("icons/cpu.svg")
+                    chipName: root.cpuDisplayName
+                    temp: root.cpuTemp
+                    power: root.cpuPower
+                    fanText: root.fanCpu === "0" ? "Auto" : root.fanCpu === "--" ? "—" : root.fanCpu + " RPM"
+                    history: root.tempHistory
+                    accentColor: root.accentRed
+                    showSparkline: root.showSparklines
                 }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: fullRoot.gaugeSize + 22 + (root.showSparklines ? 26 : 0)
-                    radius: 10
-                    clip: true
-                    color: Qt.rgba(Kirigami.Theme.backgroundColor.r, Kirigami.Theme.backgroundColor.g, Kirigami.Theme.backgroundColor.b, 0.28)
-                    border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, 0.09)
-                    Rectangle {
-                        width: 3
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        color: root.benchSteel
-                    }
-                    Gauge {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.top: parent.top
-                        anchors.topMargin: 8
-                        size: fullRoot.gaugeSize
-                        value: parseFloat(root.gpuTemp)
-                        label: "GPU"; unit: "°C"; minValue: 20; maxValue: 100
-                    }
-                    Sparkline {
-                        id: gpuSparkline
-                        visible: root.showSparklines && root.gpuTempHistory.length > 3
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        anchors.bottomMargin: 6
-                        height: 18
-                        points: root.gpuTempHistory
-                        lineColor: Qt.rgba(root.benchSteel.r, root.benchSteel.g, root.benchSteel.b, 0.85)
-                    }
+                PerfCard {
+                    iconSource: Qt.resolvedUrl("icons/gpu.svg")
+                    chipName: root.gpuDisplayName
+                    temp: root.gpuTemp
+                    power: root.gpuPower
+                    fanText: root.fanGpu === "0" ? "Auto" : root.fanGpu === "--" ? "—" : root.fanGpu + " RPM"
+                    history: root.gpuTempHistory
+                    accentColor: "#38bdf8"
+                    showSparkline: root.showSparklines
+                    dimmed: parseFloat(root.gpuTemp) < 0
                 }
             }
 
@@ -305,24 +261,42 @@ PlasmoidItem {
                 }
             }
 
-            // ── System ───────────────────────────────────────────
-            SectionCard {
-                title: "SYSTEM"
+            // ── Battery capsule — premium energy meter ──
+            BatteryBar {
                 Layout.leftMargin: fullRoot.pagePadding
                 Layout.rightMargin: fullRoot.pagePadding
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    MonitorRow { iconSource: Qt.resolvedUrl("icons/cpu.svg"); label: root.cpuDisplayName; temperature: root.cpuTemp; secondaryValue: parseFloat(root.cpuPower) >= 0 ? root.cpuPower + " W" : "—"; fanValue: root.fanCpu === "0" ? "AUTO" : root.fanCpu === "--" ? "" : root.fanCpu + " RPM" }
-                    MonitorRow { iconSource: Qt.resolvedUrl("icons/gpu.svg"); label: root.gpuDisplayName; temperature: root.gpuTemp === "--" || parseFloat(root.gpuTemp) < 0 ? "—" : root.gpuTemp; secondaryValue: parseFloat(root.gpuPower) >= 0 ? root.gpuPower + " W" : "—"; fanValue: root.fanGpu === "0" ? "AUTO" : root.fanGpu === "--" ? "" : root.fanGpu + " RPM"; muted: parseFloat(root.gpuTemp) < 0 }
-                }
+                percentage: root.batteryPct; batteryStatus: root.batteryStatus; chargeLimit: root.chargeLimit; watts: root.batWatts
             }
 
-            // ── Battery ──────────────────────────────────────────
+            // ── Telemetry history — dual-stream CPU+GPU curves fill the
+            // pop-up naturally so no void opens above the footer. ──
             SectionCard {
-                title: "BATTERY"
+                title: "TELEMETRY HISTORY"
+                badge: root.cpuTemp !== "--" ? Math.round(parseFloat(root.cpuTemp)) + "° / " + (parseFloat(root.gpuTemp) >= 0 ? Math.round(parseFloat(root.gpuTemp)) + "°" : "—") : ""
+                badgeColor: Kirigami.Theme.textColor
                 Layout.leftMargin: fullRoot.pagePadding
                 Layout.rightMargin: fullRoot.pagePadding
-                BatteryBar { percentage: root.batteryPct; batteryStatus: root.batteryStatus; chargeLimit: root.chargeLimit; watts: root.batWatts }
+                visible: root.showSparklines && (root.tempHistory.length > 1 || root.gpuTempHistory.length > 1)
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        Row { spacing: 5; Rectangle { width: 8; height: 8; radius: 4; color: "#f0524f"; anchors.verticalCenter: parent.verticalCenter } Text { text: "CPU"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize - 1; font.weight: Font.Bold; font.letterSpacing: 0.7; color: Kirigami.Theme.textColor; opacity: 0.70; anchors.verticalCenter: parent.verticalCenter } }
+                        Row { spacing: 5; Rectangle { width: 8; height: 8; radius: 4; color: "#38bdf8"; anchors.verticalCenter: parent.verticalCenter } Text { text: "GPU"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize - 1; font.weight: Font.Bold; font.letterSpacing: 0.7; color: Kirigami.Theme.textColor; opacity: 0.70; anchors.verticalCenter: parent.verticalCenter } }
+                        Item { Layout.fillWidth: true }
+                        Text { text: "30 samples"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize - 2; color: Kirigami.Theme.textColor; opacity: 0.40 }
+                    }
+                    HistoryGraph {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 64
+                        cpuPoints: root.tempHistory
+                        gpuPoints: root.gpuTempHistory
+                        cpuColor: "#f0524f"
+                        gpuColor: "#38bdf8"
+                    }
+                }
             }
 
             // ── Controls ─────────────────────────────────────────
@@ -330,100 +304,171 @@ PlasmoidItem {
                 title: "CONTROLS"
                 Layout.leftMargin: fullRoot.pagePadding
                 Layout.rightMargin: fullRoot.pagePadding
-                GridLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    columns: 2
-                    columnSpacing: 8
-                    rowSpacing: 6
-                    QuickControl {
+                    spacing: 8
+                    // Legion command deck: tap a pill to apply it immediately.
+                    RowLayout {
                         Layout.fillWidth: true
-                        enabled: root.daemonOnline
-                        opacity: root.daemonOnline ? 1.0 : 0.5
-                        iconSource: Qt.resolvedUrl("icons/profile.svg"); label: "Profile"; valueText: root.profileDisplay; valueColor: Kirigami.Theme.textColor
-                        onClicked: {
-                            var p = ["quiet", "balanced", "performance", "max-power", "custom"]
-                            var current = (root.profile || "").toLowerCase().replace(/[\s\(\)]+/g, "-").replace(/-+$/, "")
-                            if (current === "low-power" || current === "quiet-low-power") current = "quiet"
-                            var i = p.indexOf(current)
-                            if (i < 0) i = 0
-                            var next = p[(i + 1) % p.length]
-                            root.profile = next
-                            root._lastWriteTime = Date.now()
-                            executable.exec(root.cliCommand + " set-profile " + next)
-                            refreshTimer.restart()
-                        }
-                    }
-                    QuickControl {
-                        Layout.fillWidth: true
-                        enabled: root.daemonOnline
-                        opacity: root.daemonOnline ? 1.0 : 0.5
-                        iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "CPU Fan"; valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
-                        onClicked: {
-                            var pr = [0, 3000, 3500, 4000, 4500]
-                            var c = parseInt(root.fanCpu) || 0
-                            var next = pr[0]
-                            for (var idx = 0; idx < pr.length; idx++) {
-                                if (pr[idx] > c) {
-                                    next = pr[idx]
-                                    break
+                        spacing: 8
+                        Repeater {
+                            model: [
+                                { label: "Quiet", cli: "quiet", accent: "#3b82f6" },
+                                { label: "Balanced", cli: "balanced", accent: "#06b6d4" },
+                                { label: "Performance", cli: "performance", accent: "#c8102e" },
+                                { label: "Custom", cli: "custom", accent: "#8b5cf6" }
+                            ]
+                            delegate: Rectangle {
+                                id: pill
+                                required property var modelData
+                                readonly property bool active: root.profileDisplay === modelData.label
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 36
+                                radius: 10
+                                scale: pillMa.pressed ? 0.96 : 1.0
+                                color: pill.active ? pill.modelData.accent
+                                    : pillMa.pressed ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+                                    : pillMa.containsMouse ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.07)
+                                    : Qt.rgba(1, 1, 1, 0.04)
+                                border.width: 1
+                                border.color: pill.active ? Qt.lighter(pill.modelData.accent, 1.3)
+                                    : pillMa.containsMouse ? Qt.rgba(pill.modelData.accent.r, pill.modelData.accent.g, pill.modelData.accent.b, 0.45)
+                                    : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.08)
+                                opacity: root.daemonOnline ? 1.0 : 0.5
+                                Behavior on color { ColorAnimation { duration: 180 } }
+                                Behavior on border.color { ColorAnimation { duration: 180 } }
+                                Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.topMargin: 1
+                                    anchors.leftMargin: 7
+                                    anchors.rightMargin: 7
+                                    height: 1
+                                    color: pill.active ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(1, 1, 1, 0.07)
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - 8
+                                    text: pill.modelData.label
+                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                    font.weight: pill.active ? Font.Bold : Font.Medium
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                    color: pill.active ? "white" : Kirigami.Theme.textColor
+                                }
+                                MouseArea {
+                                    id: pillMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: root.daemonOnline
+                                    onClicked: {
+                                        root.profile = pill.modelData.cli
+                                        root._lastWriteTime = Date.now()
+                                        executable.exec(root.cliCommand + " set-profile " + pill.modelData.cli)
+                                        refreshTimer.restart()
+                                    }
                                 }
                             }
-                            root.fanCpu = String(next)
-                            root._lastWriteTime = Date.now()
-                            executable.exec(root.cliCommand + " set-fan 1 " + next)
-                            refreshTimer.restart()
                         }
                     }
-                    QuickControl {
+                    RowLayout {
                         Layout.fillWidth: true
-                        enabled: root.daemonOnline
-                        opacity: root.daemonOnline ? 1.0 : 0.5
-                        iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "GPU Fan"; valueText: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
-                        onClicked: {
-                            var pr = [0, 3000, 3500, 4000, 4500]
-                            var c = parseInt(root.fanGpu) || 0
-                            var next = pr[0]
-                            for (var idx = 0; idx < pr.length; idx++) {
-                                if (pr[idx] > c) {
-                                    next = pr[idx]
-                                    break
+                        spacing: 8
+                        QuickControl {
+                            enabled: root.daemonOnline
+                            opacity: root.daemonOnline ? 1.0 : 0.5
+                            iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "CPU Fan"; valueText: root.fanCpu === "0" ? "Auto" : root.fanCpu + " RPM"
+                            onClicked: {
+                                var pr = [0, 3000, 3500, 4000, 4500]
+                                var c = parseInt(root.fanCpu) || 0
+                                var next = pr[0]
+                                for (var idx = 0; idx < pr.length; idx++) {
+                                    if (pr[idx] > c) {
+                                        next = pr[idx]
+                                        break
+                                    }
                                 }
+                                root.fanCpu = String(next)
+                                root._lastWriteTime = Date.now()
+                                executable.exec(root.cliCommand + " set-fan 1 " + next)
+                                refreshTimer.restart()
                             }
-                            root.fanGpu = String(next)
-                            root._lastWriteTime = Date.now()
-                            executable.exec(root.cliCommand + " set-fan 2 " + next)
-                            refreshTimer.restart()
                         }
-                    }
-                    QuickControl {
-                        Layout.fillWidth: true
-                        enabled: root.daemonOnline
-                        opacity: root.daemonOnline ? 1.0 : 0.5
-                        iconSource: Qt.resolvedUrl("icons/charge-limit.svg"); label: "Charge Limit"; valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit + "%"; valueColor: root.chargeLimit !== "" ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
-                        onClicked: {
-                            var L = [100, 80, 60]
-                            var c = parseInt(root.chargeLimit) || 100
-                            var i = L.indexOf(c)
-                            if (i < 0) i = 0
-                            var next = L[(i + 1) % L.length]
-                            root.chargeLimit = next === 100 ? "" : String(next)
-                            root._lastWriteTime = Date.now()
-                            executable.exec(root.cliCommand + " charge-limit " + next)
-                            refreshTimer.restart()
+                        QuickControl {
+                            enabled: root.daemonOnline
+                            opacity: root.daemonOnline ? 1.0 : 0.5
+                            iconSource: Qt.resolvedUrl("icons/fan.svg"); label: "GPU Fan"; valueText: root.fanGpu === "0" ? "Auto" : root.fanGpu + " RPM"
+                            onClicked: {
+                                var pr = [0, 3000, 3500, 4000, 4500]
+                                var c = parseInt(root.fanGpu) || 0
+                                var next = pr[0]
+                                for (var idx = 0; idx < pr.length; idx++) {
+                                    if (pr[idx] > c) {
+                                        next = pr[idx]
+                                        break
+                                    }
+                                }
+                                root.fanGpu = String(next)
+                                root._lastWriteTime = Date.now()
+                                executable.exec(root.cliCommand + " set-fan 2 " + next)
+                                refreshTimer.restart()
+                            }
+                        }
+                        QuickControl {
+                            enabled: root.daemonOnline
+                            opacity: root.daemonOnline ? 1.0 : 0.5
+                            iconSource: Qt.resolvedUrl("icons/charge-limit.svg"); label: "Limit"; valueText: root.chargeLimit === "" ? "100%" : root.chargeLimit + "%"; valueColor: root.chargeLimit !== "" ? "#f5a524" : Kirigami.Theme.textColor
+                            onClicked: {
+                                var L = [100, 80, 60]
+                                var c = parseInt(root.chargeLimit) || 100
+                                var i = L.indexOf(c)
+                                if (i < 0) i = 0
+                                var next = L[(i + 1) % L.length]
+                                root.chargeLimit = next === 100 ? "" : String(next)
+                                root._lastWriteTime = Date.now()
+                                executable.exec(root.cliCommand + " charge-limit " + next)
+                                refreshTimer.restart()
+                            }
                         }
                     }
                 }
             }
 
-            // ── Foot — open app ──────────────────────────────────
+            // Flexible spacer: absorbs containment stretch so the footer
+            // stays docked without opening a void between sections.
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 38
-                Layout.topMargin: 2
-                Layout.leftMargin: fullRoot.pagePadding
-                Layout.rightMargin: fullRoot.pagePadding
-                Layout.bottomMargin: 6
+                Layout.fillHeight: true
+                Layout.minimumHeight: 0
+            }
+        }
+        }
+
+        // ── Foot bar — docked flush to the bottom, no empty space ──
+        Item {
+            id: footBar
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 46
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Qt.rgba(1, 1, 1, 0.08)
+            }
+
+            Item {
+                anchors.fill: parent
+                anchors.leftMargin: fullRoot.pagePadding
+                anchors.rightMargin: fullRoot.pagePadding
+                anchors.topMargin: 6
+                anchors.bottomMargin: 6
 
                 Rectangle {
                     id: openBtnBg
@@ -468,7 +513,6 @@ PlasmoidItem {
                 }
             }
         }
-        }
     }
 
     Plasma5Support.DataSource { id: executable; engine: "executable"; connectedSources: []; function exec(cmd){connectSource(cmd)} onNewData: function(s,d){disconnectSource(s)} }
@@ -504,13 +548,21 @@ PlasmoidItem {
             if(cpuTemp!=="--"){
                 var valTemp=parseFloat(cpuTemp);
                 if(!isNaN(valTemp)){
-                    var h=root.tempHistory.slice(); h.push(valTemp); if(h.length>30)h.shift(); root.tempHistory=h
+                    if (root.tempHistory.length === 0) {
+                        root.tempHistory = [valTemp, valTemp, valTemp, valTemp]
+                    } else {
+                        var h=root.tempHistory.slice(); h.push(valTemp); if(h.length>30)h.shift(); root.tempHistory=h
+                    }
                 }
             }
             if(gpuTemp!=="--"){
                 var gpuVal=parseFloat(gpuTemp);
                 if(!isNaN(gpuVal) && gpuVal>=0){
-                    var gh=root.gpuTempHistory.slice(); gh.push(gpuVal); if(gh.length>30)gh.shift(); root.gpuTempHistory=gh
+                    if (root.gpuTempHistory.length === 0) {
+                        root.gpuTempHistory = [gpuVal, gpuVal, gpuVal, gpuVal]
+                    } else {
+                        var gh=root.gpuTempHistory.slice(); gh.push(gpuVal); if(gh.length>30)gh.shift(); root.gpuTempHistory=gh
+                    }
                 }
             }
         }

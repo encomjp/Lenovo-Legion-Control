@@ -39,7 +39,7 @@ Kirigami.ScrollablePage {
 
         QQC2.CheckBox {
             id: gaugesCheck
-            text: i18n("Show circular temperature gauges")
+            text: i18n("Show CPU/GPU performance cards")
         }
 
         QQC2.CheckBox {

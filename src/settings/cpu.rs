@@ -475,6 +475,9 @@ pub(crate) fn build_cpu_features_page(
 pub(crate) fn build_cpu_power_page(
     toast_overlay: &adw::ToastOverlay,
     go_home: &Rc<dyn Fn(&'static str, &'static str)>,
+    apply_queue: &ApplyQueue,
+    mode_drop_slot: &Rc<RefCell<Option<adw::ComboRow>>>,
+    profile_choices_slot: &Rc<RefCell<Vec<String>>>,
 ) -> gtk::Box {
     let page = page_lede("");
     let all_limits = legion_core::profile::all_ppt_limits();
@@ -490,16 +493,21 @@ pub(crate) fn build_cpu_power_page(
         return page;
     }
     let mode = legion_core::profile::current();
+    let custom_active = mode == "custom";
 
     // Guidance row — live wording, one clear way out.
     let guide = pref_group("Power limits", None);
     tip(
         &guide,
-        "CPU PPT and GPU power sliders are edited on Home — they unlock when Power mode is Custom",
+        if custom_active {
+            "Custom mode is active — the watt sliders below are live and write through the daemon"
+        } else {
+            "CPU PPT and GPU power sliders are edited on Home — they unlock when Power mode is Custom"
+        },
     );
     let lock_row = adw::ActionRow::builder()
-        .title(if mode == "custom" {
-            "Custom mode is active"
+        .title(if custom_active {
+            "Custom mode is active — sliders below are live"
         } else {
             "Locked outside Custom mode"
         })
@@ -537,13 +545,18 @@ pub(crate) fn build_cpu_power_page(
     guide.add(&lock_row);
     page.append(&guide);
 
-    // Live preview of the same sliders Home shows — greyed out here. Values
-    // mirror the firmware read so the page informs instead of pointing.
+    // Same sliders Home shows — live here while Custom is active, greyed out
+    // otherwise. Values mirror the firmware read.
     let preview = pref_group("Custom watts", None);
     tip(
         &preview,
-        "Read-only mirror of the Custom-mode limits — edit them on Home",
+        if custom_active {
+            "Custom-mode limits — drag a slider to apply (writes go through the daemon)"
+        } else {
+            "Read-only mirror of the Custom-mode limits — switch to Custom to edit here or on Home"
+        },
     );
+    let suppress = Rc::new(Cell::new(false));
     for lim in legion_core::profile::all_ppt_limits() {
         let row = adw::ActionRow::builder()
             .title(lim.label)
@@ -570,8 +583,38 @@ pub(crate) fn build_cpu_power_page(
         row.add_suffix(&scale);
         row.add_suffix(&val);
         preview.add(&row);
+        // Wire edits through the same Custom-gate Home uses: auto-switch to
+        // Custom on first drag, then queue the firmware-attribute write.
+        let overlay = toast_overlay.clone();
+        let queue = apply_queue.clone();
+        let drop_slot = mode_drop_slot.clone();
+        let choices_slot = profile_choices_slot.clone();
+        let suppress_c = suppress.clone();
+        let val_c = val.clone();
+        let lim_id = lim.id.to_string();
+        let lim_unit = lim.unit.symbol().to_string();
+        scale.connect_value_changed(move |s| {
+            if suppress_c.get() {
+                return;
+            }
+            let v = s.value().round() as u32;
+            val_c.set_text(&format!("{v} {lim_unit}"));
+            // Home dropdown may not exist yet (build order) — fall back to a
+            // direct queued write; Home syncs from firmware on its next poll.
+            let drop_opt = drop_slot.borrow().clone();
+            let choices = choices_slot.borrow().clone();
+            match drop_opt {
+                Some(drop) if !choices.is_empty() => {
+                    ensure_custom_then_ppt(&overlay, &drop, &choices, &queue, &lim_id, v);
+                }
+                _ => {
+                    queue.set_fw_attr(&lim_id, v.to_string());
+                    legion_core::config::remember_ppt(&lim_id, v);
+                }
+            }
+        });
     }
-    preview.set_sensitive(false);
+    preview.set_sensitive(custom_active);
     page.append(&preview);
     page
 }

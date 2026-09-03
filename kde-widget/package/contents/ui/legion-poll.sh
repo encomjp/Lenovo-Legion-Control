@@ -5,7 +5,9 @@
 # legion-cli invocations per tick (status / profile / battery) — temps,
 # powers, and fan RPMs are all parsed from the single `status` dump, and
 # kbd/logo were dropped entirely (the widget never displayed them).
-# Optional values are allowed to be absent.
+# Plus at most ONE conditional `nvidia-smi` query (only when the daemon's
+# dGPU reading is missing/negative — see below). Optional values are
+# allowed to be absent.
 set -u
 export LC_ALL=C
 
@@ -38,10 +40,40 @@ value() {
 # Anchors: fields are right-aligned (spaces vary), so require \s+ and a
 # trailing °C; accept both the current "CPU" label and the legacy "Tctl".
 cpu_t="$(printf '%s\n' "$status" | grep -oP '(Tctl|CPU)\s+\K[0-9.]+(?=°C)' | head -1 || true)"
+cpu_p="$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
+dgpu_t="$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[-0-9.]+' | head -1 || true)"
+dgpu_p="$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[-0-9.]+(?=\s+W)' | head -1 || true)"
+# Daemon cgroup can block NVML (nvidia-caps) even when the GPU is awake,
+# so the daemon may report dGPU -1 while nvidia-smi works fine from this
+# user process (same fallback the GUI app does in overview.rs). Only pay
+# for the extra subprocess when the daemon value is missing or negative.
+if [[ -z "${dgpu_t:-}" || "$dgpu_t" == -* || -z "${dgpu_p:-}" || "$dgpu_p" == -* ]]; then
+  smi=""
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    smi="$(command -v nvidia-smi)"
+  else
+    for p in /usr/bin/nvidia-smi /usr/local/bin/nvidia-smi /opt/bin/nvidia-smi; do
+      [[ -x "$p" ]] && smi="$p" && break
+    done
+  fi
+  if [[ -n "$smi" ]]; then
+    smi_raw="$(timeout 3 "$smi" --query-gpu=temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | head -1 || true)"
+    if [[ -n "$smi_raw" ]]; then
+      smi_t="$(printf '%s' "$smi_raw" | cut -d, -f1 | tr -d '[:space:]' || true)"
+      smi_p="$(printf '%s' "$smi_raw" | cut -d, -f2 | tr -d '[:space:]' || true)"
+      if [[ -z "${dgpu_t:-}" || "$dgpu_t" == -* ]] && [[ "$smi_t" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        dgpu_t="$smi_t"
+      fi
+      if [[ -z "${dgpu_p:-}" || "$dgpu_p" == -* ]] && [[ "$smi_p" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        dgpu_p="$smi_p"
+      fi
+    fi
+  fi
+fi
 value CPU_TEMP "$cpu_t"
-value CPU_POWER "$(printf '%s\n' "$status" | grep -oP 'CPU power\s+\K[0-9.]+' | head -1 || true)"
-value DGPU_TEMP "$(printf '%s\n' "$status" | grep -oP 'dGPU\s+\K[-0-9.]+' | head -1 || true)"
-value DGPU_POWER "$(printf '%s\n' "$status" | grep 'dGPU' | grep -oP '[-0-9.]+(?=\s+W)' | head -1 || true)"
+value CPU_POWER "$cpu_p"
+value DGPU_TEMP "$dgpu_t"
+value DGPU_POWER "$dgpu_p"
 fans_line="$(printf '%s\n' "$status" | grep -Ei 'rpm' | grep -Ei 'CPU|GPU|Aux' | head -1 || true)"
 value FAN_CPU "$(printf '%s\n' "$fans_line" | grep -oP 'CPU\s+\K[0-9]+' | head -1 || true)"
 value FAN_GPU "$(printf '%s\n' "$fans_line" | grep -oP 'GPU\s+\K[0-9]+' | head -1 || true)"

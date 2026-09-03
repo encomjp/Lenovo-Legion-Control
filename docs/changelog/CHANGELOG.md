@@ -3,7 +3,7 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.13.md`](v0.2.13.md), [`v0.2.12.md`](v0.2.12.md), [`v0.2.11.md`](v0.2.11.md), [`v0.2.10.md`](v0.2.10.md), [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
 
 ## Unreleased
@@ -15,6 +15,17 @@ The app does not read this folder; in-app update text comes from the GitHub rele
 - Lighting: Lighting nav tooltip and startup Spectrum restore are now capability-driven; add `LEGION_LIGHTING_OVERRIDE=spectrum|fourzone|white` debug env to preview each branch.
 
 - Catalog (`data/model-capabilities.json`): fix 83KY BIOS prefix Q7CN → RXCN (live LLL #355/#409 + kernel DMI match; Q7CN belongs to 83F5); correct the 82N6 known-gaps note (plain Legion 7, alt-spectrum is only 83G0/83AG); add rows for 83Q7 (T2CN, Gen 11) and the toolkit-mapped MTs 83F1, 83EW/83EG/83EF, 83LT, 83FD, 83EX, 82Y9/82Y5/82YA as unknown-capability stubs pending the PSREF pass.
+
+## 0.2.13 - 2026-09-03
+
+Full notes: [`v0.2.13.md`](v0.2.13.md). Fixes GitHub Issue #3 (Y7000P 16IRX9 / 83DG).
+
+- Lighting: white-backlight slider writes route through the daemon (`SetKbdBrightness`) with `toast_error` on failure; integer-step snapping with Off/50%/100% marks and labels.
+- Cooling: read-only fan cards + EC-managed note on models without a fan-target write backend (`control_backend_name().is_none()`); "All fans automatic" reset gated the same way.
+- CPU → Power: Custom-watts sliders are live while in Custom mode (wired to `ensure_custom_then_ppt`); guide text reflects the active state.
+- Home: Fn+Q into Custom mode immediately reveals the Custom power sliders (`ppt_box.set_visible(firmware_mode == "custom" && ...)`).
+- Telemetry schema version 4 support; collector accepts schemas 1–4.
+- KDE widget redesign.
 
 ## 0.2.11 - 2026-09-02
 

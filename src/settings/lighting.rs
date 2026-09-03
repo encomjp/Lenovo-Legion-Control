@@ -1,10 +1,11 @@
 //! Lighting — one subtab per surface + per-key painter.
 
+use super::{run_daemon_command_async, toast_error};
 use crate::perkey;
 use crate::widgets::{effect_tooltip, labeled_row_tip, page_lede, section_tip, tip};
+use legion_core::comms::{DaemonCommand, DaemonResponse};
 use legion_core::config::ZoneEffect;
 use legion_core::keyboard::{RgbEffect, RgbZone};
-
 use adw::prelude::*;
 use gtk::{glib, Align, Orientation};
 use gtk4 as gtk;
@@ -71,7 +72,7 @@ pub fn build_lighting(
                  Brightness: fn+Q cycles 50% → 100% → Off.",
             ),
         };
-        return build_simple_backlight_page(&cfg, page, title, note);
+        return build_simple_backlight_page(&cfg, page, title, note, toast_overlay);
     }
 
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
@@ -136,11 +137,14 @@ pub fn build_lighting(
 
 /// Fallback page for non-Spectrum lighting (white-only or unsupported
 /// 4-zone): a notice + the kbd_backlight brightness slider the EC owns.
+/// Writes go through the root daemon (`SetKbdBrightness`) — the user-space
+/// GTK process cannot write `/sys/class/leds/.../brightness` directly.
 fn build_simple_backlight_page(
     _cfg: &legion_core::config::AppConfig,
     page: gtk::Box,
     title: &str,
     note: &str,
+    toast_overlay: &adw::ToastOverlay,
 ) -> (gtk::Box, adw::ViewStack) {
     let (sec, card) = section_tip(title, Some(note));
     let note = gtk::Label::new(Some(
@@ -155,33 +159,66 @@ fn build_simple_backlight_page(
     note.add_css_class("dim-label");
     card.append(&note);
 
-    // Native brightness slider bound to /sys/class/leds/*::kbd_backlight
+    // Brightness slider — reads are local sysfs, writes go through the daemon.
     let level = legion_core::keyboard::brightness().unwrap_or(0);
-    let max = legion_core::keyboard::max_brightness().unwrap_or(2);
+    let max = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
     let row = adw::ActionRow::builder()
         .title("Backlight brightness")
-        .subtitle(format!(
-            "{} %",
-            // u32 math: u8 `level * 100` overflows (debug panic, release wrap) on 3+ level boards.
-            if max > 0 {
-                (level as u32 * 100 / max as u32) as u8
-            } else {
-                0
-            }
-        ))
+        .subtitle(backlight_label(level, max))
         .activatable(false)
         .build();
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, max as f64, 1.0);
-    scale.set_value(level as f64);
+    scale.set_value(level.min(max) as f64);
     scale.set_hexpand(true);
     scale.set_valign(Align::Center);
+    scale.set_increments(1.0, 1.0);
+    scale.set_digits(0);
+    scale.set_draw_value(false);
+    // Stepped marks: 0=Off, then even percent steps (max==2 → Off/50%/100%).
+    for lvl in 0..=max {
+        scale.add_mark(
+            lvl as f64,
+            gtk::PositionType::Bottom,
+            Some(&backlight_label(lvl, max)),
+        );
+    }
     let row_c = row.clone();
+    let overlay = toast_overlay.clone();
+    // Guard against recursion when snapping the slider to integer steps, and
+    // skip duplicate daemon writes while dragging within one step.
+    let suppress = Rc::new(Cell::new(false));
+    let suppress_c = suppress.clone();
+    let last_sent = Rc::new(Cell::new(level.min(max)));
     scale.connect_value_changed(move |s| {
-        let v = s.value() as u8;
-        let _ = legion_core::keyboard::set_brightness(v);
+        if suppress_c.get() {
+            return;
+        }
         let maxv = legion_core::keyboard::max_brightness().unwrap_or(2).max(1);
-        // u32 math — see the u8-overflow note on the initial subtitle above.
-        row_c.set_subtitle(&format!("{} %", (v as u32 * 100 / maxv as u32) as u8));
+        let v = s.value().round().clamp(0.0, maxv as f64) as u8;
+        // Snap fractional drags to the integer step without re-entering.
+        if (s.value() - v as f64).abs() > f64::EPSILON {
+            suppress_c.set(true);
+            s.set_value(v as f64);
+            suppress_c.set(false);
+        }
+        row_c.set_subtitle(&backlight_label(v, maxv));
+        if v == last_sent.get() {
+            return;
+        }
+        last_sent.set(v);
+        let overlay = overlay.clone();
+        let row_c = row_c.clone();
+        run_daemon_command_async(DaemonCommand::SetKbdBrightness(v), move |result| match result {
+            Ok(DaemonResponse::Ok) => {}
+            Ok(DaemonResponse::Error(e)) => {
+                row_c.set_subtitle(&format!("Error: {e}"));
+                toast_error(&overlay, &e);
+            }
+            Err(e) => {
+                toast_error(&overlay, &e);
+            }
+            _ => {}
+        });
     });
     row.add_suffix(&scale);
     card.append(&row);
@@ -190,6 +227,17 @@ fn build_simple_backlight_page(
 
     let tabs = adw::ViewStack::new(); // empty — no zone tabs on white-only boards
     (page, tabs)
+}
+
+/// Human label for a white-backlight level: 0 → "Off", otherwise percent of
+/// max (u32 math — u8 `level * 100` overflows on 3+ level boards).
+fn backlight_label(level: u8, max: u8) -> String {
+    let max = max.max(1);
+    if level == 0 {
+        "Off".to_string()
+    } else {
+        format!("{}%", (level as u32 * 100 / max as u32) as u8)
+    }
 }
 
 fn build_keyboard_tab(
@@ -792,5 +840,16 @@ mod tests {
         for input in ["äää", "€€€", "🦀🦀", "#äää", "FF€€00"] {
             assert!(parse_hex(input).is_none(), "input {input:?}");
         }
+    }
+
+    #[test]
+    fn backlight_label_steps() {
+        // Y7000P white backlight: max==2 → Off / 50% / 100%.
+        assert_eq!(super::backlight_label(0, 2), "Off");
+        assert_eq!(super::backlight_label(1, 2), "50%");
+        assert_eq!(super::backlight_label(2, 2), "100%");
+        // Generic max uses u32 percent math (no u8 overflow).
+        assert_eq!(super::backlight_label(0, 0), "Off");
+        assert_eq!(super::backlight_label(3, 9), "33%");
     }
 }

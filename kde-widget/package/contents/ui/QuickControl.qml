@@ -2,6 +2,8 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import org.kde.kirigami 2.20 as Kirigami
 
+// Polished command-deck tile: rounded dark glass, top highlight,
+// clean icon + caps title, prominent readout with chevron affordance.
 Item {
     id: qc
     property url iconSource
@@ -10,22 +12,38 @@ Item {
     property color valueColor: Kirigami.Theme.textColor
     signal clicked()
 
-    implicitHeight: 42
+    implicitHeight: 62
     implicitWidth: 0
     Layout.fillWidth: true
     Layout.minimumWidth: 0
+    Layout.preferredHeight: 62
+
+    scale: ma.pressed ? 0.97 : 1.0
+    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
 
     Rectangle {
         anchors.fill: parent
-        radius: 8
+        radius: 10
         color: ma.pressed ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
               : ma.containsMouse ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
-              : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.025)
+              : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.03)
         border.width: 1
         border.color: ma.containsMouse || ma.pressed
-            ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.14)
-            : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
+            ? Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.16)
+            : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.07)
         Behavior on color { ColorAnimation { duration: 140 } }
+        Behavior on border.color { ColorAnimation { duration: 140 } }
+        // Subtle top highlight for glass depth.
+        Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.topMargin: 1
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            height: 1
+            color: Qt.rgba(1, 1, 1, 0.08)
+        }
     }
 
     MouseArea {
@@ -36,63 +54,64 @@ Item {
         onClicked: qc.clicked()
     }
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 10
-        anchors.rightMargin: 8
-        spacing: 6
+        anchors.leftMargin: 6
+        anchors.rightMargin: 6
+        anchors.topMargin: 7
+        anchors.bottomMargin: 7
+        spacing: 3
 
-        Item {
-            Layout.preferredWidth: 16
-            Layout.minimumWidth: 16
-            Layout.maximumWidth: 16
-            Layout.preferredHeight: 16
-            Layout.alignment: Qt.AlignVCenter
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
+            spacing: 4
             Kirigami.Icon {
-                anchors.centerIn: parent
                 source: qc.iconSource
                 isMask: true
                 color: Kirigami.Theme.textColor
-                width: 15
-                height: 15
-                opacity: 0.70
+                Layout.preferredWidth: 12
+                Layout.preferredHeight: 12
+                Layout.alignment: Qt.AlignVCenter
+                opacity: 0.65
+            }
+            Text {
+                text: qc.label.toUpperCase()
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize - 2
+                font.weight: Font.Bold
+                font.letterSpacing: 0.8
+                Layout.alignment: Qt.AlignVCenter
+                elide: Text.ElideRight
+                color: Kirigami.Theme.textColor
+                opacity: 0.62
             }
         }
 
-        Text {
-            text: qc.label
-            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-            font.weight: Font.Medium
+        RowLayout {
             Layout.fillWidth: true
-            Layout.minimumWidth: 0
-            Layout.alignment: Qt.AlignVCenter
-            elide: Text.ElideRight
-            color: Kirigami.Theme.textColor
-            opacity: 0.92
-        }
-
-        Text {
-            text: qc.valueText
-            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-            font.weight: Font.DemiBold
-            Layout.alignment: Qt.AlignVCenter
-            Layout.maximumWidth: 88
-            horizontalAlignment: Text.AlignRight
-            elide: Text.ElideRight
-            color: qc.valueColor
-            opacity: 0.95
-        }
-
-        Text {
-            text: "›"
-            font.pixelSize: 16
-            font.weight: Font.DemiBold
-            Layout.preferredWidth: 10
-            Layout.alignment: Qt.AlignVCenter
-            horizontalAlignment: Text.AlignHCenter
-            color: ma.containsMouse ? "#e8566e" : Kirigami.Theme.textColor
-            opacity: ma.containsMouse ? 0.95 : 0.40
-            Behavior on color { ColorAnimation { duration: 140 } }
+            spacing: 2
+            Item { Layout.fillWidth: true }
+            Text {
+                text: qc.valueText
+                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize + 1
+                font.weight: Font.Bold
+                font.letterSpacing: -0.2
+                Layout.alignment: Qt.AlignVCenter
+                elide: Text.ElideRight
+                color: qc.valueColor
+                opacity: 0.96
+            }
+            Kirigami.Icon {
+                source: Qt.resolvedUrl("icons/chevron.svg")
+                isMask: true
+                color: Kirigami.Theme.textColor
+                Layout.preferredWidth: 8
+                Layout.preferredHeight: 8
+                Layout.alignment: Qt.AlignVCenter
+                opacity: ma.containsMouse ? 0.65 : 0.32
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+            }
+            Item { Layout.fillWidth: true }
         }
     }
 }
