@@ -55,35 +55,54 @@ SCHEMA = (
 _seen: dict[str, list[float]] = {}
 _seen_lock = threading.Lock()
 
+_local = threading.local()
+
+
+def _new_connection() -> sqlite3.Connection:
+    """Open a fresh SQLite connection for the calling thread."""
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
 
 def connect() -> sqlite3.Connection:
-    """Return a thread-safe connection with WAL mode and busy timeout configured."""
-    conn = sqlite3.connect(DB_PATH, timeout=5.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    """Return the calling thread's cached connection, reopening if needed.
+
+    Connections are reused across requests on the same thread instead of
+    opening (and re-running PRAGMAs on) a brand-new connection per request.
+    Callers MUST NOT close the returned connection; it stays cached in
+    thread-local storage. A liveness probe reopens it if it was closed
+    externally (e.g. direct ``collector.connect().close()`` in tests).
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except sqlite3.Error:
+            pass  # closed or unusable — fall through and reopen
+    conn = _new_connection()
+    _local.conn = conn
     return conn
 
 
 def init_db() -> None:
     """Create the table once at startup with WAL mode enabled."""
     conn = connect()
-    try:
-        conn.execute(SCHEMA)
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(SCHEMA)
+    conn.commit()
 
 
 def prune_old_reports() -> int:
     """Delete reports older than RETENTION_DAYS."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
     conn = connect()
-    try:
-        cur = conn.execute("DELETE FROM reports WHERE ts < ?", (cutoff,))
-        conn.commit()
-        return cur.rowcount
-    finally:
-        conn.close()
+    cur = conn.execute("DELETE FROM reports WHERE ts < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount
 
 
 def _check_key(request: Request) -> None:
@@ -165,13 +184,10 @@ app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
 @app.get("/health")
 async def health() -> dict:
     conn = connect()
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM reports"
-        ).fetchone()
-        count, last_id = (row[0], row[1]) if row else (0, 0)
-    finally:
-        conn.close()
+    row = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM reports"
+    ).fetchone()
+    count, last_id = (row[0], row[1]) if row else (0, 0)
     return {"ok": True, "count": count, "last_id": last_id}
 
 
@@ -230,14 +246,11 @@ async def submit_report(request: Request) -> dict:
 
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect()
-    try:
-        conn.execute(
-            "INSERT INTO reports (ts, payload) VALUES (?, ?)",
-            (ts, payload),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute(
+        "INSERT INTO reports (ts, payload) VALUES (?, ?)",
+        (ts, payload),
+    )
+    conn.commit()
     return {"ok": True}
 
 
