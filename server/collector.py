@@ -58,6 +58,18 @@ _seen: dict[str, list[float]] = {}
 _seen_lock = threading.Lock()
 
 _local = threading.local()
+_last_sec = 0
+_last_ts_str = ""
+
+
+def _current_timestamp() -> str:
+    """Return current UTC second as ISO-8601, caching per second."""
+    global _last_sec, _last_ts_str
+    now_sec = int(time.time())
+    if now_sec != _last_sec:
+        _last_sec = now_sec
+        _last_ts_str = datetime.fromtimestamp(now_sec, timezone.utc).isoformat(timespec="seconds")
+    return _last_ts_str
 
 
 def _new_connection() -> sqlite3.Connection:
@@ -269,7 +281,7 @@ async def submit_report(request: Request) -> dict:
     if not isinstance(doc, dict) or doc.get("schema_version") not in _ALLOWED_SCHEMAS:
         raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
 
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = _current_timestamp()
     conn = connect()
     conn.execute(
         _INSERT_SQL,
