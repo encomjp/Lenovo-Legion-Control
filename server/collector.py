@@ -137,19 +137,26 @@ def gunzip_capped(data: bytes, cap: int) -> bytes:
     Raises ValueError when the cap is exceeded and zlib.error on corrupt data.
     """
     dec = zlib.decompressobj(wbits=31)  # 31 = gzip container
-    out = bytearray()
+    chunks: list[bytes] = []
+    out_len = 0
     piece = data
     while piece:
-        out += dec.decompress(piece, cap + 1 - len(out))
-        if len(out) > cap:
+        part = dec.decompress(piece, cap + 1 - out_len)
+        out_len += len(part)
+        if out_len > cap:
             raise ValueError("decompressed payload too large")
+        if part:
+            chunks.append(part)
         piece = dec.unconsumed_tail
-    out += dec.flush()
-    if len(out) > cap:
+    tail = dec.flush()
+    out_len += len(tail)
+    if out_len > cap:
         raise ValueError("decompressed payload too large")
     if not dec.eof:
         raise zlib.error("incomplete or truncated gzip stream")
-    return bytes(out)
+    if tail:
+        chunks.append(tail)
+    return b"".join(chunks)
 
 
 async def _retention_worker() -> None:
@@ -208,11 +215,14 @@ async def submit_report(request: Request) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="bad content-length") from exc
 
-    body = b""
+    chunks: list[bytes] = []
+    body_len = 0
     async for chunk in request.stream():
-        body += chunk
-        if len(body) > MAX_BODY_BYTES:
+        chunks.append(chunk)
+        body_len += len(chunk)
+        if body_len > MAX_BODY_BYTES:
             raise HTTPException(status_code=413, detail="payload too large")
+    body = b"".join(chunks)
 
     # The client may gzip the payload (Content-Encoding: gzip) — the ASGI
     # stack does not decode request bodies, so do it here.
@@ -232,17 +242,17 @@ async def submit_report(request: Request) -> dict:
         )
 
     try:
-        doc = json.loads(raw)
+        payload = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="payload must be UTF-8") from None
+
+    try:
+        doc = json.loads(payload)
     except (ValueError, RecursionError) as exc:  # JSONDecodeError / deep recursion
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
 
     if not isinstance(doc, dict) or doc.get("schema_version") not in (1, 2, 3, 4):
         raise HTTPException(status_code=400, detail="schema_version must be 1, 2, 3, or 4")
-
-    try:
-        payload = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="payload must be UTF-8") from None
 
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = connect()
