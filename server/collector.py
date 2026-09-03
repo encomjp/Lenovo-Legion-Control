@@ -91,6 +91,7 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     """Create the table once at startup with WAL mode enabled."""
     conn = connect()
+    conn.execute("PRAGMA page_size = 8192")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
