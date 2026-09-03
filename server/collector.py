@@ -207,9 +207,11 @@ async def submit_report(request: Request) -> dict:
     """Validate one diagnostics report and append it to the database."""
     _check_key(request)
 
-    ip = request.client.host if request.client else "unknown"
-    if _rate_limited(ip):
-        raise HTTPException(status_code=429, detail="slow down")
+    if RATE_LIMIT_PER_MIN > 0:
+        client = request.client
+        ip = client.host if client else "unknown"
+        if _rate_limited(ip):
+            raise HTTPException(status_code=429, detail="slow down")
 
     declared = request.headers.get("content-length", "")
     if declared:
