@@ -30,10 +30,23 @@ jobs:
       - run: cargo build --release --locked
       - run: |
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
-          chmod +x /tmp/appimagetool
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh -O /tmp/linuxdeploy-plugin-gtk.sh
+          chmod +x /tmp/appimagetool /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk.sh
           mkdir -p packaged
-          APPIMAGETOOL=/tmp/appimagetool ./packaging/build-appimage.sh ./packaged
+          PATH="/tmp:$PATH" APPIMAGETOOL=/tmp/appimagetool LINUXDEPLOY=/tmp/linuxdeploy ./packaging/build-appimage.sh ./packaged
           ls -lh packaged/
+      # Smoke test: in a bare container (no GTK/libadwaita installed) every
+      # bundled library must resolve, otherwise the AppImage catalog test fails.
+      - name: Check AppImage is self-contained
+        run: |
+          cd packaged && ./legion-control-*.AppImage --appimage-extract >/dev/null
+          docker run --rm -v "$PWD/squashfs-root:/app:ro" ubuntu:24.04 bash -c '
+            cd /app && for b in usr/bin/legion-settings usr/bin/legion-cli usr/bin/legion-daemon; do
+              echo "== $b"; LD_LIBRARY_PATH=/app/usr/lib ldd "$b" | tee /tmp/ldd.txt
+              if grep -q "not found" /tmp/ldd.txt; then echo "missing libs in $b"; exit 1; fi
+            done'
+          rm -rf squashfs-root
       - uses: actions/upload-artifact@v4
         with:
           name: appimage

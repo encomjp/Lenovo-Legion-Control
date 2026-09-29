@@ -53,6 +53,16 @@ install -Dm644 "$ROOT/data/udev/99-legion.rules" \
     "$APPDIR/usr/lib/udev/rules.d/99-legion.rules"
 cp -a "$ROOT/third_party/ryzen_smu/." "$APPDIR/usr/lib/legion-control/ryzen_smu/"
 
+# Bundle shared libraries (GTK4, libadwaita, ...) so the AppImage runs on
+# systems without them. glibc and other base libs stay on the host
+# (linuxdeploy's excludelist).
+LINUXDEPLOY="${LINUXDEPLOY:-$(command -v linuxdeploy || true)}"
+if [[ -n "$LINUXDEPLOY" ]]; then
+    DEPLOY_GTK_VERSION=4 NO_STRIP=1 "$LINUXDEPLOY" --appimage-extract-and-run         --appdir "$APPDIR"         --executable "$APPDIR/usr/bin/legion-settings"         --executable "$APPDIR/usr/bin/legion-cli"         --executable "$APPDIR/usr/bin/legion-daemon"         --deploy-deps-only "$APPDIR/usr/libexec/legion-control-setup"         --desktop-file "$APPDIR/usr/share/applications/com.encomjp.legion-settings.desktop"         --plugin gtk
+else
+    echo "warning: linuxdeploy not found; AppImage will depend on host GTK4/libadwaita" >&2
+fi
+
 PACKAGE="$OUT/legion-control-${VERSION}-x86_64.AppImage"
 rm -f "$PACKAGE"
 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$PACKAGE"
