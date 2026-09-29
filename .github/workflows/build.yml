@@ -16,17 +16,37 @@ concurrency:
 
 jobs:
   appimage:
+    # Built on the oldest supported Ubuntu LTS so the AppImage only needs
+    # glibc 2.35 on the host (AppImage catalog requirement). GTK4/libadwaita
+    # are too old there, so they're built from source and cached.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    container: ubuntu:22.04
+    timeout-minutes: 90
     env:
       RUSTFLAGS: "-C target-cpu=x86-64-v3"
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+      PKG_CONFIG_PATH: /opt/gnome/lib/x86_64-linux-gnu/pkgconfig:/opt/gnome/lib/pkgconfig:/opt/gnome/share/pkgconfig
+      LD_LIBRARY_PATH: /opt/gnome/lib/x86_64-linux-gnu:/opt/gnome/lib
+      XDG_DATA_DIRS: /opt/gnome/share:/usr/share
     steps:
+      - name: Install build dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq build-essential curl wget git file xz-utils pkg-config python3-pip             ninja-build flex bison gettext sassc cmake libffi-dev zlib1g-dev libpcre2-dev libmount-dev             libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev libgraphene-1.0-dev libepoxy-dev             libfribidi-dev libharfbuzz-dev libfontconfig1-dev libxkbcommon-dev libwayland-dev             wayland-protocols libx11-dev libxext-dev libxi-dev libxrandr-dev libxcursor-dev             libxdamage-dev libxinerama-dev libxfixes-dev libxml2-dev libyaml-dev libcurl4-gnutls-dev             libstemmer-dev gperf itstool desktop-file-utils appstream >/dev/null
+          pip3 install -q 'meson>=1.4' packaging
       - uses: actions/checkout@v4
+      - name: Restore GNOME stack cache
+        id: gnome-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/gnome
+          key: gnome-jammy-${{ hashFiles('packaging/appimage/build-gnome-deps.sh') }}
+      - name: Build GLib / GTK4 / libadwaita
+        if: steps.gnome-cache.outputs.cache-hit != 'true'
+        run: ./packaging/appimage/build-gnome-deps.sh
       - uses: dtolnay/rust-toolchain@stable
-      # Cargo registry + target cache — cold gtk4-rs build is ~2m10s,
-      # warm rebuild of the 4 workspace crates is ~40-60s.
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev appstream
       - run: cargo build --release --locked
       - run: |
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool
@@ -34,25 +54,32 @@ jobs:
           wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh -O /tmp/linuxdeploy-plugin-gtk.sh
           chmod +x /tmp/appimagetool /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk.sh
           mkdir -p packaged
-          PATH="/tmp:$PATH" APPIMAGETOOL=/tmp/appimagetool LINUXDEPLOY=/tmp/linuxdeploy ./packaging/build-appimage.sh ./packaged
+          PATH="/tmp:/opt/gnome/bin:$PATH" APPIMAGETOOL=/tmp/appimagetool LINUXDEPLOY=/tmp/linuxdeploy ./packaging/build-appimage.sh ./packaged
           ls -lh packaged/
-      # Smoke test: in a container with only base desktop libs (X11/GL/fonts/harfbuzz,
-      # which AppImages take from the host) and no GTK/libadwaita, every
-      # bundled library must resolve, otherwise the AppImage catalog test fails.
-      - name: Check AppImage is self-contained
-        run: |
-          cd packaged && ./legion-control-*.AppImage --appimage-extract >/dev/null
-          docker run --rm -v "$PWD/squashfs-root:/app:ro" ubuntu:24.04 bash -c '
-            apt-get update -qq && apt-get install -y -qq --no-install-recommends libx11-6 libxcb1 libgl1 libegl1 libfontconfig1 libfreetype6 libharfbuzz0b libfribidi0 >/dev/null
-            cd /app && for b in usr/bin/legion-settings usr/bin/legion-cli usr/bin/legion-daemon; do
-              echo "== $b"; LD_LIBRARY_PATH=/app/usr/lib ldd "$b" | tee /tmp/ldd.txt
-              if grep -q "not found" /tmp/ldd.txt; then echo "missing libs in $b"; exit 1; fi
-            done'
-          rm -rf squashfs-root
       - uses: actions/upload-artifact@v4
         with:
           name: appimage
           path: packaged/*.AppImage
+
+  # Smoke test on the same base the AppImage catalog tests on: only base
+  # desktop libs (X11/GL/fonts/harfbuzz, which AppImages take from the host),
+  # no GTK/libadwaita. Every bundled library and glibc symbol must resolve.
+  appimage-check:
+    needs: appimage
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+      - run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends libx11-6 libxcb1 libgl1 libegl1 libfontconfig1 libfreetype6 libharfbuzz0b libfribidi0 >/dev/null
+          chmod +x legion-control-*.AppImage && ./legion-control-*.AppImage --appimage-extract >/dev/null
+          cd squashfs-root && for b in usr/bin/legion-settings usr/bin/legion-cli usr/bin/legion-daemon; do
+            echo "== $b"; LD_LIBRARY_PATH=$PWD/usr/lib ldd "$b" 2>&1 | tee /tmp/ldd.txt
+            if grep -q "not found" /tmp/ldd.txt; then echo "missing libs or glibc symbols in $b"; exit 1; fi
+          done
 
   deb:
     runs-on: ubuntu-24.04
@@ -177,7 +204,7 @@ jobs:
           path: packaging/out/*.pkg.tar.zst
 
   release:
-    needs: [appimage, deb, rpm, arch]
+    needs: [appimage, appimage-check, deb, rpm, arch]
     # Only publish on tag pushes — a workflow_dispatch from master must not
     # create a stray "master" release.
     if: startsWith(github.ref, 'refs/tags/')
