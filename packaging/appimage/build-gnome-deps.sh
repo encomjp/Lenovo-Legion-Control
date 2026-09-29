@@ -9,6 +9,8 @@ GLIB_VERSION="${GLIB_VERSION:-2.80.5}"
 GTK_VERSION="${GTK_VERSION:-4.14.5}"
 ADW_VERSION="${ADW_VERSION:-1.5.3}"
 WAYLAND_VERSION="${WAYLAND_VERSION:-1.23.1}"
+XMLB_VERSION="${XMLB_VERSION:-0.3.19}"
+APPSTREAM_VERSION="${APPSTREAM_VERSION:-1.0.3}"
 WAYLAND_PROTOCOLS_VERSION="${WAYLAND_PROTOCOLS_VERSION:-1.36}"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/x86_64-linux-gnu/pkgconfig:$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -50,6 +52,13 @@ build "gtk-$GTK_VERSION" -Dintrospection=disabled -Ddocumentation=false -Dman-pa
     -Dmedia-gstreamer=disabled -Dprint-cpdb=disabled -Dprint-cups=disabled \
     -Dvulkan=disabled -Dcloudproviders=disabled -Dsysprof=disabled -Dtracker=disabled \
     -Dcolord=disabled -Dx11-backend=true -Dwayland-backend=true
+
+# libadwaita 1.5 needs appstream >= 1.0 (jammy: 0.15); its wrap pulls an
+# incompatible appstream main, so build a pinned release (+ libxmlb) first.
+curl -fsSL "https://github.com/hughsie/libxmlb/releases/download/$XMLB_VERSION/libxmlb-$XMLB_VERSION.tar.xz" | tar -xJ -C "$SRC"
+build "libxmlb-$XMLB_VERSION" -Dgtkdoc=false -Dintrospection=false -Dtests=false -Dcli=false     -Dlzma=disabled -Dzstd=disabled
+curl -fsSL "https://www.freedesktop.org/software/appstream/releases/AppStream-$APPSTREAM_VERSION.tar.xz" | tar -xJ -C "$SRC"
+build "AppStream-$APPSTREAM_VERSION" -Dsystemd=false -Dstemming=false -Dsvg-support=false     -Dgir=false -Ddocs=false -Dapidocs=false -Dinstall-docs=false -Dcompose=false -Dqt=false     -Dvapi=false -Dzstd-support=false
 
 fetch libadwaita "$ADW_VERSION"
 build "libadwaita-$ADW_VERSION" -Dintrospection=disabled -Dvapi=false -Dgtk_doc=false \
