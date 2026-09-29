@@ -36,14 +36,14 @@ jobs:
           mkdir -p packaged
           PATH="/tmp:$PATH" APPIMAGETOOL=/tmp/appimagetool LINUXDEPLOY=/tmp/linuxdeploy ./packaging/build-appimage.sh ./packaged
           ls -lh packaged/
-      # Smoke test: in a container with only base desktop libs (X11/GL/fonts,
+      # Smoke test: in a container with only base desktop libs (X11/GL/fonts/harfbuzz,
       # which AppImages take from the host) and no GTK/libadwaita, every
       # bundled library must resolve, otherwise the AppImage catalog test fails.
       - name: Check AppImage is self-contained
         run: |
           cd packaged && ./legion-control-*.AppImage --appimage-extract >/dev/null
           docker run --rm -v "$PWD/squashfs-root:/app:ro" ubuntu:24.04 bash -c '
-            apt-get update -qq && apt-get install -y -qq --no-install-recommends libx11-6 libxcb1 libgl1 libegl1 libfontconfig1 libfreetype6 >/dev/null
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends libx11-6 libxcb1 libgl1 libegl1 libfontconfig1 libfreetype6 libharfbuzz0b libfribidi0 >/dev/null
             cd /app && for b in usr/bin/legion-settings usr/bin/legion-cli usr/bin/legion-daemon; do
               echo "== $b"; LD_LIBRARY_PATH=/app/usr/lib ldd "$b" | tee /tmp/ldd.txt
               if grep -q "not found" /tmp/ldd.txt; then echo "missing libs in $b"; exit 1; fi
