@@ -44,7 +44,7 @@ jobs:
           key: gnome-jammy-${{ hashFiles('packaging/appimage/build-gnome-deps.sh') }}
       - name: Build GLib / GTK4 / libadwaita
         if: steps.gnome-cache.outputs.cache-hit != 'true'
-        run: ./packaging/appimage/build-gnome-deps.sh
+        run: bash ./packaging/appimage/build-gnome-deps.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked
