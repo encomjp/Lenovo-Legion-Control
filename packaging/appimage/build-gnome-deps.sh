@@ -8,6 +8,8 @@ PREFIX="${PREFIX:-/opt/gnome}"
 GLIB_VERSION="${GLIB_VERSION:-2.80.5}"
 GTK_VERSION="${GTK_VERSION:-4.14.5}"
 ADW_VERSION="${ADW_VERSION:-1.5.3}"
+WAYLAND_VERSION="${WAYLAND_VERSION:-1.23.1}"
+WAYLAND_PROTOCOLS_VERSION="${WAYLAND_PROTOCOLS_VERSION:-1.36}"
 
 export PKG_CONFIG_PATH="$PREFIX/lib/x86_64-linux-gnu/pkgconfig:$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:$PREFIX/lib:${LD_LIBRARY_PATH:-}"
@@ -32,6 +34,15 @@ build() { # dir meson-args...
 fetch glib "$GLIB_VERSION"
 build "glib-$GLIB_VERSION" -Dintrospection=disabled -Dtests=false -Dman-pages=disabled \
     -Ddocumentation=false -Dselinux=disabled
+
+# GTK 4.14 needs wayland >= 1.21 / wayland-protocols >= 1.31 (jammy: 1.20 / 1.25).
+fetch_fdo() { # project version
+    curl -fsSL "https://gitlab.freedesktop.org/wayland/$1/-/releases/$2/downloads/$1-$2.tar.xz" | tar -xJ -C "$SRC"
+}
+fetch_fdo wayland "$WAYLAND_VERSION"
+build "wayland-$WAYLAND_VERSION" -Ddocumentation=false -Dtests=false
+fetch_fdo wayland-protocols "$WAYLAND_PROTOCOLS_VERSION"
+build "wayland-protocols-$WAYLAND_PROTOCOLS_VERSION" -Dtests=false
 
 fetch gtk "$GTK_VERSION"
 build "gtk-$GTK_VERSION" -Dintrospection=disabled -Ddocumentation=false -Dman-pages=false \
