@@ -168,6 +168,32 @@ pub fn validate(points: &CurvePoints) -> Result<(), String> {
     Ok(())
 }
 
+/// Move point `idx` towards (`temp`, `pct`) while keeping the curve valid:
+/// temperatures stay strictly increasing, percentages non-decreasing, and the
+/// last point stays at 100 % and at or above 90 °C. Used by the GUI editor
+/// (mouse and keyboard) so an edited curve always passes [`validate`].
+pub fn constrain_point(points: &CurvePoints, idx: usize, temp: i32, pct: i32) -> (u8, u8) {
+    let idx = idx.min(POINTS - 1);
+    let last = idx == POINTS - 1;
+    let t_lo = if idx == 0 {
+        TEMP_MIN_C as i32
+    } else {
+        points[idx - 1].0 as i32 + 1
+    };
+    let t_hi = if last {
+        TEMP_MAX_C as i32
+    } else {
+        points[idx + 1].0 as i32 - 1
+    };
+    let t_lo = if last { t_lo.max(SAFETY_TEMP_C as i32) } else { t_lo };
+    let p_lo = if idx == 0 { 0 } else { points[idx - 1].1 as i32 };
+    let p_hi = if last { 100 } else { points[idx + 1].1 as i32 };
+    let p_lo = if last { 100 } else { p_lo };
+    let t = temp.clamp(t_lo.min(t_hi), t_hi.max(t_lo));
+    let p = pct.clamp(p_lo.min(p_hi), p_hi.max(p_lo));
+    (t as u8, p as u8)
+}
+
 /// Piecewise-linear fan percent (0..=100) for `temp_c`. Flat before the first
 /// and after the last point.
 pub fn interpolate(points: &CurvePoints, temp_c: f64) -> f64 {
@@ -667,6 +693,29 @@ mod tests {
         let d = decide(&mut h, &low, 40.0, Some(91.0));
         assert!(d.safety && d.pct == 100.0);
         assert_eq!(d.temp_c, 91.0, "weighted max picks the hotter sensor");
+    }
+
+    #[test]
+    fn constrain_point_keeps_curve_valid() {
+        let base = balanced();
+        // Interior: bounded by neighbours.
+        assert_eq!(constrain_point(&base, 3, 0, 0), (51, 25));
+        assert_eq!(constrain_point(&base, 3, 200, 200), (69, 52));
+        // First point can go down to 20 °C and 0 %.
+        assert_eq!(constrain_point(&base, 0, -5, -5), (20, 0));
+        // Last stays at 100 % and >= 90 °C.
+        assert_eq!(constrain_point(&base, 7, 50, 10), (91, 100));
+        assert_eq!(constrain_point(&base, 7, 500, 10), (100, 100));
+        // Any single-point drag from anywhere leaves a valid curve.
+        for idx in 0..POINTS {
+            for t in [-10, 0, 35, 63, 99, 150] {
+                for p in [-10, 0, 33, 99, 150] {
+                    let mut c = base;
+                    c[idx] = constrain_point(&c, idx, t, p);
+                    validate(&c).unwrap_or_else(|e| panic!("idx {idx} t {t} p {p}: {e}"));
+                }
+            }
+        }
     }
 
     #[test]

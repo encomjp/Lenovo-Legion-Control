@@ -9,6 +9,7 @@ mod tray;
 mod about;
 mod battery;
 mod cooling;
+mod curve_editor;
 mod cpu;
 mod fix;
 mod graphics;
