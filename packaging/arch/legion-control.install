@@ -1,6 +1,13 @@
 reload_udev() {
+  # udevd may have parsed 99-legion.rules while pacman unpacked it, before
+  # group 'legion' existed, and cached the rule without GROUP=. Bump the
+  # mtime so --reload-rules really re-reads it, then apply and wait.
+  for f in /usr/lib/udev/rules.d/99-legion.rules /etc/udev/rules.d/99-legion.rules; do
+    [ -f "$f" ] && touch "$f"
+  done
   udevadm control --reload-rules >/dev/null 2>&1 || true
-  udevadm trigger -s hidraw >/dev/null 2>&1 || true
+  udevadm trigger --action=change -s hidraw >/dev/null 2>&1 || true
+  udevadm settle -t 10 >/dev/null 2>&1 || true
 }
 
 post_install() {

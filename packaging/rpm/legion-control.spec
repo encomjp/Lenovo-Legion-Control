@@ -1,5 +1,5 @@
 Name:           legion-control
-Version:        0.2.15
+Version:        0.2.16
 Release:        1%{?dist}
 Summary:        Lenovo Legion hardware control suite
 License:        GPL-2.0-only
@@ -72,8 +72,12 @@ else
     echo "legion-control: for CLI/GUI daemon access run: sudo usermod -aG legion \$USER  (then re-login)" >&2
 fi
 if command -v udevadm >/dev/null 2>&1; then
+    # Force a re-parse: udevd may have cached 99-legion.rules before group
+    # 'legion' existed (GROUP= dropped, RGB nodes stay root-only).
+    touch /usr/lib/udev/rules.d/99-legion.rules 2>/dev/null || :
     udevadm control --reload-rules || :
-    udevadm trigger -s hidraw || :
+    udevadm trigger --action=change -s hidraw || :
+    udevadm settle -t 10 || :
 fi
 
 %preun

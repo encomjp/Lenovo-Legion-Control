@@ -227,15 +227,24 @@ fn read_thermal_zone_temp(include_acpitz: bool) -> Option<i32> {
 
 /// Reads the main CPU temperature via cached hwmon discovery.
 ///
-/// AMD: `k10temp` `temp1_input` (Tctl) + `temp4_input` (Tccd1).
+/// AMD: `k10temp` `temp1_input` (Tctl) + the input labelled `Tccd1`
+/// (temp3 on Zen 5 — temp indices differ per family, so match by label).
 /// Intel Raptor Lake (Y7000P IRX9 83DG 0°C bug): `coretemp` Package id / Core
 /// labels, else `x86_pkg_temp` thermal zone. Source-agnostic so the governor
 /// works on both vendors; `sensors::read_all` is the display twin.
 pub fn read_cpu_temps() -> (Option<i32>, Option<i32>) {
     if let Some(hw) = crate::sensors::hwmon_by_name("k10temp").or_else(|| crate::sensors::hwmon_by_name("zenpower")) {
         let cpu_temp = read_temp_file(&hw.join("temp1_input"), "temp1_input (Tctl/Tdie)");
-        let tccd1 = read_temp_file(&hw.join("temp4_input"), "temp4_input (Tccd1)");
-        let cpu_temp_2 = tccd1
+        let labelled = |want: &str| {
+            (2..=12).find_map(|i| {
+                let label = std::fs::read_to_string(hw.join(format!("temp{i}_label"))).ok()?;
+                (label.trim() == want)
+                    .then(|| read_temp_file(&hw.join(format!("temp{i}_input")), want))
+                    .flatten()
+            })
+        };
+        let cpu_temp_2 = labelled("Tccd1")
+            .or_else(|| labelled("Tccd2"))
             .or_else(|| read_temp_file(&hw.join("temp2_input"), "temp2_input (Tctl fallback)"))
             .or_else(|| read_temp_file(&hw.join("temp3_input"), "temp3_input (Tccd1 fallback)"));
         return (cpu_temp, cpu_temp_2);

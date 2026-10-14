@@ -273,6 +273,12 @@ fn validate_driver() -> Result<(u32, String, String), String> {
     Ok((codename, driver, firmware))
 }
 
+/// `Err(why)` when Curve Optimizer does not apply to this machine: Intel CPU,
+/// optional ryzen_smu driver absent, or an AMD codename/model not validated.
+pub fn applicability() -> Result<(), String> {
+    validate_driver().map(|_| ())
+}
+
 /// Read-only capability probe and current per-core values.
 pub fn status() -> CurveOptimizerStatus {
     let _guard = match ACCESS.lock() {

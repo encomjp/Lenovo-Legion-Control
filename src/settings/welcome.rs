@@ -13,12 +13,27 @@ pub(crate) fn set_telemetry(
     sync: &Rc<Cell<bool>>,
 ) {
     legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+    push_telemetry_to_daemon(enabled);
     consent.set(enabled);
     sync.set(true);
     if let Some(row) = share {
         row.set_active(enabled);
     }
     sync.set(false);
+}
+
+/// The root daemon keeps its own config and sends telemetry itself, so the
+/// user's choice must reach it over IPC. Background thread: the GTK main
+/// loop never waits on the socket. Best effort — logged on failure.
+pub(crate) fn push_telemetry_to_daemon(enabled: bool) {
+    std::thread::spawn(move || {
+        use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
+        match send_command(DaemonCommand::SetTelemetry(enabled)) {
+            Ok(DaemonResponse::Ok) => log::info!("telemetry choice ({enabled}) applied to daemon"),
+            Ok(other) => log::warn!("daemon rejected telemetry choice: {other:?}"),
+            Err(e) => log::warn!("could not send telemetry choice to daemon: {e}"),
+        }
+    });
 }
 
 /// First-launch welcome — a real window (not a cramped alert): brand header,
@@ -682,6 +697,7 @@ impl SetupCtx {
     /// shared consent cell gating Send-now, and the live Setup-page switch.
     fn disable_telemetry(&self) {
         legion_core::config::update(|c| c.diagnostics.enabled = false);
+        push_telemetry_to_daemon(false);
         self.consent.set(false);
         self.sync.set(true);
         if let Some(row) = self.share_switch.as_ref() {

@@ -651,9 +651,30 @@ pub fn health_from_wh(full: f64, design: f64) -> Option<f64> {
     Some(h)
 }
 
+/// Display form of a raw health percentage: `(text, label)`. New packs often
+/// report `energy_full > energy_full_design` (>100%); show 100% "new pack".
+/// The raw value stays in `health_pct()` / diagnostics.
+pub fn health_display(raw: f64) -> (String, &'static str) {
+    if raw > 100.0 {
+        ("100%".into(), "new pack")
+    } else if raw < 80.0 {
+        (format!("{raw:.0}%"), "worn")
+    } else {
+        (format!("{raw:.0}%"), "good")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_display_clamps_over_100_and_labels() {
+        assert_eq!(health_display(110.0), ("100%".to_string(), "new pack"));
+        assert_eq!(health_display(100.0), ("100%".to_string(), "good"));
+        assert_eq!(health_display(79.4), ("79%".to_string(), "worn"));
+        assert_eq!(health_display(92.0).1, "good");
+    }
 
     #[test]
     fn discretize_maps_to_supported_limits() {

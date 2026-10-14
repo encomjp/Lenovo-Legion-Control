@@ -90,6 +90,7 @@ pub struct UserProfile {
     pub fan1: u32,
     #[serde(default)]
     pub fan2: u32,
+    /// Third ("aux") fan slot — hardware fan3 or fan4, see `fans::slot_ids`.
     #[serde(default)]
     pub fan4: u32,
     #[serde(default = "default_brightness")]
@@ -360,16 +361,52 @@ pub fn mark_welcome_seen() {
     });
 }
 
+/// Move a daemon config written by older builds at /.config/legion-control
+/// to /var/lib/legion-control, keeping settings and the telemetry
+/// machine_id (a fresh id would show up as a new laptop). Runs once.
+fn migrate_root_config_once() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let old = Path::new("/.config/legion-control/settings.json");
+        let new = Path::new(SYSTEM_STATE_DIR).join("legion-control/settings.json");
+        if new.exists() || !old.exists() {
+            return;
+        }
+        if let Some(dir) = new.parent() {
+            if let Err(e) = fs::create_dir_all(dir) {
+                log::warn!("config: cannot create {}: {e}", dir.display());
+                return;
+            }
+        }
+        match fs::copy(old, &new) {
+            Ok(_) => {
+                log::info!("config: migrated {} → {}", old.display(), new.display());
+                let _ = fs::remove_file(old);
+                let _ = fs::remove_file("/.config/legion-control/.settings.lock");
+                let _ = fs::remove_dir(old.parent().unwrap_or(old));
+                let _ = fs::remove_dir("/.config");
+            }
+            Err(e) => log::warn!("config: migration from {} failed: {e}", old.display()),
+        }
+    });
+}
+
+/// State dir for the system daemon, which systemd starts without $HOME.
+const SYSTEM_STATE_DIR: &str = "/var/lib";
+
 fn config_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            let mut h = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-            if h.as_os_str().is_empty() {
-                log::trace!("config::config_path — XDG_CONFIG_HOME unset and HOME empty");
+            let home = std::env::var_os("HOME").unwrap_or_default();
+            if home.is_empty() {
+                // No $HOME (systemd system service): "" + ".config" used to
+                // resolve to /.config at the filesystem root.
+                log::trace!("config::config_path — XDG_CONFIG_HOME/HOME unset, using {SYSTEM_STATE_DIR}");
+                migrate_root_config_once();
+                return PathBuf::from(SYSTEM_STATE_DIR);
             }
-            h.push(".config");
-            h
+            PathBuf::from(home).join(".config")
         });
     let p = base.join("legion-control").join("settings.json");
     log::trace!("config::config_path — resolved to {}", p.display());
@@ -492,9 +529,16 @@ fn store() -> &'static Mutex<CachedConfig> {
 }
 
 fn load_from_disk() -> AppConfig {
+    try_load_from_disk().unwrap_or_default()
+}
+
+/// Like [`load_from_disk`], but a read failure other than "file missing"
+/// (EACCES, EIO, …) is an `Err` — the file may hold real settings, so
+/// callers that write back must not replace it with defaults.
+fn try_load_from_disk() -> std::io::Result<AppConfig> {
     let path = config_path();
     log::trace!("config::load_from_disk — reading {}", path.display());
-    match fs::read_to_string(&path) {
+    Ok(match fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str::<AppConfig>(&s) {
             Ok(mut parsed) => {
                 log::debug!(
@@ -546,9 +590,9 @@ fn load_from_disk() -> AppConfig {
         }
         Err(e) => {
             log::warn!("config read failed ({}): {e}", path.display());
-            AppConfig::default()
+            return Err(e);
         }
-    }
+    })
 }
 
 fn write_disk(cfg: &AppConfig) {
@@ -648,7 +692,15 @@ pub fn update(f: impl FnOnce(&mut AppConfig)) {
         // Re-read the on-disk state first: another process (daemon/GUI) may
         // have written since our cache was last updated. We are already
         // holding the config lock, so this read is serialized too.
-        let mut cfg = load_from_disk();
+        let mut cfg = match try_load_from_disk() {
+            Ok(c) => c,
+            Err(e) => {
+                // Unreadable but present: never overwrite it with defaults.
+                log::error!("config::update — settings unreadable ({e}); change kept in memory only");
+                f(&mut g.config);
+                return;
+            }
+        };
         log::trace!("config::update — invoking caller closure");
         f(&mut cfg);
         cfg.version = VERSION;
@@ -823,7 +875,8 @@ pub fn remember_fan(fan: u8, rpm: u32) {
     update(|cfg| match fan {
         1 => cfg.last_session.fan1 = rpm,
         2 => cfg.last_session.fan2 = rpm,
-        4 => cfg.last_session.fan4 = rpm,
+        // Third-fan slot: fan4 (lenovo_wmi_other) or fan3 (legion_hwmon).
+        3 | 4 => cfg.last_session.fan4 = rpm,
         _ => log::debug!("config::remember_fan — unknown fan id {fan}, ignored"),
     });
 }

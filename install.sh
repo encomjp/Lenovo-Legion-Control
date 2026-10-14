@@ -449,14 +449,29 @@ if [[ "$PREFIX" != "$USER_PREFIX" ]]; then
   install -Dm755 "$BIN_GUI"    "${USER_PREFIX}/bin/legion-settings"
 fi
 
+# ─── legion group ───────────────────────────────────────────────────────────
+# Must exist BEFORE the udev rules load: udevd resolves GROUP= when it parses
+# the rules and caches the rule without the group if it is unknown, leaving
+# the RGB hidraw nodes root-only until the next udevd restart.
+# The invoking user is $SUDO_USER under `sudo ./install.sh`, else ourselves.
+INVOKER="${SUDO_USER:-$(id -un)}"
+if [[ "$DO_UDEV" -eq 1 || "$DO_DAEMON" -eq 1 ]]; then
+  sudo_run groupadd -r legion 2>/dev/null || true
+  if [[ -n "$INVOKER" && "$INVOKER" != "root" ]] && ! id -nG "$INVOKER" 2>/dev/null | grep -qw legion; then
+    sudo_run usermod -aG legion "$INVOKER"
+    warn "Added $INVOKER to group 'legion' — log out and back in for full CLI/GUI access"
+  fi
+fi
+
 # ─── udev ───────────────────────────────────────────────────────────────────
 if [[ "$DO_UDEV" -eq 1 ]]; then
   say ""
   info "Installing Spectrum RGB udev rules…"
   sudo_run install -Dm644 "$ROOT/data/udev/99-legion.rules" /etc/udev/rules.d/99-legion.rules
   sudo_run udevadm control --reload-rules || true
-  sudo_run udevadm trigger -s hidraw || true
-  ok "udev rules installed (re-login if RGB was permission-denied before)"
+  sudo_run udevadm trigger --action=change -s hidraw || true
+  sudo_run udevadm settle -t 10 || true
+  ok "udev rules installed"
 fi
 
 # ─── desktop entry ──────────────────────────────────────────────────────────
@@ -524,15 +539,7 @@ if [[ "$DO_DAEMON" -eq 1 ]]; then
   info "Installing root daemon (fans / platform profile / charge limit)…"
   systemctl --user disable --now legion-control 2>/dev/null || true
   pkill -x legion-daemon 2>/dev/null || true
-  # The daemon's IPC socket is 0660 root:legion — create the group and add
-  # the invoking user so CLI/GUI/widget can talk to the daemon.
-  sudo_run groupadd -r legion 2>/dev/null || true
-  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
-    if ! id -nG "$SUDO_USER" 2>/dev/null | grep -qw legion; then
-      sudo_run usermod -aG legion "$SUDO_USER"
-      warn "Added $SUDO_USER to group 'legion' — log out and back in for CLI/GUI access to take effect"
-    fi
-  fi
+  # Group 'legion' and membership are set up above, before the udev rules.
   sudo_run install -Dm644 "$ROOT/data/systemd/legion-control.system.service" \
     /etc/systemd/system/legion-control.service
   # Declarative group creation for future systems (groupadd above covers now).

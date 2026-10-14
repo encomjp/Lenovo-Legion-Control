@@ -272,6 +272,14 @@ pub fn diagnose() -> Diagnosis {
     }
 }
 
+const NEEDS_ROOT_MSG: &str = "USB reset / permission repair needs root and was skipped — \
+restart or update the legion-control daemon (sudo systemctl restart legion-control) and retry";
+
+fn is_root() -> bool {
+    // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
+    unsafe { libc::geteuid() == 0 }
+}
+
 /// Soft → hard recovery ladder. Safe to call from GUI / CLI / daemon watchdog.
 pub fn troubleshoot() -> FixReport {
     let mut steps = Vec::new();
@@ -306,7 +314,10 @@ pub fn troubleshoot() -> FixReport {
     // 1) Permissions — target state is udev 0660 + uaccess, not world-writable.
     if let Some(path) = &before.device_path {
         if let Some(mode) = before.permission_mode {
-            if mode & 0o060 != 0o060 {
+            if mode & 0o060 != 0o060 && !is_root() {
+                log::info!("rgb-panic: ladder 1/5 permissions skipped — not root");
+                errors.push(NEEDS_ROOT_MSG.into());
+            } else if mode & 0o060 != 0o060 {
                 log::info!(
                     "rgb-panic: ladder 1/5 permissions: mode {mode:04o} lacks group rw — fixing"
                 );
@@ -424,6 +435,13 @@ fn hardware_kick(
     relight_label: &str,
     rebind_sleep: Duration,
 ) {
+    if !is_root() {
+        log::info!("rgb-panic: USB reset skipped — not root");
+        if !errors.iter().any(|e| e == NEEDS_ROOT_MSG) {
+            errors.push(NEEDS_ROOT_MSG.into());
+        }
+        return;
+    }
     log::info!("rgb-panic: USB reset on {}", usb.display());
     match usb_reset(usb) {
         Ok(()) => {
@@ -723,6 +741,8 @@ fn hid_rebind_spectrum() -> Result<String, String> {
         "Spectrum USB path gone".to_string()
     })?;
     let mut hid_iface: Option<(String, PathBuf, String)> = None;
+    // First non-hid-generic binding seen — reported if nothing better exists.
+    let mut foreign: Option<(String, PathBuf, String)> = None;
     if let Ok(rd) = fs::read_dir(&usb) {
         for e in rd.flatten() {
             let n = e.file_name();
@@ -731,8 +751,13 @@ fn hid_rebind_spectrum() -> Result<String, String> {
             if n.contains(':') {
                 if let Some((link, drv)) = iface_driver(&e.path()) {
                     log::debug!("rgb-panic: hid_rebind: interface {n} bound to driver {drv}");
-                    hid_iface = Some((n.into_owned(), link, drv));
-                    break;
+                    // The USB interface (e.g. 3-2.4:1.0) is usbhid-owned; the
+                    // hid-generic node sits one level below — keep looking.
+                    if drv == "hid-generic" {
+                        hid_iface = Some((n.into_owned(), link, drv));
+                        break;
+                    }
+                    foreign.get_or_insert((n.into_owned(), link, drv));
                 }
             }
         }
@@ -750,8 +775,11 @@ fn hid_rebind_spectrum() -> Result<String, String> {
                                 log::debug!(
                                     "rgb-panic: hid_rebind: interface {n} bound to driver {drv} (one level down)"
                                 );
-                                hid_iface = Some((n.into_owned(), link, drv));
-                                break;
+                                if drv == "hid-generic" {
+                                    hid_iface = Some((n.into_owned(), link, drv));
+                                    break;
+                                }
+                                foreign.get_or_insert((n.into_owned(), link, drv));
                             }
                         }
                     }
@@ -762,7 +790,7 @@ fn hid_rebind_spectrum() -> Result<String, String> {
             }
         }
     }
-    let Some((id, driver_link, driver)) = hid_iface else {
+    let Some((id, driver_link, driver)) = hid_iface.or(foreign) else {
         log::warn!(
             "rgb-panic: hid_rebind: no HID interface id found under {}",
             usb.display()
