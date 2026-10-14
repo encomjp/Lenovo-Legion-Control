@@ -89,7 +89,7 @@ pub fn page_box(title: &str, subtitle: &str) -> gtk::Box {
     page
 }
 
-/// Page body with lede only — header bar already shows the page title.
+/// Page body with lede only, header bar already shows the page title.
 pub fn page_lede(subtitle: &str) -> gtk::Box {
     page_box("", subtitle)
 }
@@ -408,7 +408,7 @@ pub fn metric_chip_tip(title: &str, tooltip: Option<&str>) -> (gtk::Box, gtk::La
     let l = gtk::Label::new(Some(title));
     l.add_css_class("label");
     l.set_halign(Align::Start);
-    let v = gtk::Label::new(Some("—"));
+    let v = gtk::Label::new(Some("…"));
     v.add_css_class("value");
     v.add_css_class("numeric");
     v.set_halign(Align::Start);
@@ -460,7 +460,7 @@ pub fn primary_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
     btn
 }
 
-/// Widgets that need the root legion-control service — greyed out while offline.
+/// Widgets that need the root legion-control service, greyed out while offline.
 #[derive(Clone, Debug)]
 pub struct DaemonGate {
     widgets: Rc<RefCell<Vec<gtk::Widget>>>,

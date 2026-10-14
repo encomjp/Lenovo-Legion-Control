@@ -1,4 +1,4 @@
-//! Cooling — fan-curve editor, per-fan cards and manual control.
+//! Cooling, fan-curve editor, per-fan cards and manual control.
 
 use super::curve_editor::CurveEditor;
 use super::*;
@@ -10,15 +10,15 @@ pub(crate) fn build_cooling_overview_page(
     gate: &DaemonGate,
 ) -> gtk::Box {
     let page = page_lede("");
-    // LOQ 15AHP10 / R8CN — tachometer locked behind yogafan
+    // LOQ 15AHP10 / R8CN, tachometer locked behind yogafan
     if legion_core::fans::needs_yogafan_setup() {
-        let locked = pref_group("Fans locked — driver required", None);
+        let locked = pref_group("Fans locked, driver required", None);
         tip(
             &locked,
             "lenovo_wmi_other binds but reads 0 RPM on this model; yogafan provides the real tachometer",
         );
         let banner = adw::Banner::new(
-            "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+            "Fan sensors need the yogafan driver, install to unlock RPM reading and control",
         );
         banner.set_button_label(Some("Unlock fans"));
         locked.add(&banner);
@@ -56,15 +56,15 @@ pub(crate) fn build_cooling_overview_page(
             let locked_c = locked_c.clone();
             run_setup_helper("install-yogafan", move |result| match result {
                 Ok(_) => {
-                    toast_ok(&overlay, "Fans unlocked — reopen the Cooling page to see RPM");
-                    banner_c.set_title("Installed — reopen this page");
+                    toast_ok(&overlay, "Fans unlocked, reopen the Cooling page to see RPM");
+                    banner_c.set_title("Installed, reopen this page");
                     locked_c.set_sensitive(false);
                 }
                 Err(e) => {
                     toast_error(&overlay, &e);
                     banner_c.set_sensitive(true);
                     banner_c.set_title(
-                        "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+                        "Fan sensors need the yogafan driver, install to unlock RPM reading and control",
                     );
                 }
             });
@@ -96,7 +96,7 @@ pub(crate) fn build_cooling_overview_page(
             overview.add(&property_row(
                 "No fans detected",
                 "Check the daemon and HWMon",
-                Some("Fan channels missing — check legion-control service"),
+                Some("Fan channels missing, check legion-control service"),
             ));
         }
         let note = pref_group("Manual control unavailable", None);
@@ -149,13 +149,13 @@ pub(crate) fn build_cooling_overview_page(
         overview.add(&property_row(
             "No fans detected",
             "Check the daemon and HWMon",
-            Some("Fan channels missing — check legion-control service"),
+            Some("Fan channels missing, check legion-control service"),
         ));
     }
     let reset = pref_group("Automatic mode", None);
     let btn = secondary_button_tip(
         "All fans automatic",
-        Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
+        Some("Clears manual RPM on all detected fans, returns to the firmware fan curve"),
     );
     let queue = apply_queue.clone();
     let fan_ids: Vec<u8> = channels.iter().map(|c| c.id).collect();
@@ -271,8 +271,8 @@ impl CurveUi {
             Some(st) => {
                 let now = st.current_profile == profile;
                 let base = if enabled && now && st.active {
-                    let t = st.temp_c.map_or("—".into(), |t| format!("{t:.0} °C"));
-                    let p = st.pct.map_or("—".into(), |p| format!("{p}%"));
+                    let t = st.temp_c.map_or("unknown".into(), |t| format!("{t:.0} °C"));
+                    let p = st.pct.map_or("unknown".into(), |p| format!("{p}%"));
                     if st.safety {
                         kind = "bad";
                         format!("Safety max at {t}: all fans at 100%")
@@ -322,7 +322,7 @@ impl CurveUi {
         if st.is_some() && !enabled {
             why.push("No custom curve to reset");
         }
-        self.reason.set_text(&why.join(" · "));
+        self.reason.set_text(&why.join(", "));
         self.reason.set_visible(!why.is_empty());
         self.headline
             .set_text(&format!("Fan curve for {}", profile_tab_label(&profile)));
@@ -361,14 +361,14 @@ fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi)
     card.add_css_class("fan-card");
     card.set_hexpand(true);
     card.set_valign(Align::Fill);
-    tip(&card, &format!("{} · {}–{} rpm", ch.title, ch.min_rpm, ch.max_rpm));
+    tip(&card, &format!("{}, {}–{} rpm", ch.title, ch.min_rpm, ch.max_rpm));
     let top = gtk::Box::new(Orientation::Horizontal, 8);
     let title = gtk::Label::new(Some(&ch.title));
     title.add_css_class("row-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let rpm = gtk::Label::new(Some("— rpm"));
+    let rpm = gtk::Label::new(Some("…"));
     rpm.add_css_class("numeric");
     rpm.add_css_class("fan-rpm");
     rpm.set_xalign(1.0);
@@ -557,7 +557,7 @@ fn build_fan_curve_section(
             ui.sync();
         });
     }
-    // Apply / Reset (async IPC — GTK main thread never blocks).
+    // Apply / Reset (async IPC, GTK main thread never blocks).
     let send = {
         let ui = ui.clone();
         Rc::new(move |enabled: bool| {
@@ -622,7 +622,7 @@ fn build_fan_curve_section(
                     DaemonResponse::FanCurves(s) => s,
                     DaemonResponse::Error(e) => {
                         return Err(format!(
-                            "Fan curves unavailable ({e}) — update and restart legion-control"
+                            "Fan curves unavailable ({e}), update and restart legion-control"
                         ))
                     }
                     _ => return Err("Unexpected response from the daemon".into()),
@@ -656,7 +656,7 @@ fn build_fan_curve_section(
                                             (r.saturating_sub(c.min) as f64 / span).clamp(0.0, 1.0),
                                         );
                                     }
-                                    None => c.rpm.set_text("— rpm"),
+                                    None => c.rpm.set_text("…"),
                                 }
                             }
                         }
@@ -725,7 +725,7 @@ pub(crate) fn fan_card(
             .build();
         tip(
             &mode_row,
-            "The EC firmware owns the fan curve on this model — no manual target write path is exposed",
+            "The EC firmware owns the fan curve on this model, no manual target write path is exposed",
         );
         mode_row.add_suffix(&rpm_l);
         group.add(&mode_row);
@@ -767,7 +767,7 @@ pub(crate) fn fan_card(
         .build();
     tip(
         &sw,
-        "On = Automatic firmware curve · Off = Manual fixed RPM with the slider",
+        "On = Automatic firmware curve, Off = Manual fixed RPM with the slider",
     );
     group.add(&sw);
     if !auto {
@@ -788,7 +788,7 @@ pub(crate) fn fan_card(
     tip(
         &scale,
         &format!(
-            "Target RPM for {title} · enabled only in Manual · about {min_rpm:.0}–{max_rpm:.0}"
+            "Target RPM for {title}, enabled only in Manual, about {min_rpm:.0}–{max_rpm:.0}"
         ),
     );
     let cur = legion_core::fans::display_target(fan);
@@ -807,7 +807,7 @@ pub(crate) fn fan_card(
         .build();
     tip(
         &speed_row,
-        "Automatic follows temperature · Manual holds a fixed speed until you change it",
+        "Automatic follows temperature, Manual holds a fixed speed until you change it",
     );
     speed_row.add_suffix(&scale);
     speed_row.add_suffix(&speed_val);

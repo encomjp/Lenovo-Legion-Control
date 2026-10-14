@@ -307,7 +307,7 @@ impl CurveEditor {
             }
             // Readout of the selected point.
             let (st_t, st_p) = st.points[st.focused];
-            let readout = format!("{st_t} °C · {st_p}%");
+            let readout = format!("{st_t} °C, {st_p}%");
             let ext = cr.text_extents(&readout).map(|e| e.width()).unwrap_or(70.0);
             let sx = g.x(st_t as f64);
             let sy = g.y(st_p as f64);

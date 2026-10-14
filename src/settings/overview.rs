@@ -1,4 +1,4 @@
-//! Control center — the home page: health pill, power mode, live cards,
+//! Control center, the home page: health pill, power mode, live cards,
 //! temperature history, quick toggles, GPU mode and charge limit.
 //!
 //! Every IPC / sysfs / HID read or write happens off the GTK main thread
@@ -47,7 +47,7 @@ fn live_card(
     bar.add_css_class("card-bar");
     bar.set_hexpand(true);
     bar.set_valign(Align::Center);
-    let value = gtk::Label::new(Some("—"));
+    let value = gtk::Label::new(Some("…"));
     value.add_css_class("value");
     value.add_css_class("numeric");
     value.set_xalign(1.0);
@@ -116,7 +116,7 @@ fn daemon_switch(
                 &format!("{label} {}", if on { "on" } else { "off" }),
             ),
             Ok(DaemonResponse::Error(e)) => revert(&e),
-            Err(e) if is_version_skew_error(&e) => revert("Service outdated — reinstall to update"),
+            Err(e) if is_version_skew_error(&e) => revert("Service outdated, reinstall to update"),
             Err(e) => revert(&e),
             Ok(_) => revert("Unexpected response from service"),
         }
@@ -198,7 +198,7 @@ pub(crate) fn build_overview(
     let active = choices.iter().position(|c| *c == current).unwrap_or(0) as u32;
 
     // The ComboRow is the logic holder shared with Profiles / Performance
-    // (mode_drop_slot) — it is never shown; the segmented control mirrors it.
+    // (mode_drop_slot), it is never shown; the segmented control mirrors it.
     let drop = string_combo_row("Mode", "", &label_refs, active);
     *mode_drop_slot.borrow_mut() = Some(drop.clone());
 
@@ -372,7 +372,7 @@ pub(crate) fn build_overview(
         last_ok_n.set(idx as u32);
     });
 
-    // ── Live cards: CPU · GPU · Fans · Battery ──────────────────────────
+    // ── Live cards: CPU, GPU, Fans, Battery ──────────────────────────
     let cards = gtk::Box::new(Orientation::Vertical, 0);
     cards.add_css_class("panel");
     cards.add_css_class("live-panel");
@@ -380,7 +380,7 @@ pub(crate) fn build_overview(
     let (cpu_card, _cpu_t, cpu_v, cpu_d, cpu_bar) = live_card(
         "CPU temperature",
         &format!(
-            "{} — package temperature, power and load",
+            "{}, package temperature, power and load",
             if info.cpu_model.is_empty() {
                 "Processor"
             } else {
@@ -391,7 +391,7 @@ pub(crate) fn build_overview(
     let (gpu_card, _gpu_t, gpu_v, gpu_d, gpu_bar) = live_card(
         "GPU temperature",
         &format!(
-            "{} — discrete GPU temperature, power and utilization",
+            "{}, discrete GPU temperature, power and utilization",
             if info.gpu_model.is_empty() {
                 "Discrete GPU"
             } else {
@@ -479,7 +479,7 @@ pub(crate) fn build_overview(
                 let mut first = true;
                 for (i, point) in hist.iter().enumerate() {
                     let t = if idx == 0 { point.0 } else { point.1 };
-                    // A 0 reading means "no sensor / GPU asleep" — leave a gap.
+                    // A 0 reading means "no sensor / GPU asleep", leave a gap.
                     if t <= 0.0 {
                         first = true;
                         continue;
@@ -639,7 +639,7 @@ pub(crate) fn build_overview(
                             }
                             Ok(DaemonResponse::Error(e)) => last_err = Some(e),
                             Err(e) if is_version_skew_error(&e) => {
-                                last_err = Some("Service outdated — reinstall to update".into())
+                                last_err = Some("Service outdated, reinstall to update".into())
                             }
                             Err(e) => last_err = Some(e),
                             Ok(_) => last_err = Some("Unexpected response from service".into()),
@@ -790,9 +790,9 @@ pub(crate) fn build_overview(
         tip(
             b,
             match pct {
-                60 => "Conservation: stops early so the pack stays cooler — best when mostly plugged in",
+                60 => "Conservation: stops early so the pack stays cooler, best when mostly plugged in",
                 80 => "Long life: more runtime than 60%, gentler than always charging to 100%",
-                _ => "Full charge: maximum capacity — use before travel or long unplugged sessions",
+                _ => "Full charge: maximum capacity, use before travel or long unplugged sessions",
             },
         );
     }
@@ -817,12 +817,12 @@ pub(crate) fn build_overview(
     gpu_sub.set_xalign(0.0);
     gpu_text.append(&gpu_title);
     gpu_text.append(&gpu_sub);
-    let gpu_mode_l = gtk::Label::new(Some("—"));
+    let gpu_mode_l = gtk::Label::new(Some("…"));
     gpu_mode_l.add_css_class("row-title");
     gpu_mode_l.set_valign(Align::Center);
     let gpu_link = secondary_button_tip(
         "Change",
-        Some("Switching needs a reboot — opens Performance"),
+        Some("Switching needs a reboot, opens Performance"),
     );
     {
         let nav = nav.clone();
@@ -926,7 +926,7 @@ pub(crate) fn build_overview(
         cycles: Option<u32>,
     }
     // Data collected off the main thread each tick. IPC and nvidia-smi can
-    // block for seconds — they must never run inside the GTK main loop.
+    // block for seconds, they must never run inside the GTK main loop.
     struct DashboardPoll {
         cpu_pct: f64,
         gpu_pct: f64,
@@ -1011,12 +1011,12 @@ pub(crate) fn build_overview(
                 bat_bar.set_fraction(b.pct as f64 / 100.0);
                 let mut d = b.status.clone();
                 if let Some(c) = b.cycles {
-                    d.push_str(&format!(" · {c} cycles"));
+                    d.push_str(&format!(", {c} cycles"));
                 }
                 bat_d.set_text(&d);
                 if let Some(h) = b.health {
                     let (text, _) = legion_core::battery::health_display(h);
-                    bat_d.set_text(&format!("{d} · health {text}"));
+                    bat_d.set_text(&format!("{d}, health {text}"));
                 }
                 let _ = &bat_t;
                 bat_card_c.remove_css_class("hot");
@@ -1040,7 +1040,7 @@ pub(crate) fn build_overview(
                 }
                 cpu_bar.set_fraction(temp_fraction(c));
                 cpu_d.set_text(&match poll.cpu_w {
-                    Some(w) => format!("{w:.0} W · load {:.0}%", poll.cpu_pct),
+                    Some(w) => format!("{w:.0} W, load {:.0}%", poll.cpu_pct),
                     None => format!("load {:.0}%", poll.cpu_pct),
                 });
 
@@ -1051,7 +1051,7 @@ pub(crate) fn build_overview(
                 };
                 let mut gpu_power = s.dgpu_power;
                 // Daemon cgroup can block NVML (nvidia-caps) even when the
-                // GPU is awake — read nvidia-smi from this user process.
+                // GPU is awake, read nvidia-smi from this user process.
                 if from_daemon && g <= 0.0 {
                     let local = legion_core::dgpu::read_metrics_batch();
                     if let Some(t) = local.temp.filter(|t| *t > 0.0) {
@@ -1068,13 +1068,13 @@ pub(crate) fn build_overview(
                     gpu_v.set_text(if legion_core::dgpu::discrete_present() {
                         "Off"
                     } else {
-                        "—"
+                        "n/a"
                     });
                     tint_temp(&gpu_card_c, 0.0);
                 }
                 gpu_bar.set_fraction(temp_fraction(g));
                 gpu_d.set_text(&if gpu_power >= 0.0 {
-                    format!("{gpu_power:.0} W · load {:.0}%", poll.gpu_pct)
+                    format!("{gpu_power:.0} W, load {:.0}%", poll.gpu_pct)
                 } else {
                     format!("load {:.0}%", poll.gpu_pct)
                 });
@@ -1099,9 +1099,9 @@ pub(crate) fn build_overview(
                         .iter()
                         .map(|(id, rpm, _)| format!("{} {rpm}", fan_short_name(*id, aux_fan)))
                         .collect::<Vec<_>>()
-                        .join(" · ");
+                        .join(", ");
                     if legion_core::fans::rpm_estimated() && top > 0 {
-                        d.push_str(" · est.");
+                        d.push_str(", est.");
                     }
                     if stopped {
                         d = "Fans are off and start automatically when warm".into();
