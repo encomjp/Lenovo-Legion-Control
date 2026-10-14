@@ -392,11 +392,31 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
     label
 }
 
+/// Pure: a target above the channel's live max is not a real request —
+/// 83F6 legion_hwmon reports `fan1_target=9600` with `fan1_max=5100` while
+/// the EC drives the fan. Treat it as 0 (auto/unknown).
+pub fn effective_target(target: u32, max: Option<u32>) -> u32 {
+    match max {
+        Some(max) if max > 0 && target > max => 0,
+        _ => target,
+    }
+}
+
+/// Target for display/saving: `read_target` with out-of-range values as auto.
+pub fn display_target(fan: u8) -> u32 {
+    let raw = read_target(fan).unwrap_or(0);
+    let target = effective_target(raw, read_max(fan));
+    if target != raw {
+        log::trace!("fans::display_target: fan{fan} target {raw} above max — shown as auto");
+    }
+    target
+}
+
 /// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
 /// Unverified EC-fallback readings are marked "(est.)".
 pub fn rpm_label(fan: u8) -> String {
     let rpm = read_rpm(fan).unwrap_or(0);
-    let label = format_rpm_label(read_target(fan).unwrap_or(0), rpm);
+    let label = format_rpm_label(display_target(fan), rpm);
     if rpm > 0 && rpm_estimated() {
         format!("{label} (est.)")
     } else {
@@ -744,6 +764,19 @@ mod tests {
         assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 RPM");
         assert_eq!(format_rpm_label(1500, 0), "~1500 RPM");
         assert_eq!(format_rpm_label(1500, 1400), "1400 RPM");
+    }
+
+    #[test]
+    fn target_above_max_is_auto() {
+        assert_eq!(effective_target(9600, Some(5100)), 0); // 83F6 garbage
+        assert_eq!(effective_target(5100, Some(5100)), 5100);
+        assert_eq!(effective_target(3000, Some(5100)), 3000);
+        assert_eq!(effective_target(9600, None), 9600, "no live max → keep");
+        assert_eq!(effective_target(9600, Some(0)), 9600, "bogus max → keep");
+        assert_eq!(
+            format_rpm_label(effective_target(9600, Some(5100)), 2200),
+            "Auto · 2200 RPM"
+        );
     }
 
     #[test]
