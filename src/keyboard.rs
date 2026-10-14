@@ -1374,6 +1374,12 @@ pub fn set_rgb_off() -> Result<(), String> {
 }
 
 /// Spectrum brightness 0–9 (reads still hit the device directly; rare/fast).
+/// True when the Spectrum controller (048d:c197) exists in sysfs — no open,
+/// so it separates "model has no per-key RGB" from "present but unreadable".
+pub fn spectrum_present() -> bool {
+    find_spectrum_hidraw().is_some()
+}
+
 pub fn rgb_brightness() -> Option<u8> {
     let _guard = hid_lock().lock().ok()?;
     let dev = match SpectrumDevice::open() {
