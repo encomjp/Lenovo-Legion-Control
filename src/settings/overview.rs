@@ -40,9 +40,8 @@ pub(crate) fn build_overview(
     metrics.append(&bat_chip);
 
     let fan_channels = legion_core::fans::channels();
-    let aux_fan = legion_core::fans::aux_id_from(
-        &fan_channels.iter().map(|c| c.id).collect::<Vec<_>>(),
-    );
+    let aux_fan =
+        legion_core::fans::aux_id_from(&fan_channels.iter().map(|c| c.id).collect::<Vec<_>>());
     let mut fan_metric_labels: Vec<(u8, gtk::Label, gtk::Label)> = Vec::new();
     for ch in &fan_channels {
         let tip_txt = match ch.id {
@@ -718,6 +717,7 @@ pub(crate) fn set_fan_metrics_from_sensors(
 ) {
     let ids: Vec<u8> = labels.iter().map(|(id, _, _)| *id).collect();
     let aux = legion_core::fans::aux_id_from(&ids);
+    let estimated = legion_core::fans::rpm_estimated();
     for (id, value, detail) in labels {
         let (rpm, target) = match id {
             1 => (s.fan1_rpm, s.fan1_target),
@@ -729,6 +729,10 @@ pub(crate) fn set_fan_metrics_from_sensors(
             ),
         };
         set_fan_metric(value, detail, rpm, target);
+        if estimated && rpm > 0 {
+            // Unverified EC-fallback layout — don't present it as a real tach.
+            detail.set_text(&format!("{} · est.", detail.text()));
+        }
     }
 }
 

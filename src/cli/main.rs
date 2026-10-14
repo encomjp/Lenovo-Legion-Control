@@ -1211,6 +1211,9 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 "│  CPU {:>5}   GPU {:>5}   Aux {:>5} rpm             │",
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
+            if fans::rpm_estimated() && s.fan1_rpm.max(s.fan2_rpm).max(s.fan4_rpm) > 0 {
+                println!("│  (estimated — unverified EC fallback layout)       │");
+            }
             log::trace!(
                 "sensors: fans cpu {} gpu {} aux {} rpm",
                 s.fan1_rpm,

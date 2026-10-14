@@ -181,7 +181,8 @@ pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
     *guard = Some((fresh, std::time::Instant::now()));
     result
 }
-/// Get the first hwmon device matching a name.
+
+/// EC temperature slot in `SensorReadings` (legion_hwmon labels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EcTemp {
     Cpu,
@@ -199,6 +200,7 @@ fn ec_temp_slot(label: &str) -> Option<EcTemp> {
     }
 }
 
+/// Get the first hwmon device matching a name.
 pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
     find_hwmon(name).into_iter().next()
 }
@@ -647,6 +649,8 @@ pub fn read_all() -> SensorReadings {
         s.fan2_rpm,
         s.fan4_rpm
     );
+    // EC-fallback only: reject a layout that reads a constant, not a tach.
+    crate::fans::observe_ec_sample(s.fan1_rpm, s.fan2_rpm, s.cpu_temp);
 
     // ─── Platform profile ───
     s.profile = read_file(Path::new("/sys/firmware/acpi/platform_profile"))
