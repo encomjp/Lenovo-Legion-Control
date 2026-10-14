@@ -497,6 +497,8 @@ fn main() {
     for (name, worker) in [
         ("auto-mode", services::auto_mode_worker as fn(Arc<AtomicBool>)),
         ("temp-history", services::temp_history_worker),
+        // Re-apply fan curve, power limits and charge limit after resume.
+        ("resume-watch", services::resume_worker),
         // Re-apply saved Custom power limits when the mode becomes Custom.
         ("power-limits", services::power_limits_worker),
     ] {

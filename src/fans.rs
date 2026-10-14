@@ -304,6 +304,14 @@ pub fn read_max(fan: u8) -> Option<u32> {
     read_fan_u32(fan, "read_max", &path)
 }
 
+/// RPM step the driver stores `fanN_target` in (`fanN_div`, 100 on
+/// lenovo-wmi-other). Used to compare a target read-back with the written
+/// value.
+pub fn read_div(fan: u8) -> Option<u32> {
+    let path = fan_control_path(fan, "div")?;
+    read_fan_u32(fan, "read_div", &path)
+}
+
 /// Discovered fan channels with live min/max (falls back to model profile).
 pub fn channels() -> Vec<FanCapability> {
     let caps = device::detect().capabilities.fans;

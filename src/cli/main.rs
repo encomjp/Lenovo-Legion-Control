@@ -1806,7 +1806,17 @@ fn print_fan_curves(st: &legion_core::fan_curve::FanCurveStatus) {
             if st.safety { " (SAFETY: all fans max)" } else { "" }
         )
     } else if let Some(f) = &st.fault {
-        format!("firmware control: fault: {f}")
+        use legion_core::fan_curve::CurveCondition;
+        match st.condition() {
+            CurveCondition::OnBattery => {
+                "firmware control: needs charger (the firmware controls the fans on battery)".into()
+            }
+            CurveCondition::NotAccepted => {
+                "firmware control: the firmware did not accept the curve, fans back on automatic"
+                    .into()
+            }
+            _ => format!("firmware control: fault: {f}"),
+        }
     } else {
         "firmware control".into()
     };

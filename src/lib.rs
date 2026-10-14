@@ -27,6 +27,7 @@ pub mod logging;
 pub mod models;
 pub mod power_limits;
 pub mod profile;
+pub mod resume;
 pub mod rgb_panic;
 pub mod selftest;
 pub mod telemetry_id;

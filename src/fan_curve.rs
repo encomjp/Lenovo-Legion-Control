@@ -16,6 +16,23 @@
 //! * Hysteresis: speed-ups follow the temperature immediately; speed-downs
 //!   only after [`DOWN_CONFIRMATIONS`] consecutive readings at least
 //!   [`DOWN_MARGIN_C`] below the value currently driving the curve.
+//!
+//! Gen 10 firmware quirks (LenovoLegionLinux docs, Legion Toolkit):
+//! * On battery the firmware ignores or parks custom fan targets, so the
+//!   engine pauses there ([`pause_on_battery`]) and leaves the fans to the
+//!   firmware; it resumes by itself when the charger is plugged in.
+//! * Writes can be dropped (right after a mode change) or lost (suspend).
+//!   Every tick reads each `fanN_target` back ([`targets_match`], tolerant of
+//!   the driver's `fanN_div` rounding) and rewrites a dropped value. After
+//!   [`NOT_ACCEPTED_TICKS`] ticks in a row with a mismatch the curve counts as
+//!   not accepted: fans go back to the firmware and the engine waits until
+//!   something changes ([`request_reapply`]: curve or mode change, charger,
+//!   resume).
+//!
+//! The pause and the rejection travel over IPC in the existing
+//! [`FanCurveStatus::fault`] field as the fixed strings [`FAULT_ON_BATTERY`]
+//! and [`FAULT_NOT_ACCEPTED`] (no wire-format change); clients read them
+//! through [`FanCurveStatus::condition`].
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,6 +62,47 @@ pub const CPU_WEIGHT: f64 = 1.0;
 pub const GPU_WEIGHT: f64 = 1.0;
 /// Upper bound on stored per-profile curves (config-bloat guard).
 pub const MAX_CURVES: usize = 16;
+/// Consecutive ticks with a read-back mismatch before the curve counts as
+/// not accepted by the firmware.
+pub const NOT_ACCEPTED_TICKS: u32 = 3;
+/// Read-back tolerance when the driver does not report `fanN_div`.
+pub const DEFAULT_TARGET_STEP: u32 = 100;
+/// `fault` value while the engine is paused on battery.
+pub const FAULT_ON_BATTERY: &str = "paused on battery: the firmware controls the fans";
+/// `fault` value after the firmware did not keep the fan targets.
+pub const FAULT_NOT_ACCEPTED: &str = "the firmware did not accept the fan targets";
+
+/// What the engine is doing, decoded from [`FanCurveStatus`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CurveCondition {
+    /// Driving the fans (possibly at safety max).
+    Running,
+    /// Paused on battery, firmware in control.
+    OnBattery,
+    /// Firmware rejected the targets, fans back on automatic.
+    NotAccepted,
+    /// Sensor / write fault, firmware in control.
+    Fault(String),
+    /// Nothing to do (no curve for this mode, or starting).
+    Idle,
+}
+
+/// Pure: the engine stays off the fans while on battery. Unknown power
+/// source (`None`, e.g. no readable charger) keeps the curve running.
+pub fn pause_on_battery(on_ac: Option<bool>) -> bool {
+    on_ac == Some(false)
+}
+
+/// Pure: does a `fanN_target` read-back match what was written? The driver
+/// stores targets in steps of `fanN_div` RPM (100 on lenovo-wmi-other), so
+/// anything within one step counts as the same value. 0 (auto) never
+/// matches a real target.
+pub fn targets_match(written: u32, read: u32, step: u32) -> bool {
+    if (written == 0) != (read == 0) {
+        return false;
+    }
+    written.abs_diff(read) <= step.max(1)
+}
 
 /// One stored curve.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,8 +126,24 @@ pub struct FanCurveStatus {
     pub pct: Option<u8>,
     /// The ≥90 °C safety override is engaged.
     pub safety: bool,
-    /// Last sensor / write fault (fans were handed back to firmware).
+    /// Last sensor / write fault (fans were handed back to firmware), or
+    /// [`FAULT_ON_BATTERY`] / [`FAULT_NOT_ACCEPTED`].
     pub fault: Option<String>,
+}
+
+impl FanCurveStatus {
+    /// Decode the engine state, including the two fixed `fault` strings.
+    pub fn condition(&self) -> CurveCondition {
+        if self.active {
+            return CurveCondition::Running;
+        }
+        match self.fault.as_deref() {
+            Some(FAULT_ON_BATTERY) => CurveCondition::OnBattery,
+            Some(FAULT_NOT_ACCEPTED) => CurveCondition::NotAccepted,
+            Some(f) => CurveCondition::Fault(f.to_string()),
+            None => CurveCondition::Idle,
+        }
+    }
 }
 
 /// Factory shape for a profile (mirrors the design mock-up presets).
@@ -327,6 +401,10 @@ pub trait FanIo {
     fn windows(&self) -> Vec<FanWindow>;
     fn set_rpm(&self, fan: u8, rpm: u32) -> std::io::Result<()>;
     fn set_auto(&self) -> std::io::Result<()>;
+    /// Current `fanN_target`; `None` when it cannot be read (no check then).
+    fn read_target(&self, fan: u8) -> Option<u32>;
+    /// Driver rounding step for `fanN_target` in RPM.
+    fn target_step(&self, fan: u8) -> u32;
 }
 
 /// Real hardware.
@@ -369,6 +447,16 @@ impl FanIo for SysIo {
     fn set_auto(&self) -> std::io::Result<()> {
         fans::set_auto()
     }
+
+    fn read_target(&self, fan: u8) -> Option<u32> {
+        fans::read_target(fan)
+    }
+
+    fn target_step(&self, fan: u8) -> u32 {
+        fans::read_div(fan)
+            .filter(|d| (1..=1000).contains(d))
+            .unwrap_or(DEFAULT_TARGET_STEP)
+    }
 }
 
 /// Engine state machine.
@@ -379,6 +467,10 @@ pub struct Engine {
     owned: bool,
     last_rpm: Vec<(u8, u32)>,
     status: LiveStatus,
+    /// Consecutive ticks with a read-back mismatch.
+    mismatch_ticks: u32,
+    /// Firmware did not keep the targets: hands off until [`Engine::rearm`].
+    rejected: bool,
 }
 
 /// Live part of [`FanCurveStatus`].
@@ -400,6 +492,23 @@ impl Engine {
         self.owned
     }
 
+    /// The firmware rejected the curve and the engine is waiting.
+    pub fn rejected(&self) -> bool {
+        self.rejected
+    }
+
+    /// Start over after something changed (curve, mode, charger, resume):
+    /// forget the rejection and rewrite every target on the next tick even
+    /// if the value is unchanged (the firmware may have lost it).
+    pub fn rearm(&mut self) {
+        if self.rejected {
+            log::info!("fan-curve: trying the curve again");
+        }
+        self.rejected = false;
+        self.mismatch_ticks = 0;
+        self.last_rpm.clear();
+    }
+
     fn release(&mut self, io: &dyn FanIo, why: &str) {
         if self.owned {
             log::info!("fan-curve: handing fans back to firmware ({why})");
@@ -409,17 +518,38 @@ impl Engine {
         }
         self.owned = false;
         self.last_rpm.clear();
+        self.mismatch_ticks = 0;
         self.hyst.reset();
     }
 
     /// One control step. `curve` is the enabled curve for the current
-    /// profile, `None` when there is none.
-    pub fn tick(&mut self, io: &dyn FanIo, curve: Option<&CurvePoints>) {
+    /// profile, `None` when there is none. `on_ac` is the charger state
+    /// (`None` = unknown).
+    pub fn tick(&mut self, io: &dyn FanIo, curve: Option<&CurvePoints>, on_ac: Option<bool>) {
         let Some(points) = curve else {
             self.release(io, "no active curve for this profile");
+            self.rejected = false;
             self.status = LiveStatus::default();
             return;
         };
+        if pause_on_battery(on_ac) {
+            if self.status.fault.as_deref() != Some(FAULT_ON_BATTERY) {
+                log::info!("fan-curve: on battery: paused, the firmware controls the fans");
+            }
+            self.release(io, "on battery");
+            self.status = LiveStatus {
+                fault: Some(FAULT_ON_BATTERY.into()),
+                ..LiveStatus::default()
+            };
+            return;
+        }
+        if self.rejected {
+            self.status = LiveStatus {
+                fault: Some(FAULT_NOT_ACCEPTED.into()),
+                ..LiveStatus::default()
+            };
+            return;
+        }
         let (cpu, gpu) = match io.temps() {
             Ok(t) => t,
             Err(e) => {
@@ -471,6 +601,46 @@ impl Engine {
             self.last_rpm.retain(|&(id, _)| id != w.id);
             self.last_rpm.push((w.id, rpm));
         }
+        // Read every target back: catches writes the firmware dropped or
+        // parked (mode change, suspend) and rewrites them next tick.
+        let mut mismatches = Vec::new();
+        for &(id, rpm) in &self.last_rpm {
+            if let Some(read) = io.read_target(id) {
+                if !targets_match(rpm, read, io.target_step(id)) {
+                    mismatches.push((id, rpm, read));
+                }
+            }
+        }
+        if mismatches.is_empty() {
+            if self.mismatch_ticks > 0 {
+                log::info!("fan-curve: fan targets confirmed after a dropped write");
+            }
+            self.mismatch_ticks = 0;
+        } else {
+            self.mismatch_ticks += 1;
+            let detail = mismatches
+                .iter()
+                .map(|(id, w, r)| format!("fan{id} wrote {w} read {r}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            log::warn!(
+                "fan-curve: read-back mismatch {}/{NOT_ACCEPTED_TICKS}: {detail}",
+                self.mismatch_ticks
+            );
+            if self.mismatch_ticks >= NOT_ACCEPTED_TICKS {
+                log::warn!("fan-curve: {FAULT_NOT_ACCEPTED}: fans back to the firmware");
+                self.release(io, "targets not accepted");
+                self.rejected = true;
+                self.status = LiveStatus {
+                    fault: Some(FAULT_NOT_ACCEPTED.into()),
+                    ..LiveStatus::default()
+                };
+                return;
+            }
+            // Rewrite the dropped targets on the next tick.
+            self.last_rpm
+                .retain(|&(id, _)| !mismatches.iter().any(|&(m, _, _)| m == id));
+        }
         self.owned = true;
         self.status = LiveStatus {
             active: true,
@@ -486,14 +656,23 @@ impl Engine {
 
 static LIVE: OnceLock<Mutex<LiveStatus>> = OnceLock::new();
 static POKE: AtomicBool = AtomicBool::new(false);
+static REARM: AtomicBool = AtomicBool::new(false);
 
 fn live() -> &'static Mutex<LiveStatus> {
     LIVE.get_or_init(|| Mutex::new(LiveStatus::default()))
 }
 
-/// Wake the engine now (curve changed over IPC).
+/// Wake the engine now (curve or mode changed over IPC). Also clears a
+/// "not accepted" state so the curve gets another try.
 pub fn poke() {
+    REARM.store(true, Ordering::Relaxed);
     POKE.store(true, Ordering::Relaxed);
+}
+
+/// Rewrite every fan target on the next tick even when unchanged (after
+/// resume the firmware may have dropped them) and retry a rejected curve.
+pub fn request_reapply() {
+    poke();
 }
 
 /// True while the engine owns the fans (manual targets are refused then).
@@ -554,10 +733,25 @@ pub fn run(shutdown: &AtomicBool) {
     let io = SysIo;
     let mut engine = Engine::default();
     let slice = Duration::from_millis(100);
+    let mut last_prof = String::new();
+    let mut last_ac: Option<bool> = None;
     while !shutdown.load(Ordering::Relaxed) {
-        let prof = profile::current();
+        let prof = profile::current_quiet();
         let curve = active_curve_for(&prof);
-        engine.tick(&io, curve.as_ref());
+        let on_ac = profile::auto::on_ac();
+        // Anything that may make the firmware take the curve again.
+        if REARM.swap(false, Ordering::Relaxed) || prof != last_prof || on_ac != last_ac {
+            if on_ac != last_ac && last_ac.is_some() && curve.is_some() {
+                log::info!(
+                    "fan-curve: charger {}",
+                    if on_ac == Some(true) { "plugged in: resuming the curve" } else { "unplugged" }
+                );
+            }
+            engine.rearm();
+            last_prof = prof.clone();
+            last_ac = on_ac;
+        }
+        engine.tick(&io, curve.as_ref(), on_ac);
         if let Ok(mut g) = live().lock() {
             *g = engine.status().clone();
         }
@@ -773,6 +967,11 @@ mod tests {
         writes: RefCell<Vec<(u8, u32)>>,
         autos: RefCell<u32>,
         fail_write: bool,
+        /// What `fanN_target` reads back: (fan, value), like the driver it
+        /// floors to the 100 RPM step.
+        targets: RefCell<Vec<(u8, u32)>>,
+        /// The firmware ignores writes (target keeps reading this value).
+        parked: Option<u32>,
     }
 
     impl Mock {
@@ -782,6 +981,8 @@ mod tests {
                 writes: RefCell::new(vec![]),
                 autos: RefCell::new(0),
                 fail_write: false,
+                targets: RefCell::new(vec![]),
+                parked: None,
             }
         }
     }
@@ -802,11 +1003,30 @@ mod tests {
                 return Err(std::io::Error::other("boom"));
             }
             self.writes.borrow_mut().push((fan, rpm));
+            let mut t = self.targets.borrow_mut();
+            t.retain(|&(id, _)| id != fan);
+            t.push((fan, rpm / 100 * 100));
             Ok(())
         }
         fn set_auto(&self) -> std::io::Result<()> {
             *self.autos.borrow_mut() += 1;
+            self.targets.borrow_mut().clear();
             Ok(())
+        }
+        fn read_target(&self, fan: u8) -> Option<u32> {
+            if let Some(p) = self.parked {
+                return Some(p);
+            }
+            Some(
+                self.targets
+                    .borrow()
+                    .iter()
+                    .find(|&&(id, _)| id == fan)
+                    .map_or(0, |&(_, v)| v),
+            )
+        }
+        fn target_step(&self, _fan: u8) -> u32 {
+            100
         }
     }
 
@@ -815,14 +1035,14 @@ mod tests {
         let io = Mock::new(65.0);
         let c = balanced();
         let mut e = Engine::default();
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         // 65 °C → 45 %
         assert_eq!(
             *io.writes.borrow(),
             vec![(1, 3275), (2, 3365), (4, 3750)]
         );
         assert!(e.status().active && e.status().pct == Some(45));
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         assert_eq!(io.writes.borrow().len(), 3, "no rewrite when unchanged");
     }
 
@@ -831,7 +1051,7 @@ mod tests {
         let io = Mock::new(95.0);
         let low = pts([0, 0, 0, 0, 0, 0, 0, 100]);
         let mut e = Engine::default();
-        e.tick(&io, Some(&low));
+        e.tick(&io, Some(&low), Some(true));
         assert_eq!(*io.writes.borrow(), vec![(1, 5200), (2, 5400), (4, 6500)]);
         assert!(e.status().safety);
     }
@@ -841,17 +1061,17 @@ mod tests {
         let io = Mock::new(60.0);
         let c = balanced();
         let mut e = Engine::default();
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         *io.temps.borrow_mut() = Err("CPU temperature unreadable".into());
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         assert_eq!(*io.autos.borrow(), 1);
         assert!(!e.owns_fans() && !e.status().active);
         assert!(e.status().fault.is_some());
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         assert_eq!(*io.autos.borrow(), 1, "no repeated set_auto while faulted");
         *io.temps.borrow_mut() = Ok((60.0, None));
         io.writes.borrow_mut().clear();
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         assert_eq!(io.writes.borrow().len(), 3, "rewrites after recovery");
         assert!(e.status().fault.is_none());
     }
@@ -861,10 +1081,10 @@ mod tests {
         let io = Mock::new(60.0);
         let c = balanced();
         let mut e = Engine::default();
-        e.tick(&io, Some(&c));
-        e.tick(&io, None);
+        e.tick(&io, Some(&c), Some(true));
+        e.tick(&io, None, Some(true));
         assert_eq!(*io.autos.borrow(), 1);
-        e.tick(&io, None);
+        e.tick(&io, None, Some(true));
         assert_eq!(*io.autos.borrow(), 1, "idle engine never touches fans");
     }
 
@@ -873,7 +1093,7 @@ mod tests {
         let mut io = Mock::new(60.0);
         io.fail_write = true;
         let mut e = Engine::default();
-        e.tick(&io, Some(&balanced()));
+        e.tick(&io, Some(&balanced()), Some(true));
         assert_eq!(*io.autos.borrow(), 1);
         assert!(e.status().fault.is_some());
     }
@@ -883,16 +1103,128 @@ mod tests {
         let io = Mock::new(80.0);
         let c = balanced();
         let mut e = Engine::default();
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         let first = io.writes.borrow().len();
         for _ in 0..2 {
             *io.temps.borrow_mut() = Ok((70.0, None));
-            e.tick(&io, Some(&c));
+            e.tick(&io, Some(&c), Some(true));
         }
         assert_eq!(io.writes.borrow().len(), first, "held for two readings");
         *io.temps.borrow_mut() = Ok((70.0, None));
-        e.tick(&io, Some(&c));
+        e.tick(&io, Some(&c), Some(true));
         assert!(io.writes.borrow().len() > first, "third reading slows down");
+    }
+
+    #[test]
+    fn read_back_matching_allows_driver_rounding() {
+        assert!(targets_match(3275, 3200, 100), "floored to the 100 rpm step");
+        assert!(targets_match(3275, 3300, 100), "rounded up");
+        assert!(targets_match(3200, 3200, 100));
+        assert!(!targets_match(3275, 3100, 100), "more than one step off");
+        assert!(!targets_match(3275, 0, 100), "0 is auto: the firmware parked it");
+        assert!(!targets_match(0, 50, 100), "auto never matches a real target");
+        assert!(targets_match(0, 0, 100));
+        // No div reported (step 0 or 1): exact within 1 rpm.
+        assert!(targets_match(3275, 3275, 0));
+        assert!(targets_match(3275, 3276, 1));
+        assert!(!targets_match(3275, 3277, 1));
+    }
+
+    #[test]
+    fn battery_pause_decision() {
+        assert!(pause_on_battery(Some(false)));
+        assert!(!pause_on_battery(Some(true)));
+        assert!(!pause_on_battery(None), "unknown power source keeps the curve");
+    }
+
+    #[test]
+    fn engine_pauses_on_battery_and_resumes_on_ac() {
+        let io = Mock::new(65.0);
+        let c = balanced();
+        let mut e = Engine::default();
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), 3);
+        // Unplugged: fans back to the firmware, no more writes.
+        e.tick(&io, Some(&c), Some(false));
+        assert_eq!(*io.autos.borrow(), 1);
+        assert!(!e.owns_fans());
+        e.tick(&io, Some(&c), Some(false));
+        assert_eq!(io.writes.borrow().len(), 3, "never writes on battery");
+        assert_eq!(*io.autos.borrow(), 1, "no repeated set_auto");
+        let st = status_of(&e);
+        assert_eq!(st.condition(), CurveCondition::OnBattery);
+        // Plugged in again: the curve takes over by itself.
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), 6);
+        assert_eq!(status_of(&e).condition(), CurveCondition::Running);
+    }
+
+    #[test]
+    fn engine_rewrites_a_dropped_target() {
+        let io = Mock::new(65.0);
+        let c = balanced();
+        let mut e = Engine::default();
+        e.tick(&io, Some(&c), Some(true));
+        // The firmware drops fan 2 (e.g. right after a mode change).
+        io.targets.borrow_mut().retain(|&(id, _)| id != 2);
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), 3, "mismatch seen, rewrite queued");
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().last(), Some(&(2, 3365)), "fan 2 rewritten");
+        e.tick(&io, Some(&c), Some(true));
+        assert!(!e.rejected() && e.status().active);
+    }
+
+    #[test]
+    fn engine_hands_back_when_targets_are_not_accepted() {
+        let mut io = Mock::new(65.0);
+        io.parked = Some(0);
+        let c = balanced();
+        let mut e = Engine::default();
+        for _ in 0..NOT_ACCEPTED_TICKS - 1 {
+            e.tick(&io, Some(&c), Some(true));
+            assert!(!e.rejected());
+        }
+        e.tick(&io, Some(&c), Some(true));
+        assert!(e.rejected());
+        assert_eq!(*io.autos.borrow(), 1, "fault path: fans back to automatic");
+        assert_eq!(status_of(&e).condition(), CurveCondition::NotAccepted);
+        // Stays off the fans until something changes.
+        let writes = io.writes.borrow().len();
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), writes);
+        // Rearm (resume, charger, new curve): tries again.
+        io.parked = None;
+        e.rearm();
+        e.tick(&io, Some(&c), Some(true));
+        assert!(io.writes.borrow().len() > writes);
+        assert_eq!(status_of(&e).condition(), CurveCondition::Running);
+    }
+
+    #[test]
+    fn rearm_rewrites_unchanged_targets() {
+        let io = Mock::new(65.0);
+        let c = balanced();
+        let mut e = Engine::default();
+        e.tick(&io, Some(&c), Some(true));
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), 3);
+        e.rearm();
+        e.tick(&io, Some(&c), Some(true));
+        assert_eq!(io.writes.borrow().len(), 6, "resume rewrites every fan");
+    }
+
+    fn status_of(e: &Engine) -> FanCurveStatus {
+        let l = e.status().clone();
+        FanCurveStatus {
+            curves: vec![],
+            current_profile: "balanced".into(),
+            active: l.active,
+            temp_c: l.temp_c,
+            pct: l.pct,
+            safety: l.safety,
+            fault: l.fault,
+        }
     }
 
     #[test]
