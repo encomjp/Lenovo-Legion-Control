@@ -132,6 +132,18 @@ pub(crate) fn build_cooling_overview_page(
     tip(&row, "Recommended after testing loud manual speeds");
     row.add_suffix(&btn);
     reset.add(&row);
+    if legion_core::fans::manual_target_may_persist() {
+        let caveat = adw::ActionRow::builder()
+            .title("Gen 10 caveat")
+            .subtitle(legion_core::fans::GEN10_MANUAL_TARGET_WARNING)
+            .activatable(false)
+            .build();
+        tip(
+            &caveat,
+            "Some Gen 10 ECs keep the last manual RPM even after Auto; a full EC reset (unplug, hold power 30 s) restores the firmware curve",
+        );
+        reset.add(&caveat);
+    }
     page.append(&overview);
     page.append(&reset);
     gate.track(&overview);
@@ -150,7 +162,7 @@ pub(crate) fn fan_card(
     let sec_tip = match fan {
         1 => "CPU cooling fan",
         2 => "Discrete GPU cooling fan",
-        4 => "Auxiliary chassis fan",
+        3 | 4 => "Auxiliary chassis fan",
         _ => "Fan control for this channel",
     };
     let group = pref_group(title, None);
@@ -209,7 +221,7 @@ pub(crate) fn fan_card(
         return group;
     }
 
-    let auto = legion_core::fans::read_target(fan).unwrap_or(0) == 0;
+    let auto = legion_core::fans::display_target(fan) == 0;
     let sw = adw::SwitchRow::builder()
         .title(if auto { "Automatic" } else { "Manual" })
         .active(auto)
@@ -237,7 +249,7 @@ pub(crate) fn fan_card(
             "Target RPM for {title} · enabled only in Manual · about {min_rpm:.0}–{max_rpm:.0}"
         ),
     );
-    let cur = legion_core::fans::read_target(fan).unwrap_or(0);
+    let cur = legion_core::fans::display_target(fan);
     if cur > 0 {
         scale.set_value(cur as f64);
         scale.set_sensitive(true);

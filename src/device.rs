@@ -360,6 +360,22 @@ fn unsupported_vendor_info(vendor: &str) -> DeviceInfo {
     }
 }
 
+/// Model generation from DMI + the model table only — no GPU/capability
+/// probe, so it is cheap for one-shot CLI paths. 0 = unmatched.
+pub fn model_gen() -> u8 {
+    static GEN: OnceLock<u8> = OnceLock::new();
+    *GEN.get_or_init(|| {
+        let bios = read_dmi("bios_version").unwrap_or_default();
+        let (machine_type, marketing) = classify_dmi(
+            &read_dmi("product_name").unwrap_or_default(),
+            &read_dmi("product_version").unwrap_or_default(),
+            &read_dmi("product_family").unwrap_or_default(),
+            &read_dmi("product_sku").unwrap_or_default(),
+        );
+        models::lookup(&machine_type, &marketing, &bios_prefix(&bios)).map_or(0, |p| p.gen)
+    })
+}
+
 fn detect_uncached() -> DeviceInfo {
     log::debug!("device detect: full probe starting");
     let dmi_vendor = read_dmi("sys_vendor").unwrap_or_default();
@@ -831,11 +847,21 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
         log::trace!("fan probe: yogafan present but exposes no fan channels");
     }
 
+    // EC debugfs RPM (daemon/root only): report the backend the RPM path
+    // actually uses so `fan_backend` agrees with `fans::backend_name()`.
+    // Channel ids/ranges still come from the profile/placeholder below.
+    let ec_fallback = crate::fans::rpm_backend_name().filter(|name| name == "ec-fallback");
+
     // Profile fallbacks when no hwmon yet (daemon early boot, missing module).
     if let Some(p) = profile {
         log::debug!(
-            "fan probe: no hwmon fans — using profile fallback ranges ({})",
-            p.bios_prefix
+            "fan probe: no hwmon fans — using profile fallback ranges ({}){}",
+            p.bios_prefix,
+            if ec_fallback.is_some() {
+                ", RPM via EC fallback"
+            } else {
+                ""
+            }
         );
         let fans = p
             .fan_rpm_fallback
@@ -848,12 +874,14 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
                 current_rpm: 0,
             })
             .collect();
-        return (format!("profile-fallback ({})", p.bios_prefix), fans);
+        let backend =
+            ec_fallback.unwrap_or_else(|| format!("profile-fallback ({})", p.bios_prefix));
+        return (backend, fans);
     }
 
     log::warn!("fan probe: no hwmon and no profile — using static placeholder fan ranges");
     (
-        "none".into(),
+        ec_fallback.unwrap_or_else(|| "none".into()),
         vec![
             FanCapability {
                 id: 1,
@@ -974,6 +1002,15 @@ fn pretty_fan_label(raw: &str, id: u8) -> String {
         "GPU fan".into()
     } else if lower.contains("aux") || lower.contains("system") || id == 4 {
         "Aux fan".into()
+    } else if lower
+        .strip_prefix("fan")
+        .is_some_and(|n| n.trim().parse::<u8>().is_ok())
+    {
+        // legion_hwmon "Fan 1"/"Fan 3" carry no role — use the id's title
+        // instead of "Fan 1 fan".
+        fan_title(id).into()
+    } else if lower.ends_with("fan") {
+        t.into()
     } else {
         format!("{t} fan")
     }
@@ -1201,6 +1238,7 @@ fn detect_ec_chip(fan_backend: &str) -> String {
     match fan_backend {
         "lenovo_wmi_other" => "ITE (via lenovo_wmi_other)".into(),
         "legion_hwmon" => "ITE IT5508 (legion_hwmon)".into(),
+        "ec-fallback" => "Unknown (EC debugfs fallback)".into(),
         other if other.starts_with("profile-fallback") => format!("Unknown ({other})"),
         _ => "Unknown".into(),
     }
@@ -1469,6 +1507,11 @@ mod tests {
         assert_eq!(pretty_fan_label("System", 4), "Aux fan");
         assert_eq!(pretty_fan_label("", 2), "GPU fan");
         assert_eq!(pretty_fan_label("Chassis", 9), "Chassis fan");
+        // legion_hwmon labels (83F6): never "Fan 1 fan".
+        assert_eq!(pretty_fan_label("Fan 1", 1), "CPU fan");
+        assert_eq!(pretty_fan_label("Fan 2", 2), "GPU fan");
+        assert_eq!(pretty_fan_label("Fan 3", 3), "Fan 3");
+        assert_eq!(pretty_fan_label("Chassis Fan", 9), "Chassis Fan");
     }
 
     #[test]
