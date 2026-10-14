@@ -132,6 +132,18 @@ pub(crate) fn build_cooling_overview_page(
     tip(&row, "Recommended after testing loud manual speeds");
     row.add_suffix(&btn);
     reset.add(&row);
+    if legion_core::fans::manual_target_may_persist() {
+        let caveat = adw::ActionRow::builder()
+            .title("Gen 10 caveat")
+            .subtitle(legion_core::fans::GEN10_MANUAL_TARGET_WARNING)
+            .activatable(false)
+            .build();
+        tip(
+            &caveat,
+            "Some Gen 10 ECs keep the last manual RPM even after Auto; a full EC reset (unplug, hold power 30 s) restores the firmware curve",
+        );
+        reset.add(&caveat);
+    }
     page.append(&overview);
     page.append(&reset);
     gate.track(&overview);

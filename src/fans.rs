@@ -726,13 +726,35 @@ fn ec_layout_rpms(layout: &str, buf: &[u8]) -> Option<Vec<u32>> {
     }
 }
 
-/// Set all discovered fans to auto mode.
+/// User-facing caveat for manual fan targets on Gen 10 EC firmware.
+pub const GEN10_MANUAL_TARGET_WARNING: &str =
+    "manual fan targets may persist until EC reset on some Gen 10 firmware";
+
+/// Pure: generations whose EC may treat a manual target as one-way. On Gen 10
+/// (83F5 / Q7CN, EC 0x5508) writing 0 reportedly does not hand the fan back
+/// to the EC curve — only a full EC reset does (VitaminDB). Unverified on
+/// other Gen 10 units, so this only drives warnings, never write behaviour.
+pub fn gen_may_latch_manual_target(gen: u8) -> bool {
+    gen >= 10
+}
+
+/// True on machines where `GEN10_MANUAL_TARGET_WARNING` applies.
+pub fn manual_target_may_persist() -> bool {
+    gen_may_latch_manual_target(device::model_gen())
+}
+
+/// Set all discovered fans to auto mode (writes target 0 to every fan).
 pub fn set_auto() -> std::io::Result<()> {
     let all_ids = ids();
     log::info!(
-        "fans::set_auto: switching to auto on {} fan(s): {all_ids:?}",
+        "fans::set_auto: switching to auto on {} fan(s): {all_ids:?} (target 0 = EC curve)",
         all_ids.len()
     );
+    if manual_target_may_persist() {
+        log::warn!(
+            "fans::set_auto: Gen 10 EC — {GEN10_MANUAL_TARGET_WARNING}; target 0 is written but the EC may not resume its own curve"
+        );
+    }
     let mut last_err = None;
     let mut errors = 0usize;
     for id in all_ids {
@@ -777,6 +799,14 @@ mod tests {
             format_rpm_label(effective_target(9600, Some(5100)), 2200),
             "Auto · 2200 RPM"
         );
+    }
+
+    #[test]
+    fn manual_target_warning_is_gen10_and_newer() {
+        assert!(!gen_may_latch_manual_target(0));
+        assert!(!gen_may_latch_manual_target(9));
+        assert!(gen_may_latch_manual_target(10));
+        assert!(gen_may_latch_manual_target(11));
     }
 
     #[test]

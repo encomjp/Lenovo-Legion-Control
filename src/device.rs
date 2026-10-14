@@ -122,6 +122,22 @@ pub fn detect() -> DeviceInfo {
     info
 }
 
+/// Model generation from DMI + the model table only — no GPU/capability
+/// probe, so it is cheap for one-shot CLI paths. 0 = unmatched.
+pub fn model_gen() -> u8 {
+    static GEN: OnceLock<u8> = OnceLock::new();
+    *GEN.get_or_init(|| {
+        let bios = read_dmi("bios_version").unwrap_or_default();
+        let (machine_type, marketing) = classify_dmi(
+            &read_dmi("product_name").unwrap_or_default(),
+            &read_dmi("product_version").unwrap_or_default(),
+            &read_dmi("product_family").unwrap_or_default(),
+            &read_dmi("product_sku").unwrap_or_default(),
+        );
+        models::lookup(&machine_type, &marketing, &bios_prefix(&bios)).map_or(0, |p| p.gen)
+    })
+}
+
 fn detect_uncached() -> DeviceInfo {
     log::debug!("device detect: full probe starting");
     // sys_vendor is informational only — read for logs, never used for decisions.

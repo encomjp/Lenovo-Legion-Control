@@ -581,6 +581,11 @@ fn f37_machine_pins_for_83ru() {
     let mut ids = fans::ids();
     ids.sort_unstable();
     assert_eq!(ids, vec![1, 2, 4], "83RU fan layout");
+    assert_eq!(fans::aux_id(), Some(4), "83RU aux fan is WMI fan4");
+    assert!(
+        fans::manual_target_may_persist(),
+        "83RU is Gen 10 — manual-target caveat must show"
+    );
 
     // Spectrum RGB controller ships with this model — brightness read works.
     let bright = keyboard::rgb_brightness().expect("Spectrum brightness readable");
