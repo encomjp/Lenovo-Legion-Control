@@ -1822,6 +1822,7 @@ fn audio_health_label(health: crate::audio::Health) -> &'static str {
         crate::audio::Health::SoftIssue => "soft-issue",
         crate::audio::Health::HardwareBroken => "hardware-broken",
         crate::audio::Health::NotApplicable => "not-applicable",
+        crate::audio::Health::DriverMissing => "driver-missing",
     }
 }
 
@@ -3246,6 +3247,10 @@ core id\t\t: 1
             "hardware-broken"
         );
         assert_eq!(
+            audio_health_label(crate::audio::Health::DriverMissing),
+            "driver-missing"
+        );
+        assert_eq!(
             audio_health_label(crate::audio::Health::NotApplicable),
             "not-applicable"
         );
@@ -3308,7 +3313,7 @@ core id\t\t: 1
         let audio = &v["audio"];
         let health = audio["health"].as_str().expect("audio.health missing");
         assert!(
-            ["ok", "soft-issue", "hardware-broken", "not-applicable"].contains(&health),
+            ["ok", "soft-issue", "hardware-broken", "not-applicable", "driver-missing"].contains(&health),
             "open audio health vocabulary: {health:?}"
         );
         for key in [

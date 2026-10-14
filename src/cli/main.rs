@@ -540,6 +540,7 @@ fn main() {
                 legion_core::audio::Health::SoftIssue => "soft-issue",
                 legion_core::audio::Health::HardwareBroken => "broken",
                 legion_core::audio::Health::NotApplicable => "n/a",
+                legion_core::audio::Health::DriverMissing => "driver-missing",
             };
             println!("status      {tag}");
             println!("summary     {}", d.summary);
@@ -566,7 +567,11 @@ fn main() {
             for line in &d.details {
                 println!("· {line}");
             }
-            if d.health == legion_core::audio::Health::HardwareBroken {
+            if matches!(
+                d.health,
+                legion_core::audio::Health::HardwareBroken
+                    | legion_core::audio::Health::DriverMissing
+            ) {
                 std::process::exit(2);
             }
             if d.health == legion_core::audio::Health::SoftIssue {
@@ -587,10 +592,15 @@ fn main() {
                 legion_core::audio::Health::SoftIssue => "soft-issue",
                 legion_core::audio::Health::HardwareBroken => "broken",
                 legion_core::audio::Health::NotApplicable => "n/a",
+                legion_core::audio::Health::DriverMissing => "driver-missing",
             };
             println!("status      {tag}");
             println!("summary     {}", d.summary);
-            if d.health == legion_core::audio::Health::HardwareBroken {
+            if matches!(
+                d.health,
+                legion_core::audio::Health::HardwareBroken
+                    | legion_core::audio::Health::DriverMissing
+            ) {
                 std::process::exit(2);
             }
             if d.health == legion_core::audio::Health::SoftIssue || !report.errors.is_empty() {
