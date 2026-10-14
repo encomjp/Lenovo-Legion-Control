@@ -68,7 +68,7 @@ fn read_file(path: &Path) -> Option<String> {
     let res = match fs::read_to_string(path) {
         Ok(s) => Some(s.trim().to_string()),
         Err(e) => {
-            log::debug!("sensors::read_file — {} returned None: {e}", path.display());
+            log::debug!("sensors::read_file: {} returned None: {e}", path.display());
             None
         }
     };
@@ -86,7 +86,7 @@ fn read_int(path: &Path) -> Option<i64> {
             Ok(v) => Some(v),
             Err(e) => {
                 log::trace!(
-                    "sensors::read_int — {} returned None: {e} (raw={s:?})",
+                    "sensors::read_int: {} returned None: {e} (raw={s:?})",
                     path.display()
                 );
                 None
@@ -107,7 +107,7 @@ fn read_dir_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
     match fs::read_dir(dir) {
         Ok(rd) => rd.flatten().collect(),
         Err(e) => {
-            log::debug!("sensors::read_dir_entries — {} failed: {e}", dir.display());
+            log::debug!("sensors::read_dir_entries: {} failed: {e}", dir.display());
             Vec::new()
         }
     }
@@ -122,7 +122,7 @@ fn log_nvidia_smi_path_once() {
         return; // already ran this process
     }
     let Some(paths) = std::env::var_os("PATH") else {
-        log::warn!("sensors::nvidia_smi — PATH is unset; cannot locate nvidia-smi");
+        log::warn!("sensors::nvidia_smi: PATH is unset; cannot locate nvidia-smi");
         return;
     };
     let dirs: Vec<PathBuf> = std::env::split_paths(&paths).collect();
@@ -130,7 +130,7 @@ fn log_nvidia_smi_path_once() {
         let candidate = dir.join("nvidia-smi");
         if candidate.is_file() {
             log::debug!(
-                "sensors::nvidia_smi — binary resolved from PATH: {} ({} PATH dir(s) searched)",
+                "sensors::nvidia_smi: binary resolved from PATH: {} ({} PATH dir(s) searched)",
                 candidate.display(),
                 dirs.len()
             );
@@ -138,7 +138,7 @@ fn log_nvidia_smi_path_once() {
         }
     }
     log::warn!(
-        "sensors::nvidia_smi — nvidia-smi not found in any of {} PATH dir(s) — dGPU readings will be unavailable",
+        "sensors::nvidia_smi: nvidia-smi not found in any of {} PATH dir(s): dGPU readings will be unavailable",
         dirs.len()
     );
 }
@@ -259,6 +259,11 @@ pub fn nvme_fault_thresholds(max: Option<f64>, crit: Option<f64>) -> (f64, f64) 
 /// one whose slot differs from the iGPU's (integrated GPUs live on the CPU's
 /// PCI address; dGPUs sit on their own). When only one amdgpu hwmon exists
 /// the machine is APU-only and there is no dGPU to report.
+/// dGPU temperature (°C) from the amdgpu hwmon, if a discrete Radeon exists.
+pub fn amd_dgpu_temp_c() -> Option<f64> {
+    amd_dgpu_hwmon_read().map(|(t, _, _)| t).filter(|t| *t > 0.0)
+}
+
 fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
     let cards = find_hwmon("amdgpu");
     if cards.len() < 2 {
@@ -350,7 +355,7 @@ pub fn read_all() -> SensorReadings {
                 }
             }
         }
-        log::debug!("sensors::read_all — k10temp labels encountered: {labels_seen:?}");
+        log::debug!("sensors::read_all: k10temp labels encountered: {labels_seen:?}");
     } else if let Some(hw) = hwmon_by_name("coretemp") {
         // Intel Raptor Lake / Alder Lake: Package id 0 is the CPU package temp,
         // Core N are per-core. Take hottest package as cpu_temp.
@@ -403,7 +408,7 @@ pub fn read_all() -> SensorReadings {
                 }
             }
         }
-        log::debug!("sensors::read_all — coretemp labels encountered: {labels_seen:?}");
+        log::debug!("sensors::read_all: coretemp labels encountered: {labels_seen:?}");
     } else {
         // Last resort: thermal zone x86_pkg_temp (works on both Intel/AMD when hwmon missing)
         for zone in read_dir_entries(Path::new("/sys/class/thermal")) {
@@ -643,7 +648,7 @@ pub fn read_all() -> SensorReadings {
     }
     if exact_r8169.is_empty() {
         log::debug!(
-            "sensors::read_all — no hwmon dir named exactly 'r8169'; engaging contains-match fallback scan"
+            "sensors::read_all: no hwmon dir named exactly 'r8169'; engaging contains-match fallback scan"
         );
     }
     // Also try r8169_0_700:00 variant
@@ -667,7 +672,7 @@ pub fn read_all() -> SensorReadings {
         }
     }
     log::debug!(
-        "sensors::read_all — r8169 scan finished: exact matches={}, contains-match variant found={r8169_variant_found}",
+        "sensors::read_all: r8169 scan finished: exact matches={}, contains-match variant found={r8169_variant_found}",
         exact_r8169.len()
     );
 
@@ -747,7 +752,7 @@ pub fn sample_cpu_power_w() -> f64 {
 
     let Ok(raw) = fs::read_to_string(PATH) else {
         warn_once(format!(
-            "sensors::sample_cpu_power_w: RAPL energy_uj unreadable at {PATH} — CPU power unavailable"
+            "sensors::sample_cpu_power_w: RAPL energy_uj unreadable at {PATH}: CPU power unavailable"
         ));
         return 0.0;
     };
@@ -786,7 +791,7 @@ pub fn sample_cpu_usage_pct() -> f64 {
     let Ok(raw) = fs::read_to_string("/proc/stat") else {
         if !DEGRADED_WARNED.swap(true, Ordering::Relaxed) {
             log::warn!(
-                "sensors::sample_cpu_usage_pct: /proc/stat unreadable — CPU usage unavailable"
+                "sensors::sample_cpu_usage_pct: /proc/stat unreadable: CPU usage unavailable"
             );
         }
         return 0.0;
@@ -800,7 +805,7 @@ pub fn sample_cpu_usage_pct() -> f64 {
             Some(Ok(n)) => n,
             Some(Err(e)) => {
                 log::trace!(
-                    "sensors::sample_cpu_usage_pct — stat field unparsable, defaulted to 0: {e}"
+                    "sensors::sample_cpu_usage_pct: stat field unparsable, defaulted to 0: {e}"
                 );
                 0
             }

@@ -73,7 +73,7 @@ fn all_backend_unavailable(states: &[fans::FanRpmState]) -> bool {
 
 /// Pure: `fan_rpms_readable` verdict. Fails on any unreadable attribute or
 /// when no channel has an RPM backend at all (82JY/82K2 on Fedora used to
-/// pass with "fan1 backend-unavailable · fan2 backend-unavailable").
+/// pass with "fan1 backend-unavailable, fan2 backend-unavailable").
 fn fan_rpms_ok(states: &[fans::FanRpmState]) -> bool {
     !states.contains(&fans::FanRpmState::Unreadable) && !all_backend_unavailable(states)
 }
@@ -158,7 +158,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         !channels.is_empty() && !placeholder,
         if placeholder {
             format!(
-                "no fan hwmon — {} placeholder channel(s) from {cap_backend}",
+                "no fan hwmon: {} placeholder channel(s) from {cap_backend}",
                 channels.len()
             )
         } else {
@@ -186,7 +186,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     } else if fans::rpm_estimated() && states.contains(&fans::FanRpmState::Readable) {
         detail_parts.push("estimated (unverified EC layout)".into());
     }
-    out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(" · ")));
+    out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(", ")));
 
     // Temperatures — source-agnostic: k10temp (AMD) or coretemp/x86_pkg_temp (Intel).
     let is_intel = device::detect().cpu_model.to_lowercase().contains("intel");
@@ -194,7 +194,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     let t_ok = plaus(s.cpu_temp, 0.0, 125.0);
     let cpu_detail = if s.cpu_temp == 0.0 {
         // Keep failure visible; Intel path should never leave 0 if coretemp exists.
-        "0.0°C — no hwmon (k10temp/coretemp/thermal) reading".into()
+        "0.0°C: no hwmon (k10temp/coretemp/thermal) reading".into()
     } else {
         format!("{:.1}°C", s.cpu_temp)
     };
@@ -239,7 +239,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         None => out.push(check(
             "spectrum_controller",
             false,
-            "048d:c197 present but unreadable — udev rule / permissions",
+            "048d:c197 present but unreadable: udev rule / permissions",
         )),
     }
     match keyboard::camera_power() {
@@ -296,7 +296,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         "ppt_surface",
         true,
         format!(
-            "available={} · {} gpu limit(s)",
+            "available={}, {} gpu limit(s)",
             profile::ppt_available(),
             limits.len()
         ),
@@ -425,7 +425,7 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     ));
 
     let passed = out.iter().filter(|c| c.ok).count();
-    log::debug!("self-checks: done — {passed}/{} passed", out.len());
+    log::debug!("self-checks: done: {passed}/{} passed", out.len());
     out
 }
 
@@ -500,7 +500,7 @@ pub fn scan_faults() -> Vec<Fault> {
             ),
         ));
     } else if streak > 0 {
-        log::debug!("fault scan: fans read 0 rpm at {hottest:.0}°C — sample {streak}/{FANS_OFF_MIN_SAMPLES}");
+        log::debug!("fault scan: fans read 0 rpm at {hottest:.0}°C: sample {streak}/{FANS_OFF_MIN_SAMPLES}");
     }
 
     // ── NVMe thermals ───────────────────────────────────────────────────
@@ -513,7 +513,7 @@ pub fn scan_faults() -> Vec<Fault> {
             out.push(fault(
                 "nvme_overheat",
                 Severity::Critical,
-                format!("NVMe at {t:.0}°C — at its {critical:.0}°C limit"),
+                format!("NVMe at {t:.0}°C: at its {critical:.0}°C limit"),
             ));
         } else if t >= warn {
             out.push(fault(
@@ -662,7 +662,7 @@ pub fn scan_faults() -> Vec<Fault> {
         out.push(fault(
             "igpu_overheat",
             Severity::Critical,
-            format!("iGPU edge temp {:.1}°C — thermal emergency", s.igpu_edge),
+            format!("iGPU edge temp {:.1}°C: thermal emergency", s.igpu_edge),
         ));
     }
 
@@ -684,7 +684,7 @@ pub fn scan_faults() -> Vec<Fault> {
             out.push(fault(
                 "ram_overheat",
                 Severity::Warning,
-                format!("DIMM {} at {:.0}°C — SPD throttle imminent", i, t),
+                format!("DIMM {} at {:.0}°C: SPD throttle imminent", i, t),
             ));
         }
     }
@@ -695,7 +695,7 @@ pub fn scan_faults() -> Vec<Fault> {
             "dgpu_clock_stuck",
             Severity::Info,
             format!(
-                "dGPU at {} MHz with {:.1} W draw and {:.1}°C — possible stuck clocks",
+                "dGPU at {} MHz with {:.1} W draw and {:.1}°C: possible stuck clocks",
                 s.dgpu_clock, s.dgpu_power, s.dgpu_temp
             ),
         ));
@@ -711,7 +711,7 @@ pub fn scan_faults() -> Vec<Fault> {
             "system_uptime_extreme",
             Severity::Info,
             format!(
-                "system up for {:.0} days — consider rebooting to reset hardware state",
+                "system up for {:.0} days: consider rebooting to reset hardware state",
                 uptime_secs / 86400.0
             ),
         ));
@@ -745,7 +745,7 @@ pub fn scan_faults() -> Vec<Fault> {
         .filter(|f| f.severity == Severity::Warning)
         .count();
     let infos = out.iter().filter(|f| f.severity == Severity::Info).count();
-    log::debug!("fault scan: done — {criticals} critical / {warnings} warning / {infos} info");
+    log::debug!("fault scan: done: {criticals} critical / {warnings} warning / {infos} info");
     out
 }
 
@@ -843,7 +843,7 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         } else if in_group {
             String::from("member of legion group")
         } else {
-            String::from("not in legion group — sudo usermod -aG legion $USER")
+            String::from("not in legion group: sudo usermod -aG legion $USER")
         },
     ));
 
@@ -853,7 +853,7 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         Some(false) => out.push(check(
             "daemon_unit_enabled",
             false,
-            "not enabled — systemctl enable legion-control",
+            "not enabled: systemctl enable legion-control",
         )),
         None => out.push(check(
             "daemon_unit_enabled",
@@ -935,7 +935,7 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
     }
 
     let passed = out.iter().filter(|c| c.ok).count();
-    log::debug!("deployment checks: done — {passed}/{} passed", out.len());
+    log::debug!("deployment checks: done: {passed}/{} passed", out.len());
     out
 }
 

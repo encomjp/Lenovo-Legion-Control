@@ -7,11 +7,14 @@ mod queue;
 mod tray;
 
 mod about;
+mod activity;
 mod battery;
 mod cooling;
+mod curve_editor;
 mod cpu;
 mod fix;
 mod graphics;
+mod history;
 mod overview;
 mod profiles;
 mod welcome;
@@ -20,6 +23,7 @@ mod widgets;
 // Page builders live in the sibling modules above; re-exported here so
 // every module (and the tests below) sees one flat namespace.
 pub(crate) use about::*;
+pub(crate) use activity::*;
 pub(crate) use battery::*;
 pub(crate) use cooling::*;
 pub(crate) use cpu::*;
@@ -46,6 +50,11 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 type PptScales = Rc<RefCell<Vec<(String, gtk::Scale, gtk::Label)>>>;
+/// A stack page that is built on first navigation: the empty slot plus the
+/// one-shot builder.
+type LazySlot = (gtk::Box, Option<Box<dyn FnOnce() -> gtk::Widget>>);
+/// Diagnostics consent cell and share switch of the Settings page, once built.
+type AboutParts = Rc<RefCell<Option<(Rc<Cell<bool>>, adw::SwitchRow)>>>;
 type PendingUpdate = Rc<RefCell<Option<legion_core::update::ReleaseInfo>>>;
 
 fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
@@ -63,7 +72,52 @@ fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
     }
 }
 
+/// Process start, for the first-frame timing log.
+fn startup_instant() -> Instant {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
+/// Window size from the saved state, else from the monitor: about 55% of its
+/// width (1000 to 1400) and 70% of its height (680 to 960), never bigger than
+/// the monitor itself.
+fn initial_window_size() -> (i32, i32, bool) {
+    let cfg = legion_core::config::get();
+    let (mon_w, mon_h) = gtk::gdk::Display::default()
+        .and_then(|d| {
+            d.monitors()
+                .item(0)
+                .and_then(|m| m.downcast::<gtk::gdk::Monitor>().ok())
+        })
+        .map(|m| (m.geometry().width(), m.geometry().height()))
+        .unwrap_or((1920, 1080));
+    let fit = |w: i32, h: i32| (w.min(mon_w).max(360), h.min(mon_h - 60).max(400));
+    if cfg.window_width >= 360 && cfg.window_height >= 400 {
+        let (w, h) = fit(cfg.window_width, cfg.window_height);
+        return (w, h, cfg.window_maximized);
+    }
+    let w = ((mon_w as f64 * 0.55) as i32).clamp(1000, 1400);
+    let h = ((mon_h as f64 * 0.70) as i32).clamp(680, 960);
+    let (w, h) = fit(w, h);
+    (w, h, cfg.window_maximized)
+}
+
+/// Remember size and maximized state for the next launch.
+fn save_window_state(window: &adw::ApplicationWindow) {
+    let maximized = window.is_maximized();
+    let (w, h) = (window.width(), window.height());
+    legion_core::config::update(|c| {
+        c.window_maximized = maximized;
+        // Keep the last normal size while maximized.
+        if !maximized && w >= 360 && h >= 400 {
+            c.window_width = w;
+            c.window_height = h;
+        }
+    });
+}
+
 fn main() {
+    startup_instant();
     legion_core::logging::init("legion-settings");
     let hidden = std::env::args().any(|a| a == "--hidden" || a == "--tray" || a == "--autostart");
     if hidden {
@@ -156,8 +210,7 @@ fn toast_with_button(
 /// Quiet row-suffix button for opening external links.
 fn flat_open_button(tooltip: &str) -> gtk::Button {
     let btn = gtk::Button::with_label("Open");
-    btn.add_css_class("flat");
-    btn.add_css_class("open-btn");
+    btn.add_css_class("pill-btn");
     btn.set_valign(Align::Center);
     tip(&btn, tooltip);
     btn
@@ -167,12 +220,12 @@ fn flat_open_button(tooltip: &str) -> gtk::Button {
 /// the configured limit while the laptop was off (documented firmware
 /// behavior). Shared by the snapshot poll and the page-switch handler.
 const PAGE_TITLES: &[(&str, &str)] = &[
-    ("overview", "Home"),
-    ("cpu", "CPU"),
+    ("overview", "Control center"),
+    ("cpu", "Performance"),
     ("cooling-fans", "Cooling"),
     ("lighting", "Lighting"),
-    ("battery-status", "Battery"),
-    ("profiles", "Profiles"),
+    ("battery-status", "Power"),
+    ("health", "Health"),
     ("about", "Settings"),
 ];
 
@@ -186,14 +239,13 @@ fn page_title(name: &str) -> Option<&'static str> {
 /// Map any page id (current or legacy) to its top-level stack page.
 fn top_level_page(id: &str) -> &'static str {
     match id {
-        "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" => "cpu",
-        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" | "fix"
-        | "fix-audio" | "fix-lighting" | "fix-logs" => "about",
+        "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" | "profiles" => "cpu",
+        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" => "about",
+        "health" | "fix" | "fix-audio" | "fix-lighting" | "fix-logs" => "health",
         "lighting" | "lighting-keyboard" | "lighting-front" | "lighting-rear" | "lighting-logo"
         | "lighting-more" => "lighting",
         "battery-status" | "battery-limit" => "battery-status",
         "cooling-fans" => "cooling-fans",
-        "profiles" => "profiles",
         _ => "overview",
     }
 }
@@ -205,12 +257,10 @@ fn hub_initial_tab(id: &str) -> Option<&'static str> {
         "cpu-features" => Some("features"),
         "cpu-tuning" => Some("tuning"),
         "cpu-power" => Some("power"),
+        "profiles" => Some("profiles"),
         "about-setup" => Some("setup"),
         "about-hardware" | "about-storage" => Some("hardware"),
         "about-help" => Some("help"),
-        "fix" | "fix-audio" => Some("fix"),
-        "fix-lighting" => Some("fix"),
-        "fix-logs" => Some("fix"),
         "lighting-keyboard" => Some("keyboard"),
         "lighting-front" => Some("front"),
         "lighting-rear" => Some("rear"),
@@ -230,6 +280,8 @@ fn hub_page(
 ) -> (gtk::Box, adw::ViewStack) {
     let tabs = adw::ViewStack::new();
     tabs.set_vexpand(true);
+    tabs.set_hhomogeneous(false);
+    tabs.set_vhomogeneous(false);
     for (page, id, title) in children {
         let w = page_shell(&page);
         // ViewSwitcher shows an icon when the page has one — missing icons
@@ -244,6 +296,7 @@ fn hub_page(
             "features" => "applications-engineering-symbolic",
             "tuning" => "applications-system-symbolic",
             "power" => "battery-symbolic",
+            "profiles" => "document-save-symbolic",
             "keyboard" => "input-keyboard-symbolic",
             "front" => "video-display-symbolic",
             "rear" => "video-display-symbolic",
@@ -305,7 +358,7 @@ pub(crate) fn start_legion_control() -> Result<(), String> {
         .output()
     {
         Ok(out) if out.status.success() => {
-            log::info!("systemctl start succeeded — waiting for socket");
+            log::info!("systemctl start succeeded, waiting for socket");
             return wait_for_daemon_socket();
         }
         Ok(out) => {
@@ -360,8 +413,8 @@ fn sync_daemon_ui(
 
 fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdate) {
     if !online {
-        banner.set_title("Service offline — fans, profile, and charge need it");
-        banner.set_button_label(Some("Start daemon"));
+        banner.set_title("Service offline. Fans, profile and charge limit need it");
+        banner.set_button_label(Some("Start service"));
         banner.set_revealed(true);
         return;
     }
@@ -369,17 +422,17 @@ fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdat
     match legion_core::comms::query_daemon_version() {
         Ok(v) if v != current_ver => {
             banner.set_title(&format!(
-                "Daemon version mismatch: running v{v}, GUI is v{current_ver}"
+                "Service v{v} doesn't match app v{current_ver}"
             ));
-            banner.set_button_label(Some("Restart daemon"));
+            banner.set_button_label(Some("Restart service"));
             banner.set_revealed(true);
             return;
         }
         Err(_) => {
             banner.set_title(&format!(
-                "Daemon is outdated (legacy pre-v0.2.11, GUI is v{current_ver})"
+                "Service is outdated (app is v{current_ver})"
             ));
-            banner.set_button_label(Some("Restart daemon"));
+            banner.set_button_label(Some("Restart service"));
             banner.set_revealed(true);
             return;
         }
@@ -447,9 +500,9 @@ fn apply_charge_limit_blocking(pct: u32) -> Result<(), String> {
     match send_command(DaemonCommand::SetChargeLimit(pct)) {
         Ok(DaemonResponse::Ok) => Ok(()),
         Ok(DaemonResponse::Error(e)) => Err(e),
-        Err(e) if is_version_skew_error(&e) => Err("Service outdated — reinstall to update".into()),
+        Err(e) if is_version_skew_error(&e) => Err("Service outdated, reinstall to update".into()),
         _ => legion_core::battery::set_charge_limit_pct(pct)
-            .map_err(|_| "Service outdated — reinstall to update".into()),
+            .map_err(|_| "Service outdated, reinstall to update".into()),
     }
 }
 
@@ -478,12 +531,26 @@ fn build_ui(app: &adw::Application) {
     // opt-out made before the daemon learned SetTelemetry never reached it.
     welcome::push_telemetry_to_daemon(legion_core::config::get().diagnostics.enabled);
 
+    let (win_w, win_h, win_max) = initial_window_size();
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Legion Control")
-        .default_width(1060)
-        .default_height(680)
+        .default_width(win_w)
+        .default_height(win_h)
+        .maximized(win_max)
         .build();
+    activity::follow_window(&window);
+    {
+        let first = Cell::new(true);
+        window.connect_map(move |_| {
+            if first.replace(false) {
+                log::info!(
+                    "first frame mapped {} ms after start",
+                    startup_instant().elapsed().as_millis()
+                );
+            }
+        });
+    }
 
     let toast_overlay = adw::ToastOverlay::new();
     let apply_queue = ApplyQueue::new(&toast_overlay);
@@ -495,113 +562,152 @@ fn build_ui(app: &adw::Application) {
     let ppt_suppress_slot: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let trend_feed_slot: Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>> = Rc::new(RefCell::new(None));
     let split = adw::NavigationSplitView::new();
-    split.set_min_sidebar_width(228.0);
-    split.set_max_sidebar_width(280.0);
-    split.set_sidebar_width_fraction(0.2);
+    split.set_min_sidebar_width(190.0);
+    split.set_max_sidebar_width(230.0);
+    split.set_sidebar_width_fraction(0.19);
 
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
+    // Only the visible page may set the minimum size, not the widest sibling.
+    stack.set_hhomogeneous(false);
+    stack.set_vhomogeneous(false);
 
     // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
     let legion_page_req = std::env::var("LEGION_PAGE").ok();
+    let hub_tab_req: Option<&'static str> = legion_page_req.as_deref().and_then(hub_initial_tab);
 
-    let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
-    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
-    // Fix is now a tab inside Settings — keep the left rail short.
-    let fix_compact = build_fix_compact(&toast_overlay, &daemon_gate);
+    // Pages are built on first navigation: each stack page starts as an empty
+    // slot, and `ensure_built` fills it the first time the page is shown.
+    let lazy: Rc<RefCell<std::collections::HashMap<&'static str, LazySlot>>> =
+        Rc::new(RefCell::new(std::collections::HashMap::new()));
+    let add_lazy = {
+        let stack = stack.clone();
+        let lazy = lazy.clone();
+        move |id: &'static str, title: &'static str, build: Box<dyn FnOnce() -> gtk::Widget>| {
+            let slot = gtk::Box::new(Orientation::Vertical, 0);
+            slot.set_vexpand(true);
+            slot.set_hexpand(true);
+            stack.add_titled(&slot, Some(id), title);
+            lazy.borrow_mut().insert(id, (slot, Some(build)));
+        }
+    };
+    let ensure_built: Rc<dyn Fn(&str)> = {
+        let lazy = lazy.clone();
+        Rc::new(move |id: &str| {
+            let job = {
+                let mut map = lazy.borrow_mut();
+                map.get_mut(id)
+                    .and_then(|(slot, build)| build.take().map(|b| (slot.clone(), b)))
+            };
+            if let Some((slot, build)) = job {
+                let t0 = Instant::now();
+                let page = activity::with_page(id, build);
+                slot.append(&page);
+                log::debug!("built page {id} in {} ms", t0.elapsed().as_millis());
+            }
+        })
+    };
+
     // Shared suppress flag: programmatic telemetry switches (welcome window,
     // guided setup) must not re-trigger the Settings page's opt-out nudge.
     let telemetry_sync: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let (
-        about_setup_page,
-        about_help_page,
-        about_hardware_page,
-        welcome_consent,
-        welcome_share_switch,
-    ) = build_about_pages(&toast_overlay, &telemetry_sync);
+    // Filled when the Settings page is built; the welcome window needs it.
+    let about_parts: AboutParts = Rc::new(RefCell::new(None));
 
-    // Lighting hub: the zone ViewStack existed but had no visible switcher —
-    // the sidebar used to reset it to "keyboard", leaving zones unreachable.
-    let lighting_hub = {
-        let switcher = adw::ViewSwitcher::new();
-        switcher.set_stack(Some(&lighting_tabs));
-        switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
-        switcher.set_halign(Align::Center);
-        let bar = gtk::Box::new(Orientation::Vertical, 0);
-        bar.add_css_class("hub-bar");
-        bar.append(&switcher);
-        let hub = gtk::Box::new(Orientation::Vertical, 0);
-        hub.set_vexpand(true);
-        hub.append(&bar);
-        hub.append(&page_shell_width(&lighting_page, PageWidth::Wide));
-        hub
-    };
-    if let Some(tab) = legion_page_req.as_deref().and_then(hub_initial_tab) {
-        if lighting_tabs.child_by_name(tab).is_some() {
-            lighting_tabs.set_visible_child_name(tab);
-        }
+    {
+        let overlay = toast_overlay.clone();
+        let queue = apply_queue.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "cooling-fans",
+            "Cooling",
+            Box::new(move || {
+                page_shell_width(
+                    &build_cooling_overview_page(&overlay, &queue, &gate),
+                    PageWidth::Wide,
+                )
+                .upcast()
+            }),
+        );
     }
-
-    let about_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let (about_hub, about_tabs) = hub_page(
-        vec![
-            (about_setup_page, "setup", "Setup"),
-            (fix_compact, "fix", "Fix"),
-            (about_hardware_page, "hardware", "Hardware"),
-            (about_help_page, "help", "Help"),
-        ],
-        about_initial,
-    );
-
-    stack.add_titled(
-        &page_shell_width(
-            &build_overview(
-                &toast_overlay,
-                &apply_queue,
-                &daemon_gate,
-                &mode_drop_slot,
-                &profile_choices_slot,
-                &ppt_group_slot,
-                &ppt_scales_slot,
-                &ppt_suppress_slot,
-                &trend_feed_slot,
-            ),
-            PageWidth::Wide,
-        ),
-        Some("overview"),
-        "Home",
-    );
-    stack.add_titled(
-        &page_shell_width(
-            &build_cooling_overview_page(&toast_overlay, &apply_queue, &daemon_gate),
-            PageWidth::Wide,
-        ),
-        Some("cooling-fans"),
-        "Cooling",
-    );
-    stack.add_titled(&lighting_hub, Some("lighting"), "Lighting");
-    stack.add_titled(
-        &page_shell(&battery_page),
-        Some("battery-status"),
-        "Battery",
-    );
-    stack.add_titled(
-        &page_shell(&build_profiles_page(
-            &toast_overlay,
-            &daemon_gate,
-            &mode_drop_slot,
-            &profile_choices_slot,
-        )),
-        Some("profiles"),
-        "Profiles",
-    );
-    stack.add_titled(&about_hub, Some("about"), "Settings");
+    {
+        let overlay = toast_overlay.clone();
+        let app = app.clone();
+        add_lazy(
+            "lighting",
+            "Lighting",
+            Box::new(move || {
+                let (lighting_page, lighting_tabs) = lighting::build_lighting(&overlay, &app);
+                // The zone ViewStack needs a visible switcher, or zones are
+                // unreachable from the rail.
+                let switcher = adw::ViewSwitcher::new();
+                switcher.set_stack(Some(&lighting_tabs));
+                switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+                switcher.set_halign(Align::Center);
+                let bar = gtk::Box::new(Orientation::Vertical, 0);
+                bar.add_css_class("hub-bar");
+                bar.append(&switcher);
+                let hub = gtk::Box::new(Orientation::Vertical, 0);
+                hub.set_vexpand(true);
+                hub.append(&bar);
+                hub.append(&page_shell_width(&lighting_page, PageWidth::Wide));
+                if let Some(tab) = hub_tab_req {
+                    if lighting_tabs.child_by_name(tab).is_some() {
+                        lighting_tabs.set_visible_child_name(tab);
+                    }
+                }
+                hub.upcast()
+            }),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "battery-status",
+            "Power",
+            Box::new(move || page_shell(&build_battery_pages(&overlay, &gate)).upcast()),
+        );
+    }
+    {
+        // Health is its own rail page (speakers, RGB repair, logs, self-checks).
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "health",
+            "Health",
+            Box::new(move || page_shell(&build_fix_compact(&overlay, &gate)).upcast()),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let sync = telemetry_sync.clone();
+        let parts = about_parts.clone();
+        add_lazy(
+            "about",
+            "Settings",
+            Box::new(move || {
+                let (setup, help, hardware, consent, share_switch) =
+                    build_about_pages(&overlay, &sync);
+                *parts.borrow_mut() = Some((consent, share_switch));
+                let (hub, _tabs) = hub_page(
+                    vec![
+                        (setup, "setup", "Setup"),
+                        (hardware, "hardware", "Hardware"),
+                        (help, "help", "Help"),
+                    ],
+                    hub_tab_req,
+                );
+                hub.upcast()
+            }),
+        );
+    }
 
     let sidebar_box = gtk::Box::new(Orientation::Vertical, 0);
     let brand = gtk::Box::new(Orientation::Horizontal, 12);
     brand.add_css_class("sidebar-brand");
     brand.set_valign(Align::Center);
-    let brand_icon = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 40);
+    let brand_icon = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 32);
     brand.append(&brand_icon);
     let brand_text = gtk::Box::new(Orientation::Vertical, 0);
     let brand_name = gtk::Label::new(Some("Legion Control"));
@@ -638,18 +744,18 @@ fn build_ui(app: &adw::Application) {
     for (icon, title, tooltip) in [
         (
             include_bytes!("../../data/icons/home.svg").as_slice(),
-            "Home",
-            "Temperatures, fans, battery, power mode",
+            "Control center",
+            "Power mode, live temperatures, fans, battery and quick toggles",
         ),
         (
             include_bytes!("../../data/icons/cpu.svg"),
-            "CPU",
-            "Features (boost, threading) · Tuning (thermal, undervolt) · Power limits",
+            "Performance",
+            "Features (boost, GPU mode), Tuning, Power limits, Saved profiles",
         ),
         (
             include_bytes!("../../data/icons/cooling.svg"),
             "Cooling",
-            "All fans at a glance — per-fan tuning and reset",
+            "All fans at a glance, per-fan tuning and reset",
         ),
         (
             include_bytes!("../../data/icons/lighting.svg"),
@@ -658,27 +764,25 @@ fn build_ui(app: &adw::Application) {
         ),
         (
             include_bytes!("../../data/icons/battery.svg"),
-            "Battery",
-            "Status and charge limit",
+            "Power",
+            "Battery status, charge limit, Fn Lock and USB charging",
         ),
         (
-            include_bytes!("../../data/icons/profiles.svg"),
-            "Profiles",
-            "Save and restore presets",
+            include_bytes!("../../data/icons/fix.svg"),
+            "Health",
+            "Self-checks, speakers, RGB repair and logs",
         ),
         (
-            include_bytes!("../../data/icons/about.svg"),
+            include_bytes!("../../data/icons/settings.svg"),
             "Settings",
-            "Setup, fix, hardware, help",
+            "Setup, hardware, help",
         ),
     ] {
         let row = adw::ActionRow::builder()
             .title(title)
             .activatable(true)
             .build();
-        let ic = color_icon(icon, 15);
-        ic.set_opacity(0.72);
-        row.add_prefix(&ic);
+        row.add_prefix(&mono_icon(icon, 16));
         tip(&row, tooltip);
         nav_list.append(&row);
     }
@@ -694,6 +798,8 @@ fn build_ui(app: &adw::Application) {
     );
     let dot = gtk::Box::new(Orientation::Vertical, 0);
     dot.add_css_class("conn-dot");
+    dot.set_valign(Align::Start);
+    dot.set_halign(Align::Center);
     let foot_text = gtk::Box::new(Orientation::Vertical, 0);
     foot_text.set_hexpand(true);
     let conn_l = gtk::Label::new(Some("Connected"));
@@ -706,6 +812,37 @@ fn build_ui(app: &adw::Application) {
     tip(&conn_s, "Click to check service status");
     foot_text.append(&conn_l);
     foot_text.append(&conn_s);
+    // Health summary lives here (not on Home): issue count from the same
+    // read-only self-checks the Health page runs.
+    let conn_h = gtk::Label::new(Some("Checking health…"));
+    conn_h.add_css_class("conn-sub");
+    conn_h.set_halign(Align::Start);
+    conn_h.set_xalign(0.0);
+    tip(&conn_h, "Read-only self-checks and fault scan, details on the Health page");
+    foot_text.append(&conn_h);
+    {
+        let conn_h = conn_h.clone();
+        let refresh = Rc::new(move || {
+            let conn_h = conn_h.clone();
+            dispatch_async(
+                || Ok::<usize, String>(health_issue_count()),
+                "Health check stopped without a result",
+                move |res| match res {
+                    Ok(0) => conn_h.set_text("No problems found"),
+                    Ok(n) => conn_h.set_text(&format!(
+                        "{n} problem{} on the Health page",
+                        if n == 1 { "" } else { "s" }
+                    )),
+                    Err(_) => conn_h.set_text("Health check unavailable"),
+                },
+            );
+        });
+        refresh();
+        ticker_local(Duration::from_secs(90), move || {
+            refresh();
+            glib::ControlFlow::Continue
+        });
+    }
     foot.append(&dot);
     foot.append(&foot_text);
     sidebar_box.append(&foot);
@@ -730,7 +867,7 @@ fn build_ui(app: &adw::Application) {
     // second top bar — never above the titlebar in a plain Box.
     let content_toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    let window_title = adw::WindowTitle::new("Home", "");
+    let window_title = adw::WindowTitle::new("Control center", "");
     header.set_title_widget(Some(&window_title));
 
     let menu = gio::Menu::new();
@@ -742,15 +879,12 @@ fn build_ui(app: &adw::Application) {
         .menu_model(&menu)
         .primary(true)
         .build();
-    menu_btn.set_child(Some(&color_icon(
-        include_bytes!("../../data/icons/menu.svg"),
-        22,
-    )));
+    menu_btn.set_icon_name("open-menu-symbolic");
     header.pack_end(&menu_btn);
     content_toolbar.add_top_bar(&header);
 
-    let banner = adw::Banner::new("Service offline — fans, profile, and charge need it");
-    banner.set_button_label(Some("Start daemon"));
+    let banner = adw::Banner::new("Service offline. Fans, profile and charge limit need it");
+    banner.set_button_label(Some("Start service"));
     banner.set_revealed(false);
     content_toolbar.add_top_bar(&banner);
     content_toolbar.set_content(Some(&stack));
@@ -827,9 +961,9 @@ fn build_ui(app: &adw::Application) {
                         &pending_c,
                     );
                     if online {
-                        toast_ok(&overlay_c, "Daemon online — service ready");
+                        toast_ok(&overlay_c, "Service is running");
                     } else {
-                        toast_error(&overlay_c, "Daemon offline — start legion-control.service");
+                        toast_error(&overlay_c, "Service is offline. Start legion-control.service");
                     }
                     glib::ControlFlow::Break
                 }
@@ -861,7 +995,7 @@ fn build_ui(app: &adw::Application) {
             }
             return;
         }
-        if banner_b.button_label().as_deref() == Some("Restart daemon") {
+        if banner_b.button_label().as_deref() == Some("Restart service") {
             starting_b.set(true);
             banner_b.set_button_label(Some("Restarting…"));
             let overlay = overlay_banner.clone();
@@ -878,10 +1012,10 @@ fn build_ui(app: &adw::Application) {
                 match result {
                     Ok(_) => {
                         sync_daemon_ui(true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending);
-                        toast_ok(&overlay, "Hardware daemon restarted");
+                        toast_ok(&overlay, "Service restarted");
                     }
                     Err(e) => {
-                        banner.set_button_label(Some("Restart daemon"));
+                        banner.set_button_label(Some("Restart service"));
                         toast_error(&overlay, &e);
                     }
                 }
@@ -926,7 +1060,7 @@ fn build_ui(app: &adw::Application) {
             glib::timeout_add_local(Duration::from_millis(200), move || match rx.try_recv() {
                 Ok(Ok(())) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     sync_daemon_ui(
                         true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
                     );
@@ -935,19 +1069,19 @@ fn build_ui(app: &adw::Application) {
                 }
                 Ok(Err(e)) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     sync_daemon_ui(
                         false, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
                     );
                     let overlay_c = overlay.clone();
                     toast_with_button(
                         &overlay,
-                        &format!("Could not start daemon — {e}"),
+                        &format!("Couldn't start the service: {e}"),
                         "Copy fix",
                         8,
                         move || {
                             copy_daemon_fix_cmd();
-                            toast_ok(&overlay_c, "Command copied — paste in a terminal");
+                            toast_ok(&overlay_c, "Command copied, paste in a terminal");
                         },
                     );
                     glib::ControlFlow::Break
@@ -955,7 +1089,7 @@ fn build_ui(app: &adw::Application) {
                 Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     glib::ControlFlow::Break
                 }
             });
@@ -963,7 +1097,7 @@ fn build_ui(app: &adw::Application) {
     });
 
     let content_page = adw::NavigationPage::builder()
-        .title("Home")
+        .title("Control center")
         .child(&content_toolbar)
         .build();
 
@@ -988,39 +1122,83 @@ fn build_ui(app: &adw::Application) {
         let split = split.clone();
         let title_widget = window_title.clone();
         Rc::new(move |name: &'static str, title: &'static str| {
+            // The rail title map is authoritative (callers may pass stale labels).
+            let title = page_title(name).unwrap_or(title);
             nav_to(&stack, &page, &split, &title_widget, name, title)
         })
     };
     // The CPU hub is registered here because its Power tab needs show_page
     // to jump back to the Custom-watts controls on Home.
-    let cpu_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let (cpu_hub, _cpu_tabs) = hub_page(
-        vec![
-            (
-                build_cpu_features_page(&toast_overlay, &daemon_gate),
-                "features",
-                "Features",
-            ),
-            (
-                build_cpu_tuning_page(&toast_overlay, &daemon_gate),
-                "tuning",
-                "Tuning",
-            ),
-            (
-                build_cpu_power_page(
-                    &toast_overlay,
-                    &show_page,
-                    &apply_queue,
-                    &mode_drop_slot,
-                    &profile_choices_slot,
-                ),
-                "power",
-                "Power",
-            ),
-        ],
-        cpu_initial,
-    );
-    stack.add_titled(&cpu_hub, Some("cpu"), "CPU");
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        let queue = apply_queue.clone();
+        let show = show_page.clone();
+        let mode_drop = mode_drop_slot.clone();
+        let choices = profile_choices_slot.clone();
+        add_lazy(
+            "cpu",
+            "Performance",
+            Box::new(move || {
+                let (cpu_hub, _cpu_tabs) = hub_page(
+                    vec![
+                        (
+                            build_cpu_features_page(&overlay, &gate),
+                            "features",
+                            "Features",
+                        ),
+                        (build_cpu_tuning_page(&overlay, &gate), "tuning", "Tuning"),
+                        (
+                            build_cpu_power_page(&overlay, &show, &queue, &mode_drop, &choices),
+                            "power",
+                            "Power",
+                        ),
+                        (
+                            build_profiles_page(&overlay, &gate, &mode_drop, &choices),
+                            "profiles",
+                            "Profiles",
+                        ),
+                    ],
+                    hub_tab_req,
+                );
+                cpu_hub.upcast()
+            }),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        let queue = apply_queue.clone();
+        let show = show_page.clone();
+        let mode_drop = mode_drop_slot.clone();
+        let choices = profile_choices_slot.clone();
+        let ppt_group = ppt_group_slot.clone();
+        let ppt_scales = ppt_scales_slot.clone();
+        let ppt_suppress = ppt_suppress_slot.clone();
+        let trend = trend_feed_slot.clone();
+        add_lazy(
+            "overview",
+            "Control center",
+            Box::new(move || {
+                page_shell_width(
+                    &build_overview(
+                        &overlay,
+                        &queue,
+                        &gate,
+                        &show,
+                        &mode_drop,
+                        &choices,
+                        &ppt_group,
+                        &ppt_scales,
+                        &ppt_suppress,
+                        &trend,
+                    ),
+                    PageWidth::Wide,
+                )
+                .upcast()
+            }),
+        );
+    }
 
     // One flat list: row order mirrors the rail above. Fix lives inside
     // Settings — keep the rail short.
@@ -1030,7 +1208,7 @@ fn build_ui(app: &adw::Application) {
         "cooling-fans",
         "lighting",
         "battery-status",
-        "profiles",
+        "health",
         "about",
     ];
     {
@@ -1081,23 +1259,30 @@ fn build_ui(app: &adw::Application) {
 
     split.set_sidebar(Some(&sidebar_page));
     split.set_content(Some(&content_page));
+    // When narrow, open on the page itself; the header back button shows the rail.
+    split.set_show_content(true);
 
     // Dev/screenshots: LEGION_PAGE=<name> opens a specific page at startup
     // (e.g. LEGION_PAGE=cpu-tuning legion-settings). Legacy ids resolve to
     // their hub + tab. Harmless if unset.
-    if let Some(page) = legion_page_req {
-        let top = top_level_page(&page);
-        if stack.child_by_name(top).is_some() {
-            stack.set_visible_child_name(top);
-            // Keep header in sync — the stack override bypasses nav_to().
-            if let Some(title) = page_title(top) {
-                content_page.set_title(title);
-                window_title.set_title(title);
-            }
-            // Mirror the rail selection so screenshots show the highlight.
-            if top == "overview" {
+    let initial_top = legion_page_req
+        .as_deref()
+        .map(top_level_page)
+        .unwrap_or("overview");
+    if stack.child_by_name(initial_top).is_some() {
+        stack.set_visible_child_name(initial_top);
+        activity::set_visible_page(initial_top);
+        ensure_built(initial_top);
+        // Keep header in sync — the stack override bypasses nav_to().
+        if let Some(title) = page_title(initial_top) {
+            content_page.set_title(title);
+            window_title.set_title(title);
+        }
+        // Mirror the rail selection so screenshots show the highlight.
+        if legion_page_req.is_some() {
+            if initial_top == "overview" {
                 nav_list.unselect_all();
-            } else if let Some(idx) = FLAT_IDS.iter().position(|id| *id == top) {
+            } else if let Some(idx) = FLAT_IDS.iter().position(|id| *id == initial_top) {
                 if let Some(row) = nav_list.row_at_index(idx as i32) {
                     nav_list.select_row(Some(&row));
                 }
@@ -1119,10 +1304,18 @@ fn build_ui(app: &adw::Application) {
     // offenders when a page stops scaling at narrow sizes.
     if std::env::var_os("LEGION_DEBUG_LAYOUT").is_some() {
         let probe_root = window.clone();
+        let threshold: i32 = std::env::var("LEGION_DEBUG_LAYOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v| *v > 100)
+            .unwrap_or(760);
         glib::timeout_add_local(Duration::from_secs(2), move || {
-            fn walk(w: &gtk::Widget, depth: usize, out: &mut Vec<String>) {
+            fn walk(w: &gtk::Widget, depth: usize, out: &mut Vec<String>, threshold: i32) {
+                if !w.is_visible() {
+                    return;
+                }
                 let (min, _, _, _) = w.measure(gtk::Orientation::Horizontal, -1);
-                if min > 900 {
+                if min > threshold {
                     out.push(format!(
                         "{}{} ({}) min={min} classes={:?}",
                         "  ".repeat(depth),
@@ -1133,14 +1326,14 @@ fn build_ui(app: &adw::Application) {
                 }
                 let mut child = w.first_child();
                 while let Some(c) = child {
-                    walk(&c, depth + 1, out);
+                    walk(&c, depth + 1, out, threshold);
                     child = c.next_sibling();
                 }
             }
             let mut out = Vec::new();
-            walk(probe_root.upcast_ref::<gtk::Widget>(), 0, &mut out);
+            walk(probe_root.upcast_ref::<gtk::Widget>(), 0, &mut out, threshold);
             if out.is_empty() {
-                log::info!("layout probe: no widget wider than 900px");
+                log::info!("layout probe: no widget wider than 760px");
             } else {
                 for line in out {
                     log::warn!("layout probe: {line}");
@@ -1157,6 +1350,7 @@ fn build_ui(app: &adw::Application) {
     {
         let page = content_page.clone();
         let title_widget = window_title.clone();
+        let ensure = ensure_built.clone();
         stack.connect_visible_child_notify(move |stk| {
             let Some(child) = stk.visible_child() else {
                 return;
@@ -1165,6 +1359,8 @@ fn build_ui(app: &adw::Application) {
                 Some(n) => n,
                 None => return,
             };
+            activity::set_visible_page(&name);
+            ensure(&name);
             let Some(title) = page_title(&name) else {
                 return;
             };
@@ -1179,6 +1375,7 @@ fn build_ui(app: &adw::Application) {
     // Close hides to tray (Quit from tray exits).
     let win_hide = window.clone();
     window.connect_close_request(move |_| {
+        save_window_state(&win_hide);
         win_hide.set_visible(false);
         glib::Propagation::Stop
     });
@@ -1195,6 +1392,7 @@ fn build_ui(app: &adw::Application) {
                     win_tray.present();
                 }
                 tray::TrayCmd::Quit => {
+                    save_window_state(&win_tray);
                     app_tray.quit();
                 }
             }
@@ -1218,14 +1416,14 @@ fn build_ui(app: &adw::Application) {
         legion_core::fourzone::restore_async();
     }
 
-    show_welcome_if_needed(
-        &window,
-        &stack,
-        Some(&about_tabs),
-        &welcome_consent,
-        Some(&welcome_share_switch),
-        &telemetry_sync,
-    );
+    if !legion_core::config::welcome_seen() {
+        // The welcome window drives the diagnostics switch that lives on the
+        // Settings page, so that page is built first (first launch only).
+        ensure_built("about");
+        if let Some((consent, share_switch)) = about_parts.borrow().as_ref() {
+            show_welcome_if_needed(&window, consent, Some(share_switch), &telemetry_sync);
+        }
+    }
 
     // Click the connection strip to re-check the daemon.
     let foot_click = gtk::GestureClick::new();
@@ -1257,12 +1455,12 @@ fn build_ui(app: &adw::Application) {
                 let overlay = overlay_r.clone();
                 toast_with_button(
                     &overlay_r,
-                    "Service offline — start it from the banner",
+                    "Service offline, start it from the banner",
                     "Copy fix",
                     5,
                     move || {
                         copy_daemon_fix_cmd();
-                        toast_ok(&overlay, "Command copied — paste in a terminal");
+                        toast_ok(&overlay, "Command copied, paste in a terminal");
                     },
                 );
             }
@@ -1271,7 +1469,7 @@ fn build_ui(app: &adw::Application) {
     foot.add_controller(foot_click);
     tip(
         &foot,
-        "Shows whether the root legion-control service is reachable — click to check again",
+        "Shows whether the root legion-control service is reachable, click to check again",
     );
 
     // Live daemon status in the sidebar (and banner).
@@ -1283,7 +1481,7 @@ fn build_ui(app: &adw::Application) {
     let banner_p = banner.clone();
     let gate_p = daemon_gate.clone();
     let pending_p = pending_update.clone();
-    glib::timeout_add_local(Duration::from_secs(5), move || {
+    ticker_local(Duration::from_secs(5), move || {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(daemon_ok());
@@ -1374,46 +1572,46 @@ fn apply_conn_status(
         let current_ver = legion_core::update::CURRENT_VERSION;
         match legion_core::comms::query_daemon_version() {
             Ok(v) if v == current_ver => {
-                conn_l.set_text("Connected");
-                conn_s.set_text(&format!("Daemon v{v} ready"));
-                tip(conn_l, "Root legion-control service is reachable and up to date");
+                conn_l.set_text("Service running");
+                conn_s.set_text(&format!("Version {v}"));
+                tip(conn_l, "The background service is running and up to date");
             }
             Ok(v) => {
                 conn_l.set_text("Outdated");
-                conn_s.set_text(&format!("Daemon v{v} (GUI v{current_ver})"));
-                tip(conn_l, "Daemon is older than GUI — restart to update");
+                conn_s.set_text(&format!("Service v{v}, app v{current_ver}"));
+                tip(conn_l, "The service is older than the app. Restart it to update");
             }
             Err(_) => {
                 conn_l.set_text("Outdated");
-                conn_s.set_text(&format!("Legacy daemon (GUI v{current_ver})"));
-                tip(conn_l, "Daemon is pre-v0.2.11 — restart to update");
+                conn_s.set_text(&format!("Old service, app v{current_ver}"));
+                tip(conn_l, "The service is very old. Restart it to update");
             }
         }
         tip(
             conn_s,
             "Fans, profile, charge, and PPT commands can be applied",
         );
-        tip(dot, "Green = daemon online");
+        tip(dot, "Green: service is running");
         tip(
             foot,
             "Root legion-control service is reachable for fans, profile, and charge",
         );
     } else {
         dot.add_css_class("off");
-        conn_l.set_text("Offline");
-        conn_s.set_text("Start legion-control service");
+        conn_l.set_text("Service offline");
+        conn_s.set_text("Start it to continue");
         tip(
             conn_l,
-            "Service offline — fans, profile, and charge need it",
+            "Service offline. Fans, profile and charge limit need it",
         );
         tip(
             conn_s,
-            "Use Start daemon in the banner, or: sudo systemctl enable --now legion-control",
+            "Use Start service in the banner, or: sudo systemctl enable --now legion-control",
         );
-        tip(dot, "Red = daemon offline");
+        tip(dot, "Red: service is offline");
         tip(
             foot,
-            "Service offline — start it from the banner, or: sudo systemctl enable --now legion-control",
+            "Service offline, start it from the banner, or: sudo systemctl enable --now legion-control",
         );
     }
 }
@@ -1641,7 +1839,7 @@ fn run_daemon_command_async(
 ) {
     dispatch_async(
         move || send_command(command),
-        "Daemon request stopped without a result",
+        "Service request stopped without a result",
         done,
     );
 }
@@ -1728,11 +1926,11 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // Same visual grammar as the sections below (Curve Optimizer etc.):
     // chips row directly on the page, then a plain boxed-list group — no
     // extra .card wrapper that made this section wider than its neighbours.
-    let page = gtk::Box::new(Orientation::Vertical, 18);
-    let group = pref_group("Thermal throttle", None);
+    let page = gtk::Box::new(Orientation::Vertical, 10);
+    let group = pref_group("Thermal throttle", Some("Slows the CPU above the limit below"));
     tip(
         &group,
-        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp/coretemp/x86_pkg_temp).",
+        "When the CPU gets hotter than the limit, the service lowers its top speed in small steps, then restores it once it is 7 °C cooler. 95 °C is the chip's own safety limit."
     );
 
     // Bare switch in the group header — the slider below explains itself,
@@ -1741,7 +1939,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     enabled.set_valign(Align::Center);
     tip(
         &enabled,
-        "On = daemon steps scaling_max_freq when temp ≥ max; Off = no clamp",
+        "On: slows the CPU when it reaches the limit. Off: no slowing.",
     );
     group.set_header_suffix(Some(&enabled));
 
@@ -1757,20 +1955,20 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     scale.set_width_request(180);
     value.set_width_chars(6);
     value.set_xalign(1.0);
-    tip(&scale, "Maximum temperature — restore point is 7 °C below");
+    tip(&scale, "Temperature at which the CPU is slowed. Speed returns 7 °C below.");
     tip(&value, "Current threshold");
     // TjMax tick labels under the trough
     let scale_marks = gtk::Box::new(Orientation::Horizontal, 0);
     scale_marks.add_css_class("scale-marks");
     scale_marks.set_hexpand(true);
     scale_marks.set_halign(Align::Fill);
-    let mark_70 = gtk::Label::new(Some("70"));
+    let mark_70 = gtk::Label::new(Some("70 °C"));
     mark_70.set_halign(Align::Start);
     mark_70.set_hexpand(true);
-    let mark_95 = gtk::Label::new(Some("95 TjMax"));
+    let mark_95 = gtk::Label::new(Some("95 °C (chip limit)"));
     mark_95.set_halign(Align::Center);
     mark_95.set_hexpand(true);
-    let mark_98 = gtk::Label::new(Some("98"));
+    let mark_98 = gtk::Label::new(Some("98 °C"));
     mark_98.set_halign(Align::End);
     mark_98.set_hexpand(true);
     scale_marks.append(&mark_70);
@@ -1781,12 +1979,12 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // below, marks aligned to the slider. (The old ActionRow squeezed the
     // scale into a suffix box next to the title, which overflowed the card
     // edge and duplicated the switch row's state text.)
-    let temp_title = gtk::Label::new(Some("Maximum temperature"));
+    let temp_title = gtk::Label::new(Some("Temperature limit"));
     temp_title.add_css_class("row-title");
     temp_title.set_halign(Align::Start);
     tip(
         &temp_title,
-        "70–98 °C slider — 96–98 °C needs explicit confirmation (above TjMax)",
+        "70 to 98 °C. Values from 96 °C ask for confirmation (above the chip limit).",
     );
     value.set_halign(Align::End);
     value.set_hexpand(true);
@@ -1795,6 +1993,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     temp_top.append(&temp_title);
     temp_top.append(&value);
     let temp_box = gtk::Box::new(Orientation::Vertical, 6);
+    temp_box.add_css_class("panel");
     temp_box.set_hexpand(true);
     temp_box.append(&temp_top);
     temp_box.append(&scale);
@@ -1814,7 +2013,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             } else {
                 scale_c.add_css_class("muted");
                 row_c.set_sensitive(false);
-                marks_c.set_opacity(0.42);
+                marks_c.set_opacity(0.65);
             }
         })
     };
@@ -1822,22 +2021,26 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
-        .min_children_per_line(2)
+        .min_children_per_line(3)
         .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
+        .column_spacing(10)
+        .row_spacing(10)
         .build();
     chips.add_css_class("metric-grid");
     let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) = metric_chip_tip(
         "CPU temp",
-        Some("Main CPU temperature (k10temp/coretemp/x86_pkg_temp)"),
+        Some("Main CPU temperature"),
     );
     let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) =
-        metric_chip_tip("CPU CCD 2", Some("Second CPU CCD/core temperature"));
+        metric_chip_tip("Core temp 2", Some("Temperature of the second CPU core group"));
     let (freq_chip, freq_v, freq_d) = metric_chip_tip(
         "Max freq",
-        Some("Current scaling_max_freq across online CPUs"),
+        Some("Current top speed allowed for the CPU"),
     );
+    // Secondary detail lines stay out of sight: the numbers are enough.
+    for d in [&cpu_temp_d, &cpu_temp_2_d, &freq_d] {
+        d.set_visible(false);
+    }
     chips.append(&cpu_temp_chip);
     chips.append(&cpu_temp_2_chip);
     chips.append(&freq_chip);
@@ -1949,7 +2152,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     let do_apply_ok = do_apply_cc.clone();
                     confirm_risk(
                         &scale_cc,
-                        "Exceed TjMax 95 °C?",
+                        "Go above the 95 °C chip limit?",
                         THERMAL_TJMAX_WARNING,
                         &format!("Use {max_temp} °C anyway"),
                         move |ok| {
@@ -2012,7 +2215,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
                         tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_v_c.set_text("-");
                         cpu_temp_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_chip_c, 0.0);
                     }
@@ -2021,7 +2224,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_2_d_c.set_text("");
                         tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_v_c.set_text("-");
                         cpu_temp_2_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
@@ -2038,17 +2241,17 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     }
                 }
                 Ok(DaemonResponse::Error(e)) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&e);
-                    cpu_temp_2_v_c.set_text("—");
-                    freq_v_c.set_text("—");
+                    cpu_temp_2_v_c.set_text("-");
+                    freq_v_c.set_text("-");
                 }
                 Ok(other) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&format!("{other:?}"));
                 }
                 Err(e) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&e);
                 }
             }
@@ -2077,7 +2280,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                 let apply_mute_ok = apply_mute_c.clone();
                 confirm_risk(
                     row,
-                    "Exceed TjMax 95 °C?",
+                    "Go above the 95 °C chip limit?",
                     THERMAL_TJMAX_WARNING,
                     &format!("Use {max_temp} °C anyway"),
                     move |ok| {
@@ -2132,7 +2335,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let last_on_p = last_on.clone();
     let acked_p = acked.clone();
     let apply_mute_p = apply_mute.clone();
-    glib::timeout_add_local(Duration::from_secs(2), move || {
+    ticker_local(Duration::from_secs(2), move || {
         let cpu_temp_v_c = cpu_temp_v_p.clone();
         let cpu_temp_d_c = cpu_temp_d_p.clone();
         let cpu_temp_2_v_c = cpu_temp_2_v_p.clone();
@@ -2161,7 +2364,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
                         tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_v_c.set_text("-");
                         cpu_temp_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_chip_c, 0.0);
                     }
@@ -2170,7 +2373,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_2_d_c.set_text("");
                         tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_v_c.set_text("-");
                         cpu_temp_2_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
@@ -2272,7 +2475,7 @@ mod tests {
 
     #[test]
     fn offsets_text_formats_uniform_mixed_and_empty() {
-        assert_eq!(offsets_text(&[]), "—");
+        assert_eq!(offsets_text(&[]), "-");
         assert_eq!(offsets_text(&[-15, -15, -15]), "All cores: -15");
         assert_eq!(offsets_text(&[-15, -4, -15]), "Mixed");
     }
@@ -2308,6 +2511,7 @@ mod tests {
             "fix-audio",
             "fix-lighting",
             "fix-logs",
+            "health",
             "profiles",
             "about",
             "about-setup",
@@ -2325,15 +2529,13 @@ mod tests {
                 let hub = match top {
                     "cpu" => "cpu hub",
                     "about" => "about hub",
-                    "fix" => "fix hub",
                     "lighting" => "lighting hub",
                     other => panic!("hub tab {tab} mapped into non-hub page {other}"),
                 };
                 let _ = hub;
                 let valid = match top {
-                    "cpu" => ["features", "tuning", "power"].contains(&tab),
-                    "about" => ["setup", "fix", "hardware", "help"].contains(&tab),
-                    "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
+                    "cpu" => ["features", "tuning", "power", "profiles"].contains(&tab),
+                    "about" => ["setup", "hardware", "help"].contains(&tab),
                     "lighting" => ["keyboard", "front", "rear", "logo", "more"].contains(&tab),
                     _ => false,
                 };

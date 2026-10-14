@@ -141,7 +141,7 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
         if is_yogafan_quirk_model() && !has_live_fan_input(&hw) {
             if let Some(yw) = hwmon_by_name("yogafan").filter(|hw| has_fan_inputs(hw)) {
                 log::debug!(
-                    "fans::fan_hwmon: lenovo_wmi_other reads 0 on quirk model — using yogafan at {}",
+                    "fans::fan_hwmon: lenovo_wmi_other reads 0 on quirk model: using yogafan at {}",
                     yw.display()
                 );
                 return Some(("yogafan".into(), yw));
@@ -167,7 +167,7 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
             if dmi_ec_layout().is_some_and(|c| c.verified) {
                 "fleet-verified layout"
             } else {
-                "unverified layout — RPM shown as estimated"
+                "unverified layout: RPM shown as estimated"
             }
         );
         return Some((
@@ -176,7 +176,7 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
         ));
     }
     log::warn!(
-        "fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan) — re-probe in {}s",
+        "fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan): re-probe in {}s",
         REPROBE_INTERVAL.as_secs()
     );
     None
@@ -438,7 +438,7 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
         if rpm == 0 {
             "Auto".into()
         } else {
-            format!("Auto · {rpm} RPM")
+            format!("Auto, {rpm} RPM")
         }
     } else if rpm == 0 {
         format!("~{target} RPM")
@@ -464,7 +464,7 @@ pub fn display_target(fan: u8) -> u32 {
     let raw = read_target(fan).unwrap_or(0);
     let target = effective_target(raw, read_max(fan));
     if target != raw {
-        log::trace!("fans::display_target: fan{fan} target {raw} above max — shown as auto");
+        log::trace!("fans::display_target: fan{fan} target {raw} above max: shown as auto");
     }
     target
 }
@@ -498,7 +498,7 @@ pub fn clamp_target_with(min: u32, max: u32, rpm: u32) -> u32 {
 pub fn clamp_target(fan: u8, rpm: u32) -> u32 {
     let cap = channels().into_iter().find(|c| c.id == fan);
     if cap.is_none() {
-        log::trace!("fans::clamp_target: fan{fan} unknown — fallback window 0..=20_000");
+        log::trace!("fans::clamp_target: fan{fan} unknown: fallback window 0..=20_000");
     }
     let (mut min, mut max) = cap.map_or((0, 20_000), |c| (c.min_rpm, c.max_rpm));
     // Live sysfs bounds win when present; capability profile is the fallback.
@@ -720,7 +720,7 @@ pub fn observe_ec_sample(fan1: u32, fan2: u32, cpu_temp: f64) {
     if state.observe(fan1, fan2, cpu_temp) {
         EC_LAYOUT_REJECTED.store(true, Ordering::Relaxed);
         log::warn!(
-            "fans: EC-fallback RPM rejected — fans read {fan1}/{fan2} rpm, constant while CPU moved {:.0}–{:.0} °C (not a tachometer)",
+            "fans: EC-fallback RPM rejected: fans read {fan1}/{fan2} rpm, constant while CPU moved {:.0}–{:.0} °C (not a tachometer)",
             state.temp_lo,
             state.temp_hi
         );
@@ -815,12 +815,20 @@ pub fn set_auto() -> std::io::Result<()> {
     );
     if manual_target_may_persist() {
         log::warn!(
-            "fans::set_auto: Gen 10 EC — {GEN10_MANUAL_TARGET_WARNING}; target 0 is written but the EC may not resume its own curve"
+            "fans::set_auto: Gen 10 EC: {GEN10_MANUAL_TARGET_WARNING}; target 0 is written but the EC may not resume its own curve"
         );
     }
     let mut last_err = None;
     let mut errors = 0usize;
     for id in all_ids {
+        // Never re-write 0 to a fan that is already on auto: on Gen 10 EC
+        // firmware each write can restart the fan-stop hold, so the old
+        // unconditional write on every daemon start/stop kept fans at 0 rpm
+        // well past their normal spin-up temperature.
+        if read_target(id) == Some(0) {
+            log::debug!("fans::set_auto: fan{id} already auto: no write");
+            continue;
+        }
         match set_target(id, 0) {
             Ok(()) => log::debug!("fans::set_auto: fan{id} → auto ok"),
             Err(e) => {
@@ -846,7 +854,7 @@ mod tests {
     #[test]
     fn format_auto_covers_all_combos() {
         assert_eq!(format_rpm_label(0, 0), "Auto");
-        assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 RPM");
+        assert_eq!(format_rpm_label(0, 1800), "Auto, 1800 RPM");
         assert_eq!(format_rpm_label(1500, 0), "~1500 RPM");
         assert_eq!(format_rpm_label(1500, 1400), "1400 RPM");
     }
@@ -860,7 +868,7 @@ mod tests {
         assert_eq!(effective_target(9600, Some(0)), 9600, "bogus max → keep");
         assert_eq!(
             format_rpm_label(effective_target(9600, Some(5100)), 2200),
-            "Auto · 2200 RPM"
+            "Auto, 2200 RPM"
         );
     }
 

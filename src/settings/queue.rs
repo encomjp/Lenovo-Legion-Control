@@ -142,9 +142,9 @@ fn flush(inner: Rc<Inner>) {
                 // Surface every failure, not just the first — multi-fan or
                 // multi-attr batches must not collapse silently.
                 let detail = if errs.len() <= 3 {
-                    errs.join(" · ")
+                    errs.join(", ")
                 } else {
-                    format!("{} · …and {} more", errs[..3].join(" · "), errs.len() - 3)
+                    format!("{} and {} more", errs[..3].join(", "), errs.len() - 3)
                 };
                 let msg = if errs.len() == 1 {
                     detail

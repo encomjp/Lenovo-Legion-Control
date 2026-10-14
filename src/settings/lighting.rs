@@ -2,7 +2,10 @@
 
 use super::{run_daemon_command_async, toast_error};
 use crate::perkey;
-use crate::widgets::{effect_tooltip, labeled_row_tip, page_lede, section_tip, tip};
+use crate::widgets::{
+    effect_tooltip, labeled_row_tip, page_lede, primary_button_tip, secondary_button_tip,
+    section_tip, tip,
+};
 use legion_core::comms::{DaemonCommand, DaemonResponse};
 use legion_core::config::ZoneEffect;
 use legion_core::keyboard::{RgbEffect, RgbZone};
@@ -12,7 +15,6 @@ use gtk4 as gtk;
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
 const EFFECT_IDS: &[&str] = &[
     "static",
@@ -27,6 +29,9 @@ const EFFECT_IDS: &[&str] = &[
     "reactive",
     "off",
 ];
+
+/// Neutral dot for the zone tabs (no sun/moon/star metaphors).
+const ZONE_ICON: &str = "media-record-symbolic";
 
 const EFFECT_LABELS: &[&str] = &[
     "Static",
@@ -70,7 +75,7 @@ pub fn build_lighting(
             &cfg,
             page,
             "Keyboard backlight",
-            "This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off.",
+            "This model has a single-zone white backlight. Brightness: fn+Q cycles 50%, 100% and Off.",
             toast_overlay,
         );
     }
@@ -78,6 +83,7 @@ pub fn build_lighting(
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
 
     let tabs = adw::ViewStack::new();
+    tabs.set_hhomogeneous(false);
     tabs.set_vhomogeneous(false);
     tabs.set_vexpand(true);
     tabs.add_titled_with_icon(
@@ -93,32 +99,38 @@ pub fn build_lighting(
             RgbZone::Front,
             &cfg.front,
             toast_overlay,
+            None,
         ),
         Some("front"),
         "Front",
-        "night-light-symbolic",
+        ZONE_ICON,
     );
     tabs.add_titled_with_icon(
         &build_zone_tab(
             "Rear bar",
-            "Rear / hinge accent LEDs",
+            "Rear and hinge accent LEDs",
             RgbZone::Rear,
             &cfg.rear,
             toast_overlay,
+            None,
         ),
         Some("rear"),
         "Rear",
-        "daytime-sunset-symbolic",
+        ZONE_ICON,
     );
-    let logo_page = build_zone_tab(
-        "Lid logo",
-        "Logo colour, brightness, and LED power",
-        RgbZone::Logo,
-        &cfg.logo,
-        toast_overlay,
+    tabs.add_titled_with_icon(
+        &build_zone_tab(
+            "Lid logo",
+            "Logo colour and brightness",
+            RgbZone::Logo,
+            &cfg.logo,
+            toast_overlay,
+            Some(logo_power_row(&cfg, toast_overlay)),
+        ),
+        Some("logo"),
+        "Logo",
+        ZONE_ICON,
     );
-    logo_page.append(&logo_power_row(&cfg, toast_overlay));
-    tabs.add_titled_with_icon(&logo_page, Some("logo"), "Logo", "starred-symbolic");
     tabs.add_titled_with_icon(
         &build_more_tab(&cfg, toast_overlay),
         Some("more"),
@@ -137,7 +149,7 @@ pub fn build_lighting(
 
 const FZ_SPEED_LABELS: &[&str] = &["Slowest", "Slow", "Fast", "Fastest"];
 const FZ_BRIGHTNESS_LABELS: &[&str] = &["Off", "Low", "High"];
-const FZ_DIR_LABELS: &[&str] = &["Left → right", "Right → left"];
+const FZ_DIR_LABELS: &[&str] = &["Left to right", "Right to left"];
 
 /// Which controls make sense for an effect: (colours, speed, direction).
 fn fz_sensitivity(fx: legion_core::fourzone::FzEffect) -> (bool, bool, bool) {
@@ -162,21 +174,44 @@ fn build_fourzone_page(
     let state = Rc::new(Cell::new(cfg.four_zone.to_state()));
     let s0 = state.get();
 
-    let (sec, card) = section_tip(
-        "4-zone RGB keyboard",
-        Some("Experimental — tested by reference packets only"),
-    );
+    // Changes apply and save themselves after ~250 ms without further edits.
+    let commit: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let toast = toast_overlay.clone();
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        Rc::new(move || {
+            if let Some(id) = pending.borrow_mut().take() {
+                id.remove();
+            }
+            let state = state.clone();
+            let toast = toast.clone();
+            let pending_c = pending.clone();
+            let id = glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+                pending_c.borrow_mut().take();
+                let s = state.get();
+                super::dispatch_async(
+                    move || legion_core::fourzone::apply_and_save(&s),
+                    "4-zone write stopped without a result",
+                    move |res| {
+                        if let Err(e) = res {
+                            toast_error(&toast, &e);
+                        }
+                    },
+                );
+            });
+            *pending.borrow_mut() = Some(id);
+        })
+    };
+
+    let (sec, card) = section_tip("4-zone RGB keyboard", None);
     let warn = gtk::Label::new(Some(
-        "Experimental — tested by reference packets only. The 33-byte packets follow the layout \
+        "Experimental, tested by reference packets only. The 33-byte packets follow the layout \
          used by L5P-Keyboard-RGB, l5p-kbl, OpenRGB and Lenovo Legion Toolkit, \
          but this build has not been verified on a 4-zone laptop yet.",
     ));
     warn.set_wrap(true);
     warn.set_xalign(0.0);
-    warn.set_margin_start(12);
-    warn.set_margin_end(12);
-    warn.set_margin_top(4);
-    warn.add_css_class("dim-label");
+    warn.add_css_class("row-sub");
     card.append(&warn);
 
     let labels: Vec<&str> = FzEffect::ALL.iter().map(|f| f.display_name()).collect();
@@ -220,12 +255,13 @@ fn build_fourzone_page(
     for i in 0..4 {
         let [r, g, b] = s0.colors[i];
         let state_c = state.clone();
-        let picker = colour_picker((r, g, b), move |r, g, b| {
+        let commit_c = commit.clone();
+        let picker = colour_picker((r, g, b), &format!("Zone {} colour", i + 1), move |r, g, b| {
             let mut s = state_c.get();
             s.colors[i] = [r, g, b];
             state_c.set(s);
+            commit_c();
         });
-        tip(&picker, &format!("Zone {} colour (left → right)", i + 1));
         let col = gtk::Box::new(Orientation::Vertical, 4);
         let l = gtk::Label::new(Some(&format!("Zone {}", i + 1)));
         l.add_css_class("dim-label");
@@ -250,6 +286,7 @@ fn build_fourzone_page(
     sync(s0.effect);
     {
         let state = state.clone();
+        let commit = commit.clone();
         effect_dd.connect_selected_notify(move |d| {
             let fx = FzEffect::ALL
                 .get(d.selected() as usize)
@@ -259,26 +296,32 @@ fn build_fourzone_page(
             s.effect = fx;
             state.set(s);
             sync(fx);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         speed_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.speed = (d.selected() as u8 + 1).clamp(1, 4);
             state.set(s);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         bri_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.brightness = (d.selected() as u8).min(2);
             state.set(s);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         dir_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.direction = if d.selected() == 1 {
@@ -287,47 +330,10 @@ fn build_fourzone_page(
                 WaveDir::Right
             };
             state.set(s);
+            commit();
         });
     }
 
-    let apply = gtk::Button::with_label("Apply");
-    apply.add_css_class("suggested-action");
-    apply.set_halign(Align::End);
-    apply.set_margin_top(8);
-    apply.set_margin_end(12);
-    apply.set_margin_bottom(8);
-    tip(
-        &apply,
-        "Send this state to the 4-zone controller and save it",
-    );
-    let toast = toast_overlay.clone();
-    apply.connect_clicked(move |btn| {
-        let s = state.get();
-        btn.set_sensitive(false);
-        let btn = btn.clone();
-        let toast = toast.clone();
-        super::dispatch_async(
-            move || legion_core::fourzone::apply_and_save(&s),
-            "4-zone write stopped without a result",
-            move |res| {
-                btn.set_sensitive(true);
-                match res {
-                    Ok(()) => {
-                        let msg = if s.brightness == 0 {
-                            "4-zone keyboard → off".to_string()
-                        } else {
-                            format!("4-zone keyboard → {}", s.effect.display_name())
-                        };
-                        let t = adw::Toast::new(&msg);
-                        t.set_timeout(2);
-                        toast.add_toast(t);
-                    }
-                    Err(e) => toast_error(&toast, &e),
-                }
-            },
-        );
-    });
-    card.append(&apply);
     sec.append(&card);
     page.append(&sec);
 
@@ -347,15 +353,12 @@ fn build_simple_backlight_page(
 ) -> (gtk::Box, adw::ViewStack) {
     let (sec, card) = section_tip(title, Some(note));
     let note = gtk::Label::new(Some(
-        "This keyboard has white backlight only — no RGB zones or effects.\n\
-         Adjust brightness with fn+Q (50% → 100% → Off), or with the slider here:",
+        "This keyboard has white backlight only, no RGB zones or effects.\n\
+         Adjust brightness with fn+Q (50%, 100%, Off) or with the slider here.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
-    note.set_margin_start(12);
-    note.set_margin_end(12);
-    note.set_margin_top(4);
-    note.add_css_class("dim-label");
+    note.add_css_class("row-sub");
     card.append(&note);
 
     // Brightness slider — reads are local sysfs, writes go through the daemon.
@@ -428,15 +431,40 @@ fn build_simple_backlight_page(
     (page, tabs)
 }
 
-/// Human label for a white-backlight level: 0 → "Off", otherwise percent of
-/// max (u32 math — u8 `level * 100` overflows on 3+ level boards).
+/// Human label for a brightness level: 0 -> "Off", otherwise the rounded
+/// percentage of `max` (u32 math, since u8 `level * 100` overflows).
 fn backlight_label(level: u8, max: u8) -> String {
-    let max = max.max(1);
+    let max = max.max(1) as u32;
     if level == 0 {
         "Off".to_string()
     } else {
-        format!("{}%", (level as u32 * 100 / max as u32) as u8)
+        format!("{}%", (level as u32 * 100 + max / 2) / max)
     }
+}
+
+/// Spectrum brightness is 0..=9; show it as a percentage.
+fn level_label(level: u8) -> String {
+    backlight_label(level.min(9), 9)
+}
+
+/// Width of the shared label column so every control starts at the same x.
+const ROW_LABEL_W: i32 = 96;
+
+/// One aligned row: title in a fixed-width column, control after it.
+fn field_row(title: &str, field: &impl IsA<gtk::Widget>, tooltip: &str) -> gtk::Box {
+    let row = gtk::Box::new(Orientation::Horizontal, 12);
+    row.add_css_class("panel-row");
+    let t = gtk::Label::new(Some(title));
+    t.add_css_class("row-title");
+    t.set_xalign(0.0);
+    t.set_valign(Align::Center);
+    t.set_width_request(ROW_LABEL_W);
+    row.append(&t);
+    let f = field.as_ref();
+    f.set_valign(Align::Center);
+    row.append(f);
+    tip(&row, tooltip);
+    row
 }
 
 fn build_keyboard_tab(
@@ -445,26 +473,23 @@ fn build_keyboard_tab(
     toast: &adw::ToastOverlay,
     app: &adw::Application,
 ) -> gtk::Box {
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
-    let (sec_fx, fx_card) = section_tip("Whole keyboard", None);
+    let (sec_fx, fx_card) = section_tip("Whole keyboard", Some("One effect across every key"));
     fx_card.append(&zone_editor(RgbZone::Keyboard, layer, true, toast));
     box_.append(&sec_fx);
 
-    let (sec_brush, brush_card) = section_tip("Paint colour", None);
-    brush_card.append(&colour_toolbar(brush));
-    box_.append(&sec_brush);
-
-    let (sec_map, map_card) = section_tip("Per-key lighting", None);
-    let open_btn = gtk::Button::with_label("Open individual key lighting…");
-    open_btn.add_css_class("suggested-action");
-    open_btn.add_css_class("pill-btn");
-    open_btn.set_halign(Align::Start);
-    tip(
-        &open_btn,
-        "Opens a dedicated window with a full-size per-key painter",
+    let (sec_map, map_card) = section_tip(
+        "Per-key lighting",
+        Some("Paint single keys with the brush colour"),
     );
+    let open_btn = secondary_button_tip(
+        "Open key painter",
+        Some("Opens a dedicated window with a full-size per-key painter"),
+    );
+    open_btn.set_halign(Align::End);
+    map_card.append(&colour_toolbar(brush, Some(&open_btn)));
     let brush_w = brush.clone();
     let app_w = app.clone();
     let win_slot: Rc<RefCell<Option<adw::Window>>> = Rc::new(RefCell::new(None));
@@ -482,7 +507,6 @@ fn build_keyboard_tab(
         });
         *win_slot_c.borrow_mut() = Some(win);
     });
-    map_card.append(&open_btn);
     box_.append(&sec_map);
 
     box_
@@ -515,11 +539,11 @@ fn open_perkey_window(app: &adw::Application, brush: Rc<Cell<(u8, u8, u8)>>) -> 
     lede.set_wrap(true);
     tip(
         &lede,
-        "Paint individual keys with the brush colour — opens full-size so keys stay easy to hit",
+        "Paint individual keys with the brush colour, opens full-size so keys stay easy to hit",
     );
     body.append(&lede);
 
-    let brush_row = colour_toolbar(&brush);
+    let brush_row = colour_toolbar(&brush, None);
     body.append(&brush_row);
     body.append(&perkey::build_perkey_editor(brush));
 
@@ -537,25 +561,28 @@ fn open_perkey_window(app: &adw::Application, brush: Rc<Cell<(u8, u8, u8)>>) -> 
 
 fn build_zone_tab(
     title: &str,
-    _blurb: &str,
+    blurb: &str,
     zone: RgbZone,
     layer: &ZoneEffect,
     toast: &adw::ToastOverlay,
+    extra: Option<gtk::Box>,
 ) -> gtk::Box {
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
-    let (sec, card) = section_tip(title, None);
-    card.append(&zone_editor(zone, layer, false, toast));
+    let (sec, card) = section_tip(title, Some(blurb));
+    card.append(&zone_editor(zone, layer, true, toast));
+    if let Some(extra) = extra {
+        card.append(&extra);
+    }
     box_.append(&sec);
     box_
 }
 
-/// The lid-logo LED on/off switch — lives on the Logo tab next to its
+/// The lid-logo LED on/off switch: lives on the Logo tab next to its
 /// colour/brightness editor instead of hiding under More.
 fn logo_power_row(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverlay) -> gtk::Box {
     let logo = gtk::Switch::builder().active(cfg.logo_on).build();
-    tip(&logo, "Turns the physical lid logo LED on or off");
     let logo_suppress = Rc::new(Cell::new(true));
     let logo_suppress_c = logo_suppress.clone();
     let toast_logo = toast.clone();
@@ -569,121 +596,206 @@ fn logo_power_row(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
         toast_logo.add_toast(t);
     });
     logo_suppress.set(false);
-    labeled_row_tip(
-        "Logo LED power",
-        "",
-        &logo,
-        Some("Turns the physical lid logo LED on or off"),
-    )
+    logo.set_halign(Align::Start);
+    field_row("Logo LED", &logo, "Turns the physical lid logo LED on or off")
 }
 
 fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverlay) -> gtk::Box {
     let toast = toast.clone();
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
-    let (sec_look, look) = section_tip("Keyboard brightness", None);
-
-    let bright = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
-    bright.set_value(cfg.brightness as f64);
-    bright.set_draw_value(false);
-    bright.set_digits(0);
-    bright.set_hexpand(true);
-    bright.set_width_request(240);
-    let bright_val = gtk::Label::new(Some(&cfg.brightness.to_string()));
-    bright_val.add_css_class("numeric");
-    bright_val.add_css_class("scale-value");
-    bright_val.set_width_chars(2);
-    bright_val.set_xalign(1.0);
-    let bright_suppress = Rc::new(Cell::new(true));
-    let bright_suppress_c = bright_suppress.clone();
-    let bri_ticket = Rc::new(Cell::new(0u32));
-    let toast_bri = toast.clone();
-    let bright_val_c = bright_val.clone();
-    bright.connect_value_changed(move |s| {
-        bright_val_c.set_text(&s.value().round().clamp(0.0, 9.0).to_string());
-        if bright_suppress_c.get() {
-            return;
-        }
-        let level = s.value().round().clamp(0.0, 9.0) as u8;
-        let t = bri_ticket.get().wrapping_add(1);
-        bri_ticket.set(t);
-        let bri_ticket = bri_ticket.clone();
-        let toast_c = toast_bri.clone();
-        glib::timeout_add_local_once(Duration::from_millis(80), move || {
-            if bri_ticket.get() == t {
-                legion_core::keyboard::set_rgb_brightness_async(level);
-                let msg = if level == 0 {
-                    "Lights off".to_string()
-                } else {
-                    format!("Brightness → {level}")
-                };
-                let t = adw::Toast::new(&msg);
-                t.set_timeout(1);
-                toast_c.add_toast(t);
-            }
-        });
-    });
-    bright_suppress.set(false);
-    tip(
-        &bright,
-        "Spectrum brightness 0–9 · 0 turns lights off · saved to your config",
-    );
-    let bright_box = gtk::Box::new(Orientation::Horizontal, 10);
-    bright_box.append(&bright);
-    bright_box.append(&bright_val);
-    look.append(&labeled_row_tip(
-        "Brightness",
-        "",
-        &bright_box,
-        Some("Applies to keyboard and accent Spectrum zones"),
-    ));
-    box_.append(&sec_look);
-
-    let (sec_all, all_card) = section_tip("Everything at once", None);
-    tip(
-        &all_card,
-        "Writes one effect to keyboard, front, rear, and logo together",
+    let (sec_all, all_card) = section_tip(
+        "All lights",
+        Some("One effect on keyboard, front, rear and logo together"),
     );
     all_card.append(&zone_editor(RgbZone::All, &cfg.keyboard, false, &toast));
     box_.append(&sec_all);
 
-    let (sec_r, restore_card) = section_tip("Session", None);
-    let restore = gtk::Button::with_label("Re-apply saved");
-    restore.add_css_class("flat");
-    tip(
-        &restore,
-        "Push ~/.config/legion-control/settings.json to the Spectrum hardware again",
+    let (sec_r, restore_card) = section_tip("Restore", None);
+    let restore = secondary_button_tip(
+        "Reapply",
+        Some("Push the saved lighting settings to the keyboard again"),
     );
     let toast_r = toast.clone();
     restore.connect_clicked(move |_| {
         legion_core::keyboard::restore_lighting_async();
-        let t = adw::Toast::new("Restored saved lighting");
+        let t = adw::Toast::new("Saved lighting reapplied");
         t.set_timeout(2);
         toast_r.add_toast(t);
     });
     restore_card.append(&labeled_row_tip(
-        "Hardware sync",
-        "",
+        "Reapply saved lighting",
+        "Use after sleep or if colours look wrong",
         &restore,
-        Some("Useful after sleep or if lights drifted from the saved look"),
+        Some("Sends your saved effect, colour and brightness to the hardware again"),
     ));
     box_.append(&sec_r);
 
     box_
 }
 
+/// Effects that sweep through hues rather than using the chosen colour.
+fn is_rainbow(id: &str) -> bool {
+    matches!(id, "rainbow-wave" | "screw-rainbow" | "smooth" | "color-change")
+}
+
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    (r + m, g + m, b + m)
+}
+
+/// Slim, flat preview of what a zone is set to: the colour (or a hue
+/// sweep for rainbow effects), dimmed with brightness, plus its name and
+/// brightness. Returns the widget and a refresh closure.
+fn preview_strip(
+    effect_dd: &gtk::DropDown,
+    color: &Rc<Cell<(u8, u8, u8)>>,
+    brightness: &Rc<Cell<u8>>,
+    show_pct: bool,
+) -> (gtk::Overlay, Rc<dyn Fn()>) {
+    let effect_id = {
+        let dd = effect_dd.clone();
+        move || {
+            EFFECT_IDS
+                .get(dd.selected() as usize)
+                .copied()
+                .unwrap_or("static")
+        }
+    };
+    // Lit amount: 0 (off) .. 1 (full), kept visible at low levels.
+    let alpha_for = |level: u8| 0.3 + 0.7 * (level.min(9) as f64 / 9.0);
+
+    let area = gtk::DrawingArea::new();
+    area.add_css_class("lighting-preview");
+    area.set_content_height(40);
+    area.set_hexpand(true);
+    {
+        let (color, brightness, effect_id) = (color.clone(), brightness.clone(), effect_id.clone());
+        area.set_draw_func(move |area, cr, w, h| {
+            let (w, h) = (w as f64, h as f64);
+            let r = 8.0;
+            let pi = std::f64::consts::PI;
+            let outline = |cr: &gtk::cairo::Context| {
+                cr.new_sub_path();
+                cr.arc(w - r - 0.5, r + 0.5, r, -pi / 2.0, 0.0);
+                cr.arc(w - r - 0.5, h - r - 0.5, r, 0.0, pi / 2.0);
+                cr.arc(r + 0.5, h - r - 0.5, r, pi / 2.0, pi);
+                cr.arc(r + 0.5, r + 0.5, r, pi, 3.0 * pi / 2.0);
+                cr.close_path();
+            };
+            let fg = area.color();
+            let id = effect_id();
+            let level = brightness.get();
+            let (cr_, cg, cb) = color.get();
+            let (cr_, cg, cb) = (cr_ as f64 / 255.0, cg as f64 / 255.0, cb as f64 / 255.0);
+            let a = alpha_for(level);
+            outline(cr);
+            if id == "off" || level == 0 {
+                cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, 0.06);
+            } else if is_rainbow(id) {
+                let g = gtk::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
+                for i in 0..=6 {
+                    let (hr, hg, hb) = hsl_to_rgb(i as f64 * 60.0, 0.62, 0.66);
+                    g.add_color_stop_rgba(i as f64 / 6.0, hr, hg, hb, a);
+                }
+                let _ = cr.set_source(&g);
+            } else if matches!(id, "color-pulse" | "color-wave" | "ripple") {
+                let g = gtk::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
+                g.add_color_stop_rgba(0.0, cr_, cg, cb, a);
+                g.add_color_stop_rgba(1.0, cr_, cg, cb, a * 0.55);
+                let _ = cr.set_source(&g);
+            } else {
+                cr.set_source_rgba(cr_, cg, cb, a);
+            }
+            let _ = cr.fill_preserve();
+            cr.set_line_width(1.0);
+            cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, 0.14);
+            let _ = cr.stroke();
+        });
+    }
+
+    let name = gtk::Label::new(None);
+    name.add_css_class("lighting-preview-text");
+    name.set_hexpand(true);
+    name.set_xalign(0.0);
+    let pct = gtk::Label::new(None);
+    pct.add_css_class("lighting-preview-text");
+    pct.add_css_class("numeric");
+    pct.set_visible(show_pct);
+    let labels = gtk::Box::new(Orientation::Horizontal, 8);
+    labels.set_margin_start(14);
+    labels.set_margin_end(14);
+    labels.set_valign(Align::Center);
+    labels.set_can_target(false);
+    labels.append(&name);
+    labels.append(&pct);
+
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&area));
+    overlay.add_overlay(&labels);
+
+    let refresh: Rc<dyn Fn()> = {
+        let (area, color, brightness) = (area.clone(), color.clone(), brightness.clone());
+        Rc::new(move || {
+            let id = effect_id();
+            let level = brightness.get();
+            let off = id == "off" || level == 0;
+            let idx = EFFECT_IDS.iter().position(|e| *e == id).unwrap_or(0);
+            name.set_text(EFFECT_LABELS.get(idx).copied().unwrap_or("Static"));
+            pct.set_text(&level_label(level));
+            // Text colour follows what is behind it.
+            let (r, g, b) = color.get();
+            let lum = (0.2126 * r as f64 + 0.7152 * g as f64 + 0.0722 * b as f64) / 255.0;
+            let class = if off || alpha_for(level) < 0.6 {
+                None
+            } else if is_rainbow(id) || lum > 0.5 {
+                Some("on-light")
+            } else {
+                Some("on-dark")
+            };
+            for l in [&name, &pct] {
+                l.remove_css_class("on-light");
+                l.remove_css_class("on-dark");
+                if let Some(c) = class {
+                    l.add_css_class(c);
+                }
+            }
+            area.queue_draw();
+        })
+    };
+    refresh();
+    (overlay, refresh)
+}
+
 fn zone_editor(
     zone: RgbZone,
     layer: &ZoneEffect,
-    compact: bool,
+    show_brightness: bool,
     toast: &adw::ToastOverlay,
 ) -> gtk::Box {
     let toast = toast.clone();
     let wrap = gtk::Box::new(Orientation::Vertical, 0);
     let color = Rc::new(Cell::new((layer.r, layer.g, layer.b)));
     let speed = Rc::new(Cell::new(layer.speed.clamp(1, 3)));
-    let brightness = Rc::new(Cell::new(layer.brightness.min(9)));
+    // Zones without their own slider (All lights) apply the saved level, or
+    // full brightness if that was off.
+    let start_level = match layer.brightness.min(9) {
+        0 if !show_brightness => 9,
+        n => n,
+    };
+    let brightness = Rc::new(Cell::new(start_level));
 
     let effect_dd = gtk::DropDown::from_strings(EFFECT_LABELS);
     let fx_sel = EFFECT_IDS
@@ -691,240 +803,195 @@ fn zone_editor(
         .position(|e| *e == layer.effect)
         .unwrap_or(0) as u32;
     effect_dd.set_selected(fx_sel);
+    effect_dd.set_halign(Align::Start);
+    effect_dd.set_width_request(200);
     tip(
         &effect_dd,
         effect_tooltip(EFFECT_IDS.get(fx_sel as usize).copied().unwrap_or("static")),
     );
-    effect_dd.connect_selected_notify(move |d| {
-        let idx = d.selected() as usize;
-        let id = EFFECT_IDS.get(idx).copied().unwrap_or("static");
-        tip(d, effect_tooltip(id));
-    });
+
+    // Zones other than All Lights save and apply themselves shortly after the
+    // last change. All Lights overwrites every zone, so it keeps a button.
+    let auto = zone != RgbZone::All;
+    let commit = auto_commit(&effect_dd, &color, &speed, &brightness, zone);
+    let (strip, refresh) = preview_strip(&effect_dd, &color, &brightness, show_brightness);
+    strip.set_margin_bottom(6);
+    wrap.append(&strip);
+
+    wrap.append(&field_row(
+        "Effect",
+        &effect_dd,
+        "Lighting animation for this surface",
+    ));
 
     let speed_dd = gtk::DropDown::from_strings(&["Slow", "Normal", "Fast"]);
-    tip(
-        &speed_dd,
-        "How fast animated effects move — ignored for Static and Off",
-    );
+    speed_dd.set_halign(Align::Start);
+    speed_dd.set_width_request(200);
     speed_dd.set_selected((speed.get().saturating_sub(1) as u32).min(2));
     let speed_c = speed.clone();
+    let commit_s = commit.clone();
     speed_dd.connect_selected_notify(move |d| {
         speed_c.set((d.selected() as u8).saturating_add(1).min(3));
+        commit_s();
     });
+    let speed_row = field_row("Speed", &speed_dd, "How fast the animation moves");
+    let sync_speed = {
+        let speed_row = speed_row.clone();
+        move |idx: usize| {
+            let id = EFFECT_IDS.get(idx).copied().unwrap_or("static");
+            speed_row.set_visible(!matches!(id, "static" | "off"));
+        }
+    };
+    sync_speed(fx_sel as usize);
+    wrap.append(&speed_row);
 
-    let picker = colour_picker(color.get(), {
+    {
+        let refresh = refresh.clone();
+        let commit = commit.clone();
+        effect_dd.connect_selected_notify(move |d| {
+            let idx = d.selected() as usize;
+            let id = EFFECT_IDS.get(idx).copied().unwrap_or("static");
+            tip(d, effect_tooltip(id));
+            sync_speed(idx);
+            refresh();
+            commit();
+        });
+    }
+
+    let picker = colour_picker(color.get(), "Colour", {
         let color = color.clone();
-        move |r, g, b| color.set((r, g, b))
+        let refresh = refresh.clone();
+        let commit = commit.clone();
+        move |r, g, b| {
+            color.set((r, g, b));
+            refresh();
+            commit();
+        }
     });
-    tip(
-        &picker,
-        "Colour for Static / Pulse / Wave and other coloured effects — click to open the colour dialog",
-    );
+    let colour_box = gtk::Box::new(Orientation::Horizontal, 12);
+    colour_box.append(&picker);
+    colour_box.append(&preset_swatches(&picker));
+    wrap.append(&field_row(
+        "Colour",
+        &colour_box,
+        "Used by Static, Pulse, Wave and the other single-colour effects",
+    ));
 
-    if compact {
-        let row = gtk::Box::new(Orientation::Horizontal, 12);
-        row.set_valign(Align::Center);
-        effect_dd.set_hexpand(true);
-        row.append(&effect_dd);
-        row.append(&speed_dd);
-        row.append(&picker);
-        row.append(&apply_button(
-            &effect_dd,
-            &color,
-            &speed,
-            &brightness,
-            zone,
-            &toast,
-        ));
-        wrap.append(&row);
-    } else {
-        let hex = gtk::Entry::builder()
-            .placeholder_text("#RRGGBB")
-            .width_chars(9)
-            .max_length(7)
-            .build();
-        tip(
-            &hex,
-            "Type a hex colour like #C8102E and press Return — same as the colour picker",
-        );
-        let (r, g, b) = color.get();
-        hex.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-        let color_h = color.clone();
-        let picker_h = picker.clone();
-        hex.connect_activate(move |e| {
-            if let Some((r, g, b)) = parse_hex(&e.text()) {
-                color_h.set((r, g, b));
-                set_picker_rgba(&picker_h, r, g, b);
-            }
-        });
-        let hex_s = hex.clone();
-        let color_s = color.clone();
-        picker.connect_rgba_notify(move |p| {
-            let (r, g, b) = rgba_to_rgb(p.rgba());
-            color_s.set((r, g, b));
-            hex_s.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-        });
-
-        let fx_box = gtk::Box::new(Orientation::Horizontal, 8);
-        fx_box.set_valign(Align::Center);
-        effect_dd.set_hexpand(true);
-        fx_box.append(&effect_dd);
-        fx_box.append(&speed_dd);
-        wrap.append(&labeled_row_tip(
-            "Effect",
-            "",
-            &fx_box,
-            Some("Lighting animation for this surface — speed only affects animated effects"),
-        ));
-
-        let colour_box = gtk::Box::new(Orientation::Horizontal, 8);
-        colour_box.set_valign(Align::Center);
-        colour_box.append(&picker);
-        colour_box.append(&hex);
-        wrap.append(&labeled_row_tip(
-            "Colour",
-            "",
-            &colour_box,
-            Some("Used by Static, Pulse, Wave, and other coloured effects"),
-        ));
-
+    if show_brightness {
         let bright_slider = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 9.0, 1.0);
         bright_slider.set_value(brightness.get() as f64);
         bright_slider.set_draw_value(false);
         bright_slider.set_digits(0);
         bright_slider.set_hexpand(true);
-        bright_slider.set_width_request(220);
-        let bright_val = gtk::Label::new(Some(&brightness.get().to_string()));
+        bright_slider.set_width_request(160);
+        let bright_val = gtk::Label::new(Some(&level_label(brightness.get())));
         bright_val.add_css_class("numeric");
         bright_val.add_css_class("scale-value");
-        bright_val.set_width_chars(2);
         bright_val.set_xalign(1.0);
         let bri_val_c = bright_val.clone();
         let bri_c = brightness.clone();
+        let refresh_b = refresh.clone();
+        let commit_b = commit.clone();
         bright_slider.connect_value_changed(move |s| {
-            bri_val_c.set_text(&s.value().round().clamp(0.0, 9.0).to_string());
-            bri_c.set(s.value().round().clamp(0.0, 9.0) as u8);
+            let level = s.value().round().clamp(0.0, 9.0) as u8;
+            bri_val_c.set_text(&level_label(level));
+            bri_c.set(level);
+            refresh_b();
+            commit_b();
         });
-        tip(
-            &bright_slider,
-            "Brightness 0–9 for this zone · 0 turns it off",
-        );
+        tip(&bright_slider, "0% turns this zone off");
         let bright_box = gtk::Box::new(Orientation::Horizontal, 10);
+        bright_box.set_hexpand(true);
         bright_box.append(&bright_slider);
         bright_box.append(&bright_val);
-        wrap.append(&labeled_row_tip(
-            "Brightness",
-            "",
-            &bright_box,
-            Some("Per-zone brightness — independent of other zones"),
-        ));
+        wrap.append(&field_row("Brightness", &bright_box, "Brightness of this zone only"));
+    }
 
+    if !auto {
         let apply = apply_button(&effect_dd, &color, &speed, &brightness, zone, &toast);
         apply.set_halign(Align::End);
-        apply.set_margin_top(10);
+        apply.set_margin_top(8);
         wrap.append(&apply);
     }
 
     wrap
 }
 
-fn colour_toolbar(brush: &Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
+/// Brush colour row: picker and presets, plus an optional trailing button.
+fn colour_toolbar(brush: &Rc<Cell<(u8, u8, u8)>>, trailing: Option<&gtk::Button>) -> gtk::Box {
     let row = gtk::Box::new(Orientation::Horizontal, 12);
     row.set_valign(Align::Center);
 
-    let picker = colour_picker(brush.get(), {
+    let t = gtk::Label::new(Some("Brush colour"));
+    t.add_css_class("row-title");
+    t.set_xalign(0.0);
+    t.set_width_request(ROW_LABEL_W);
+    tip(&t, "Paint colour for per-key mode, also used by coloured effects");
+    row.append(&t);
+
+    let picker = colour_picker(brush.get(), "Brush colour", {
         let brush = brush.clone();
         move |r, g, b| {
             brush.set((r, g, b));
             legion_core::config::set_ui_color(r, g, b);
         }
     });
-
-    let text = gtk::Box::new(Orientation::Vertical, 0);
-    text.set_hexpand(true);
-    let t = gtk::Label::new(Some("Brush"));
-    t.add_css_class("row-title");
-    t.set_halign(Align::Start);
-    tip(
-        &t,
-        "Active paint colour for per-key mode — also used by coloured lighting effects",
-    );
-    text.append(&t);
-    tip(
-        &row,
-        "Choose the colour you paint keys with — saved as your UI brush colour",
-    );
-    row.append(&text);
     row.append(&picker);
-    tip(
-        &picker,
-        "Brush colour for per-key painting — also used when you Apply a coloured effect",
-    );
+    row.append(&preset_swatches(&picker));
 
-    let hex = gtk::Entry::builder()
-        .placeholder_text("#RRGGBB")
-        .width_chars(9)
-        .max_length(7)
-        .build();
-    tip(&hex, "Type a hex colour like #C8102E and press Return");
-    let (r, g, b) = brush.get();
-    hex.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-    let brush_h = brush.clone();
-    let picker_h = picker.clone();
-    hex.connect_activate(move |e| {
-        if let Some((r, g, b)) = parse_hex(&e.text()) {
-            brush_h.set((r, g, b));
-            legion_core::config::set_ui_color(r, g, b);
-            set_picker_rgba(&picker_h, r, g, b);
-        }
-    });
-    row.append(&hex);
+    let spacer = gtk::Box::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    row.append(&spacer);
+    if let Some(btn) = trailing {
+        row.append(btn);
+    }
+    row
+}
 
-    let hex_s = hex.clone();
-    picker.connect_rgba_notify(move |p| {
-        let (r, g, b) = rgba_to_rgb(p.rgba());
-        hex_s.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-    });
-
+/// Quick colour presets. Picking one drives the colour button, which in turn
+/// notifies whoever owns the colour.
+fn preset_swatches(picker: &gtk::ColorDialogButton) -> gtk::Box {
+    let row = gtk::Box::new(Orientation::Horizontal, 8);
+    row.set_valign(Align::Center);
     for (name, r, g, b) in [
         ("Red", 200u8, 16u8, 46u8),
         ("White", 255, 255, 255),
         ("Ice", 120, 220, 255),
-        ("Off", 0, 0, 0),
+        ("Black", 0, 0, 0),
     ] {
         let btn = gtk::Button::new();
         btn.add_css_class("swatch");
         btn.add_css_class(&format!("swatch-{:02x}{:02x}{:02x}", r, g, b));
-        tip(
-            &btn,
-            &format!("Preset “{name}” (#{r:02X}{g:02X}{b:02X}) — click to set brush colour"),
-        );
-        let brush_p = brush.clone();
+        btn.set_valign(Align::Center);
+        tip(&btn, &format!("{name} #{r:02X}{g:02X}{b:02X}"));
         let picker_p = picker.clone();
-        let hex_p = hex.clone();
-        btn.connect_clicked(move |_| {
-            brush_p.set((r, g, b));
-            legion_core::config::set_ui_color(r, g, b);
-            set_picker_rgba(&picker_p, r, g, b);
-            hex_p.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-        });
+        btn.connect_clicked(move |_| set_picker_rgba(&picker_p, r, g, b));
         row.append(&btn);
     }
-
     row
 }
 
+/// Colour button; the hex value lives in its tooltip only.
 fn colour_picker(
     initial: (u8, u8, u8),
+    what: &str,
     on_change: impl Fn(u8, u8, u8) + 'static,
 ) -> gtk::ColorDialogButton {
     let dialog = gtk::ColorDialog::new();
     dialog.set_with_alpha(false);
     let picker = gtk::ColorDialogButton::new(Some(dialog));
     picker.add_css_class("colour-picker");
+    picker.set_valign(Align::Center);
+    picker.set_halign(Align::Start);
     set_picker_rgba(&picker, initial.0, initial.1, initial.2);
+    let what = what.to_string();
+    let hex_tip = move |p: &gtk::ColorDialogButton, (r, g, b): (u8, u8, u8)| {
+        tip(p, &format!("{what} #{r:02X}{g:02X}{b:02X}"));
+    };
+    hex_tip(&picker, initial);
     picker.connect_rgba_notify(move |p| {
         let (r, g, b) = rgba_to_rgb(p.rgba());
+        hex_tip(p, (r, g, b));
         on_change(r, g, b);
     });
     picker
@@ -947,6 +1014,49 @@ fn rgba_to_rgb(rgba: gtk::gdk::RGBA) -> (u8, u8, u8) {
     )
 }
 
+/// Debounced live apply: waits for ~250 ms without changes, then sends the
+/// state through `apply_lighting`, which also writes the saved zone config.
+fn auto_commit(
+    effect_dd: &gtk::DropDown,
+    color: &Rc<Cell<(u8, u8, u8)>>,
+    speed: &Rc<Cell<u8>>,
+    brightness: &Rc<Cell<u8>>,
+    zone: RgbZone,
+) -> Rc<dyn Fn()> {
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let (effect_dd, color, speed, brightness) = (
+        effect_dd.clone(),
+        color.clone(),
+        speed.clone(),
+        brightness.clone(),
+    );
+    Rc::new(move || {
+        if zone == RgbZone::All {
+            return;
+        }
+        if let Some(id) = pending.borrow_mut().take() {
+            id.remove();
+        }
+        let pending_c = pending.clone();
+        let (effect_dd, color, speed, brightness) = (
+            effect_dd.clone(),
+            color.clone(),
+            speed.clone(),
+            brightness.clone(),
+        );
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+            pending_c.borrow_mut().take();
+            let id = EFFECT_IDS
+                .get(effect_dd.selected() as usize)
+                .copied()
+                .unwrap_or("static");
+            let (r, g, b) = color.get();
+            apply_lighting(id, r, g, b, speed.get(), brightness.get(), zone);
+        });
+        *pending.borrow_mut() = Some(id);
+    })
+}
+
 fn apply_button(
     effect_dd: &gtk::DropDown,
     color: &Rc<Cell<(u8, u8, u8)>>,
@@ -955,11 +1065,9 @@ fn apply_button(
     zone: RgbZone,
     toast: &adw::ToastOverlay,
 ) -> gtk::Button {
-    let apply = gtk::Button::with_label("Apply");
-    apply.add_css_class("suggested-action");
-    tip(
-        &apply,
-        "Send this effect, colour, speed, and brightness to the Spectrum controller now",
+    let apply = primary_button_tip(
+        "Use on all lights",
+        Some("Send this effect, colour, speed and brightness to every light now"),
     );
     let effect_dd_c = effect_dd.clone();
     let color_a = color.clone();
@@ -972,28 +1080,20 @@ fn apply_button(
         let (r, g, b) = color_a.get();
         apply_lighting(id, r, g, b, speed_a.get(), brightness_a.get(), zone);
         let label = EFFECT_LABELS.get(idx).copied().unwrap_or("Effect");
-        let t = adw::Toast::new(&format!("{label} → {}", zone.display_name()));
+        let msg = if id == "off" {
+            format!("{} off", zone.display_name())
+        } else {
+            format!(
+                "{label} on {}, {}",
+                zone.display_name(),
+                level_label(brightness_a.get())
+            )
+        };
+        let t = adw::Toast::new(&msg);
         t.set_timeout(2);
         toast_a.add_toast(t);
     });
     apply
-}
-
-fn parse_hex(s: &str) -> Option<(u8, u8, u8)> {
-    let t = s.trim().trim_start_matches('#');
-    // Byte-length checks don't imply char boundaries: reject non-ASCII before
-    // slicing so multibyte input (e.g. "äää", exactly 6 bytes) can't panic.
-    if !t.is_ascii() {
-        return None;
-    }
-    if t.len() != 6 {
-        return None;
-    }
-    Some((
-        u8::from_str_radix(&t[0..2], 16).ok()?,
-        u8::from_str_radix(&t[2..4], 16).ok()?,
-        u8::from_str_radix(&t[4..6], 16).ok()?,
-    ))
 }
 
 fn apply_lighting(effect: &str, r: u8, g: u8, b: u8, speed: u8, brightness: u8, zone: RgbZone) {
@@ -1011,34 +1111,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_hex_table() {
-        #[allow(clippy::type_complexity)]
-        let cases: &[(&str, Option<(u8, u8, u8)>)] = &[
-            ("#FF8000", Some((255, 128, 0))),
-            ("ff8000", Some((255, 128, 0))),
-            ("  #ff8000 ", Some((255, 128, 0))), // surrounding whitespace trimmed
-            ("", None),                          // empty
-            ("#", None),                         // hash only
-            ("FF80", None),                      // too short
-            ("FF80000", None),                   // too long
-            ("##FF8000", Some((255, 128, 0))),   // all leading hashes trimmed
-            ("GG8000", None),                    // non-hex first pair
-            ("FF80G0", None),                    // non-hex last pair
-            ("€€€", None),                       // multibyte UTF-8 — must not panic
-            ("äää", None), // multibyte UTF-8, exactly 6 bytes — must not panic
-        ];
-        for (input, expected) in cases {
-            assert_eq!(parse_hex(input), *expected, "input {input:?}");
-        }
-    }
-
-    #[test]
-    fn parse_hex_multibyte_never_panics() {
-        // Regression: any non-ASCII input must return None instead of slicing
-        // through a multi-byte char boundary.
-        for input in ["äää", "€€€", "🦀🦀", "#äää", "FF€€00"] {
-            assert!(parse_hex(input).is_none(), "input {input:?}");
-        }
+    fn spectrum_levels_read_as_percent() {
+        assert_eq!(level_label(0), "Off");
+        assert_eq!(level_label(1), "11%");
+        assert_eq!(level_label(5), "56%");
+        assert_eq!(level_label(9), "100%");
     }
 
     #[test]

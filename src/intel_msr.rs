@@ -129,7 +129,7 @@ pub fn planes() -> Vec<Plane> {
 pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
     log::debug!("intel_msr: set_offset plane='{plane}' {mv} mV");
     if !PLANES.contains(&plane) {
-        log::debug!("intel_msr: set_offset '{plane}' rejected — unknown plane");
+        log::debug!("intel_msr: set_offset '{plane}' rejected: unknown plane");
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!(
@@ -147,7 +147,7 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
         Some(true) => {}
         _ => {
             log::debug!(
-                "intel_msr: set_offset plane '{plane}' rejected — offset control not supported \
+                "intel_msr: set_offset plane '{plane}' rejected: offset control not supported \
                  (supported={supported:?}, path {supported_path})"
             );
             return Err(io::Error::new(
@@ -167,7 +167,7 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
     if let Some(max_ov) = max_overvolt {
         if mv > max_ov as i32 {
             log::debug!(
-                "intel_msr: set_offset plane '{plane}' rejected — {mv} mV exceeds \
+                "intel_msr: set_offset plane '{plane}' rejected: {mv} mV exceeds \
                  max_overvolt {max_ov} mV"
             );
             return Err(io::Error::new(
@@ -183,7 +183,7 @@ pub fn set_offset(plane: &str, mv: i32) -> io::Result<()> {
         // `max_undervolt` is a magnitude (e.g. 200 means -200 mV is the limit).
         if mv < 0 && (-(mv as i64) as u32) > max_uv {
             log::debug!(
-                "intel_msr: set_offset plane '{plane}' rejected — {mv} mV exceeds \
+                "intel_msr: set_offset plane '{plane}' rejected: {mv} mV exceeds \
                  max_undervolt {max_uv} mV"
             );
             return Err(io::Error::new(

@@ -438,15 +438,26 @@ if [[ "$PREFIX" == /usr ]]; then
 fi
 info "Installing PolicyKit setup helper to ${SETUP_PREFIX}/libexec …"
 sudo_run install -Dm755 "$BIN_SETUP" "${SETUP_PREFIX}/libexec/legion-control-setup"
+# ryzen_smu source is always shipped so Settings → Setup can build it later;
+# the DKMS build itself stays opt-in (--with-ryzen-smu).
+if [[ -f "$ROOT/third_party/ryzen_smu/Makefile" && -f "$ROOT/third_party/ryzen_smu/dkms.conf" ]]; then
+  sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
+  sudo_run cp -a "$ROOT/third_party/ryzen_smu/." "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
+fi
 sudo_run install -Dm644 "$ROOT/data/polkit/com.encomjp.legion-control.policy" \
   /usr/share/polkit-1/actions/com.encomjp.legion-control.policy
 ok "PolicyKit helper installed"
 
-# Keep ~/.local/bin copy for convenience when using --user or as fallback
+# A system-wide install must not leave copies in ~/.local/bin: that directory
+# comes first in PATH and nothing ever updates it, so older installers'
+# "convenience" copies shadowed every later upgrade. Remove them.
 if [[ "$PREFIX" != "$USER_PREFIX" ]]; then
-  mkdir -p "${USER_PREFIX}/bin"
-  install -Dm755 "$BIN_CLI"    "${USER_PREFIX}/bin/legion-cli"
-  install -Dm755 "$BIN_GUI"    "${USER_PREFIX}/bin/legion-settings"
+  for b in legion-cli legion-settings; do
+    if [[ -f "${USER_PREFIX}/bin/$b" ]]; then
+      rm -f "${USER_PREFIX}/bin/$b"
+      warn "Removed stale ${USER_PREFIX}/bin/$b (it shadowed the system install)"
+    fi
+  done
 fi
 
 # ─── legion group ───────────────────────────────────────────────────────────
@@ -479,6 +490,7 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
   DESKTOP_SRC="$ROOT/data/gui/com.encomjp.legion-settings.desktop"
   APP_ICON="$ROOT/data/icons/app-mark.svg"
   TRAY_ICON="$ROOT/data/icons/tray.svg"
+  TRAY_MODES=(quiet balanced performance extreme)
   if [[ -f "$DESKTOP_SRC" ]]; then
     info "Installing desktop menu entry…"
     if [[ "$PREFIX" == /usr* ]]; then
@@ -488,6 +500,10 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
         "${PREFIX}/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
       sudo_run install -Dm644 "$TRAY_ICON" \
         "${PREFIX}/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+      for m in "${TRAY_MODES[@]}"; do
+        sudo_run install -Dm644 "$ROOT/data/icons/tray-$m.svg" \
+          "${PREFIX}/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$m.svg"
+      done
       if need_cmd gtk-update-icon-cache; then
         sudo_run gtk-update-icon-cache -f -t "${PREFIX}/share/icons/hicolor" || true
       fi
@@ -498,6 +514,10 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
         "${HOME}/.local/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
       install -Dm644 "$TRAY_ICON" \
         "${HOME}/.local/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+      for m in "${TRAY_MODES[@]}"; do
+        install -Dm644 "$ROOT/data/icons/tray-$m.svg" \
+          "${HOME}/.local/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$m.svg"
+      done
       if need_cmd gtk-update-icon-cache; then
         gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" || true
       fi
@@ -551,7 +571,9 @@ if [[ "$DO_DAEMON" -eq 1 ]]; then
     sudo_run install -Dm755 "$BIN_DAEMON" /usr/local/bin/legion-daemon
   fi
   sudo_run systemctl daemon-reload
-  sudo_run systemctl enable --now legion-control
+  sudo_run systemctl enable legion-control
+  # restart, not start: an upgrade must replace the already-running daemon.
+  sudo_run systemctl restart legion-control
   sleep 0.4
   if systemctl is-active --quiet legion-control; then
     ok "Daemon running: systemctl status legion-control"
@@ -588,9 +610,6 @@ if [[ "$DO_RYZEN_SMU" -eq 1 ]]; then
   if [[ ! -f "$SMU_SRC/Makefile" || ! -f "$SMU_SRC/dkms.conf" ]]; then
     die "Bundled ryzen_smu source is missing under third_party/ryzen_smu/"
   fi
-  sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
-  sudo_run cp -a "$ROOT/third_party/ryzen_smu/." \
-    "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
   sudo_run "${SETUP_PREFIX}/libexec/legion-control-setup" install-ryzen-smu
   if [[ -d /sys/kernel/ryzen_smu_drv ]]; then
     ok "ryzen_smu loaded — no tuning value was written"

@@ -3,14 +3,14 @@
 Live telemetry and quick controls for Lenovo Legion laptops.
 
 ## Features
-- **Circular temperature gauges** — optional animated CPU and dGPU temperature arcs with color zones (green/yellow/orange/red)
-- **System Monitor card** — CPU and dGPU rows with temperatures, fan values, and dGPU power when available
-- **Battery bar** — animated fill with charging pulse, watts, and charge-limit label
-- **Quick controls** — click to cycle Profile, CPU Fan, GPU Fan, and Charge Limit
-- **Compact panel mode** — small icon + color-coded CPU temperature in your panel
-- **Daemon status** — compact tooltip status for the legion-control service
-- **Configurable** — refresh interval, gauges toggle, and a sparkline setting (the current main view does not instantiate a sparkline)
-- **Theme-aware** — uses Kirigami colors, adapts to Breeze Dark / Light
+- **Panel chip (compact view)** — power-mode colour dot, CPU temperature and a fan glyph. Works in horizontal and vertical panels. Click to expand, **scroll to cycle power modes**, hover for a tooltip with mode, temperatures, fans and battery.
+- **Power mode selector** — Quiet / Balanced / Performance / Max power (max-power) segmented control. Mode colours: Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Max power/Custom `#8E5BD6`.
+- **CPU / GPU / Fans cards** — temperature, power, optional sparklines, GPU (MUX) mode label.
+- **Fan rows** — live RPM for CPU and GPU fans with an `auto` / `manual` badge; click a row to step through manual presets (auto, 3000, 3500, 4000, 4500 RPM). "Fans · auto" restores all fans to auto.
+- **Battery bar** with charge limit (click the limit to cycle 100 / 80 / 60 %).
+- **Quick buttons** — Keyboard light on/off, Set fans to automatic, **Fn lock** switch (shown only when `legion-cli fn-lock` reports support), read-only **GPU mode** label (`legion-cli gpu-mode`), and **Open Legion Control**.
+- **Configurable** — refresh interval, CPU/GPU/Fans cards toggle, sparklines toggle.
+- **Theme-aware** — Kirigami colours, adapts to Breeze Dark / Light.
 
 ## Install
 ```bash
@@ -24,7 +24,7 @@ Or manually:
 kpackagetool6 --type Plasma/Applet -i kde-widget/package
 ```
 
-Then right-click desktop → Add Widgets → search "Legion Control".
+Then right-click desktop or panel → Add Widgets → search "Legion Control". The installer never restarts Plasma; if an updated widget does not refresh, re-add it or restart `plasmashell` yourself.
 
 ## Uninstall
 ```bash
@@ -36,6 +36,9 @@ Then right-click desktop → Add Widgets → search "Legion Control".
 - `legion-cli` installed in one of the widget's searched paths: `/usr/local/bin/legion-cli`, `/usr/bin/legion-cli`, or `~/.local/bin/legion-cli`
 - `legion-daemon` running (`systemctl is-active legion-control`)
 
+## Command safety
+All writes go through `legion-command.sh`, which only forwards a fixed whitelist: `set-profile {quiet|balanced|performance|max-power|custom}`, `set-fan {1|2} {0|3000|3500|4000|4500}`, `fan-auto`, `charge-limit {60|80|100}`, `set-kbd {0|1|2}`, `fn-lock [on|off]`, and read-only `status|info|profile|battery|fan|kbd|gpu-mode`. Anything else exits 64 without running `legion-cli`.
+
 ## Files
 ```
 kde-widget/
@@ -46,13 +49,16 @@ kde-widget/
 └── package/
     ├── metadata.json
     └── contents/
-        ├── config/main.xml
+        ├── config/            # config.qml, configGeneral.qml, main.xml
         └── ui/
-            ├── main.qml          # Main plasmoid
-            ├── Gauge.qml          # Circular temp gauge
-            ├── Sparkline.qml      # Reusable mini history chart (not instantiated by main.qml)
-            ├── MetricCard.qml     # Reusable metric card (not instantiated by main.qml)
-            ├── QuickControl.qml   # Clickable cycle control
-            ├── BatteryBar.qml     # Animated battery section
-            └── legion-poll.sh     # Sensor data poller
+            ├── main.qml          # PlasmoidItem: compact chip + expanded popup
+            ├── AppMark.qml       # Brand mark drawn in QML (no SVG file dependency)
+            ├── MiniCard.qml      # CPU / GPU / Fans card
+            ├── Sparkline.qml     # Mini history chart used inside cards
+            ├── legion-poll.sh    # Sensor poller (status/profile/battery/kbd)
+            ├── legion-info.sh    # One-shot: CPU/GPU names, Fn Lock, GPU mode
+            ├── legion-command.sh # Whitelisted legion-cli wrapper
+            ├── legion-settings.sh
+            └── icons/
 ```
+`BatteryBar`, `PerfCard`, `QuickControl`, `SectionCard` and `HistoryGraph` are legacy components from the previous layout and are no longer used by `main.qml`.

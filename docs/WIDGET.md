@@ -21,9 +21,8 @@ kde-widget/
         └── ui/
             ├── main.qml
             ├── BatteryBar.qml
-            ├── Gauge.qml
-            ├── MetricCard.qml
-            ├── MonitorRow.qml
+            ├── AppMark.qml
+            ├── MiniCard.qml
             ├── QuickControl.qml
             ├── SectionCard.qml
             ├── Sparkline.qml
@@ -38,26 +37,15 @@ kde-widget/
 
 ## Current Plasma layout
 
-The root item in [`kde-widget/package/contents/ui/main.qml`](../kde-widget/package/contents/ui/main.qml) is a `PlasmoidItem` with two representations.
+The root item in [`kde-widget/package/contents/ui/main.qml`](../kde-widget/package/contents/ui/main.qml) is a `PlasmoidItem` with two representations. `switchWidth/switchHeight` keep the full popup on the desktop and use the compact chip in panels.
 
 ### Compact panel representation
 
-The compact representation is a clickable `MouseArea`. It shows the CPU SVG icon and CPU temperature, and clicking it toggles the expanded representation. The CPU text is colored using the current CPU temperature: above 90 °C uses the negative theme color, above 75 °C uses the neutral theme color, and lower values use the normal text color.
-
-Its tooltip can include CPU and dGPU temperatures, CPU fan speed, battery percentage, profile, and `Daemon offline`. The tooltip is visible while the compact item is hovered.
+A chip with a power-mode colour dot (Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Max power/Custom `#8E5BD6`), the CPU temperature (red at 90 °C and above) and a fan glyph. It lays out as a row in horizontal panels and a column in vertical panels (`Plasmoid.formFactor === PlasmaCore.Types.Vertical`). Click or Enter toggles the popup; mouse-wheel scrolling cycles power modes. The `ToolTipArea` shows mode, CPU/dGPU temperatures and power, fan RPM with auto/manual, and battery.
 
 ### Expanded representation
 
-The expanded representation is a `QQC2.ScrollView` with a preferred width of 26 Kirigami grid units and minimum/maximum widths of 24/30 grid units. Its column contains, in order:
-
-1. Optional circular CPU and dGPU temperature gauges.
-2. A **System Monitor** `SectionCard` with CPU and dGPU `MonitorRow`s.
-3. A **Battery** `SectionCard` with one `BatteryBar`.
-4. A **Controls** `SectionCard` with four `QuickControl`s: Profile, CPU Fan, GPU Fan, and Charge Limit.
-
-`SectionCard` supplies the rounded, translucent background and subtle border. `MonitorRow` renders an icon, label, temperature, optional secondary/tertiary values, and fan value. The dGPU row can show power in watts; unavailable/negative dGPU temperature is muted. `BatteryBar` shows percentage, charging/discharging watts when available, an animated fill bar, and a charge-limit label when the limit is not 100%.
-
-`Gauge.qml` draws a 270-degree animated arc. In `main.qml`, the gauges use a 20–100 °C range and an 80-pixel size. `Sparkline.qml` supports up to 30 points and normalizes its polyline against the current sample range. `MetricCard.qml` can combine a value with a sparkline, but neither `MetricCard` nor `Sparkline` is currently instantiated by `main.qml`; do not describe them as visible in the current expanded layout.
+Header (brand mark drawn by `AppMark.qml`, not an SVG `Image`, plus health text), the power-mode segmented control, CPU/GPU/Fans `MiniCard`s (optional sparklines), CPU/GPU fan rows with auto/manual badges, the battery bar with charge limit, Keyboard light and Fans auto buttons, a GPU mode label with the Fn Lock switch, and the **Open Legion Control** button. `Buttons are plain PlasmaComponents buttons.
 
 ## Polling and data contract
 
@@ -71,7 +59,7 @@ The poller searches for an executable `legion-cli` in this order:
 $HOME/.local/bin/legion-cli
 ```
 
-It runs `legion-cli status`, `fan`, `profile`, `kbd`, and `logo`. Battery values are read directly from the first `/sys/class/power_supply/BAT*` directory found. The helper prints newline-delimited `KEY=value` records, which `main.qml` parses.
+It runs `legion-cli status`, `profile`, `battery` and `kbd` per tick. Battery values are read directly from the first `/sys/class/power_supply/BAT*` directory found. The helper prints newline-delimited `KEY=value` records, which `main.qml` parses.
 
 ### Records consumed by `main.qml`
 
@@ -91,9 +79,10 @@ It runs `legion-cli status`, `fan`, `profile`, `kbd`, and `logo`. Battery values
 | `BAT_STATUS` | Battery label and charging/discharging presentation. |
 | `CHARGE_LIMIT` | Battery charge-limit label and Charge Limit control. `100` is stored as an empty display value. |
 | `BAT_POWER` | Charging/discharging watts. |
-| `PROFILE` | Compact tooltip and Profile control. |
-| `KBD_BRIGHTNESS` | Stored in `kbdBrightness`; not rendered. |
-| `LOGO` | Stored in `logoOn`; not rendered. |
+| `PROFILE` | Panel chip colour/tooltip and the power-mode selector. |
+| `KBD_LEVEL` | Keyboard light button state (poll). |
+| `FN_LOCK` | From `legion-info.sh`; absent when unsupported, which hides the Fn Lock switch. |
+| `GPU_MODE` | From `legion-info.sh`; read-only GPU mode label. |
 
 The poller extracts CPU temperature from a `Tctl` line, dGPU temperature/power from lines containing `dGPU`, and fan values from lines such as `CPU fan: <RPM>`. `legion-info.sh` performs a one-shot `legion-cli info` call and supplies `CPU_NAME` and `GPU_NAME`; `main.qml` disconnects that source after receiving the result.
 
@@ -101,16 +90,19 @@ After a control write, `main.qml` suppresses selected polled values for 2.5 seco
 
 ## Controls
 
-The visible controls and their exact cycling behavior are implemented in `main.qml`:
+All writes go through [`legion-command.sh`](../kde-widget/package/contents/ui/legion-command.sh), invoked via `bash` with a shell-quoted path. The helper only forwards a fixed whitelist and exits 64 for anything else:
 
-- **Profile** cycles `quiet`, `balanced`, `performance`, `max-power`, and `custom`, then runs `legion-cli set-profile <profile>`.
-- **CPU Fan** cycles `0`, `3000`, `3500`, `4000`, and `4500`, then runs `legion-cli set-fan 1 <rpm>`.
-- **GPU Fan** uses the same RPM presets and runs `legion-cli set-fan 2 <rpm>`.
-- **Charge Limit** cycles `100`, `80`, and `60`, then runs `legion-cli charge-limit <percentage>`.
+| Widget action | Command |
+| --- | --- |
+| Power mode segment / scroll on the panel chip | `set-profile quiet\|balanced\|performance\|max-power` (Max power = `max-power`; `custom` is shown but not selectable) |
+| Fan row click | `set-fan 1\|2 0\|3000\|3500\|4000\|4500` (cycles presets; 0 = auto) |
+| Fans · auto | `fan-auto` |
+| Charge limit | `charge-limit 100\|80\|60` (click the limit text to cycle) |
+| Keyboard light | `set-kbd 0` / `set-kbd 2` |
+| Fn Lock switch | `fn-lock on\|off` |
+| Open Legion Control | `legion-settings.sh` |
 
-The widget invokes [`legion-command.sh`](../kde-widget/package/contents/ui/legion-command.sh) through `bash`. That helper looks for the same three `legion-cli` locations and exits with status 127 if it cannot find the CLI. The CLI command definitions, including fan IDs 1 (CPU), 2 (GPU), and 4 (Aux), are in [`src/cli/main.rs`](../src/cli/main.rs).
-
-Although the poller reads keyboard brightness and logo state, the current `main.qml` does not render controls for them. [`legion-settings.sh`](../kde-widget/package/contents/ui/legion-settings.sh) exists in the package but is not invoked by `main.qml`.
+Fan auto/manual is tracked from what the widget last requested, because the daemon only reports live RPM; an external change is not reflected until the widget is reloaded. Fn Lock support and the GPU mode label are read once by `legion-info.sh` (`legion-cli fn-lock`, `legion-cli gpu-mode`); the switch is hidden when `fn-lock` fails as unsupported, and the GPU mode label is read-only. The keyboard backlight level is polled each tick (`KBD_LEVEL`).
 
 ## Configuration
 

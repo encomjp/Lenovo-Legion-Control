@@ -528,7 +528,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
     let entries = match std::fs::read_dir("/sys/class/hidraw") {
         Ok(entries) => entries,
         Err(e) => {
-            log::warn!("spectrum: hidraw scan aborted — cannot list /sys/class/hidraw: {e}");
+            log::warn!("spectrum: hidraw scan aborted: cannot list /sys/class/hidraw: {e}");
             return None;
         }
     };
@@ -539,7 +539,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let Ok(mut cur) = std::fs::canonicalize(entry.path().join("device")) else {
-            log::trace!("hidraw scan: {name}: no resolvable sysfs device node — skipping");
+            log::trace!("hidraw scan: {name}: no resolvable sysfs device node: skipping");
             continue;
         };
         let mut matched = false;
@@ -570,7 +570,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                     }
                     _ => {
                         log::trace!(
-                            "hidraw scan: {name}: unreadable idVendor/idProduct (mid-unplug?) — skipping branch"
+                            "hidraw scan: {name}: unreadable idVendor/idProduct (mid-unplug?): skipping branch"
                         );
                         break;
                     }
@@ -582,7 +582,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             }
         }
         if !matched {
-            log::trace!("hidraw scan: {name}: rejected — not the Spectrum USB interface");
+            log::trace!("hidraw scan: {name}: rejected: not the Spectrum USB interface");
             continue;
         }
         let path = PathBuf::from(format!("/dev/{name}"));
@@ -597,13 +597,13 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             });
             if confirmed {
                 log::debug!(
-                    "hidraw scan: {name}: 048d:{found_pid} descriptor confirms Spectrum (960 B) — candidate {}",
+                    "hidraw scan: {name}: 048d:{found_pid} descriptor confirms Spectrum (960 B): candidate {}",
                     path.display()
                 );
                 sibling.get_or_insert(path);
             } else {
                 log::trace!(
-                    "hidraw scan: {name}: 048d:{found_pid} descriptor is not Spectrum — never written"
+                    "hidraw scan: {name}: 048d:{found_pid} descriptor is not Spectrum: never written"
                 );
             }
             continue;
@@ -614,27 +614,27 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                 .any(|w| w == SPECTRUM_USAGE)
             {
                 log::debug!(
-                    "hidraw scan: {name}: Spectrum usage page 0xff89 present — selected {}",
+                    "hidraw scan: {name}: Spectrum usage page 0xff89 present: selected {}",
                     path.display()
                 );
                 return Some(path);
             }
             log::trace!(
-                "hidraw scan: {name}: Spectrum usage page absent from {}-byte report descriptor — kept as fallback",
+                "hidraw scan: {name}: Spectrum usage page absent from {}-byte report descriptor: kept as fallback",
                 desc.len()
             );
         } else {
-            log::trace!("hidraw scan: {name}: report_descriptor unreadable — kept as fallback");
+            log::trace!("hidraw scan: {name}: report_descriptor unreadable: kept as fallback");
         }
         fallback = Some(path);
     }
     let fallback = fallback.or(sibling);
     match &fallback {
         Some(p) => log::debug!(
-            "hidraw scan: done — no usage-page match, falling back to {}",
+            "hidraw scan: done: no usage-page match, falling back to {}",
             p.display()
         ),
-        None => log::debug!("hidraw scan: done — no {VID}:{PID} candidate found"),
+        None => log::debug!("hidraw scan: done: no {VID}:{PID} candidate found"),
     }
     fallback
 }
@@ -666,7 +666,7 @@ fn hid_lock() -> &'static Mutex<()> {
 impl SpectrumDevice {
     fn open() -> Result<Self, String> {
         let path = find_spectrum_hidraw().ok_or_else(|| {
-            "Spectrum HID (048d:c197 or compatible ITE controller) not found — is udev rule installed?".to_string()
+            "Spectrum HID (048d:c197 or compatible ITE controller) not found: is udev rule installed?".to_string()
         })?;
         // Blocking open — matches spectrum-ctl.py (no O_NONBLOCK).
         let file = OpenOptions::new()
@@ -687,10 +687,10 @@ impl SpectrumDevice {
         // controller. Surface the error so callers can reduce the payload.
         if data.len() > REPORT_SIZE {
             let msg = format!(
-                "HID feature report too large: {} bytes (max {REPORT_SIZE}) — fewer painted keys or simpler effect",
+                "HID feature report too large: {} bytes (max {REPORT_SIZE}): fewer painted keys or simpler effect",
                 data.len()
             );
-            log::warn!("spectrum: send rejected — {msg}");
+            log::warn!("spectrum: send rejected: {msg}");
             return Err(msg);
         }
         let opcode = data.get(1).copied().unwrap_or(0);
@@ -858,7 +858,7 @@ fn send_effects(dev: &SpectrumDevice, profile: u8, effects: &[Vec<u8>]) -> Resul
     let result = dev.set_feature(&packet);
     if result.is_ok() {
         log::debug!(
-            "spectrum: effect packet applied — profile={profile} effects={}",
+            "spectrum: effect packet applied: profile={profile} effects={}",
             effects.len()
         );
     }
@@ -901,7 +901,7 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
     if get_brightness_raw(dev)? < 1 {
         let level = cfg.brightness.max(1);
         log::debug!(
-            "spectrum: apply_config: device reads dark — raising brightness to {level} first"
+            "spectrum: apply_config: device reads dark: raising brightness to {level} first"
         );
         set_brightness_raw(dev, level)?;
     }
@@ -917,7 +917,7 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
 
     if cfg.lighting_mode == "per-key" && !cfg.per_key.is_empty() {
         log::debug!(
-            "spectrum: apply_config: per-key mode — painting {} named key(s)",
+            "spectrum: apply_config: per-key mode: painting {} named key(s)",
             cfg.per_key.len()
         );
         // Group painted keys by colour → one static effect per colour.
@@ -938,7 +938,7 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
                         .push(code);
                 }
                 None => log::warn!(
-                    "spectrum: per-key paint skipped — {name:?} does not resolve to a Spectrum code"
+                    "spectrum: per-key paint skipped: {name:?} does not resolve to a Spectrum code"
                 ),
             }
         }
@@ -959,7 +959,7 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
             push(&mut blobs, &mut n, blob);
         } else {
             log::trace!(
-                "spectrum: apply_config: every keyboard key painted — no blackout layer needed"
+                "spectrum: apply_config: every keyboard key painted: no blackout layer needed"
             );
         }
         for ((r, g, b), keys) in by_color {
@@ -979,7 +979,7 @@ fn apply_config_on_dev(dev: &SpectrumDevice, cfg: &crate::config::AppConfig) -> 
     } else {
         if cfg.lighting_mode == "per-key" {
             log::debug!(
-                "spectrum: apply_config: per-key mode but colour map empty — falling back to zone effects"
+                "spectrum: apply_config: per-key mode but colour map empty: falling back to zone effects"
             );
         }
         let blob = zone_blob(n, "keyboard", &cfg.keyboard, KEYBOARD_KEYS);
@@ -1161,7 +1161,7 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
             absorb(job);
         }
         log::debug!(
-            "spectrum: worker batch drain: 1 + {drained} coalesced job(s) — zones={:?} restore={} waiters={}",
+            "spectrum: worker batch drain: 1 + {drained} coalesced job(s): zones={:?} restore={} waiters={}",
             effects.keys().map(|z| z.name()).collect::<Vec<_>>(),
             restore,
             waiters.len()
@@ -1182,7 +1182,7 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
                     crate::config::set_brightness(level);
                 } else {
                     log::debug!(
-                        "spectrum: worker ignoring queued brightness 0 — effect batch present"
+                        "spectrum: worker ignoring queued brightness 0: effect batch present"
                     );
                 }
             }
@@ -1228,7 +1228,7 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
             Ok(()) => log::debug!("spectrum: worker batch complete"),
             // No Spectrum controller on this machine is a no-op, not a fault.
             Err(_) if !spectrum_present() => {
-                log::debug!("spectrum: worker batch skipped — no Spectrum controller present")
+                log::debug!("spectrum: worker batch skipped: no Spectrum controller present")
             }
             Err(e) => log::error!("spectrum: worker batch FAILED: {e}"),
         }
@@ -1498,7 +1498,7 @@ fn find_kbd_led() -> Option<PathBuf> {
             return Some(path);
         }
         log::trace!(
-            "kbd-backlight: candidate {} has no brightness node — trying next",
+            "kbd-backlight: candidate {} has no brightness node: trying next",
             path.display()
         );
     }
@@ -1566,7 +1566,7 @@ pub fn camera_power() -> Option<bool> {
             return Some(enabled);
         }
     }
-    log::trace!("camera: camera_power unreadable — reporting unknown");
+    log::trace!("camera: camera_power unreadable: reporting unknown");
     None
 }
 

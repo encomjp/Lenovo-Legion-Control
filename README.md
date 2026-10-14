@@ -35,84 +35,55 @@
   <img src="docs/assets/made-in-europe.svg" alt="Made in Europe · for everyone" width="320">
 </p>
 
-> **Experimental:** community-developed, no warranty. Hardware writes can affect system state — use with a recovery plan. Screenshots below are captured headless on an isolated `Xvfb :99 + openbox` session (`GDK_BACKEND=x11`, `GSK_RENDERER=cairo`) — your real desktop is never obscured.
+> **Experimental:** community-developed, no warranty. Hardware writes can affect system state — use with a recovery plan. 
 
 ---
 
-### Hero — Home overview on Legion Pro 7 16AFR10H (83RU)
+### Control center on a Legion Pro 7 16AFR10H (83RU)
 
 <p align="center">
-  <a href="docs/assets/screenshots/01-home-overview.png"><img src="docs/assets/screenshots/01-home-overview.png" alt="Home — metric chips, fans, battery, power mode" width="920"></a><br>
-  <sub><b>Home</b> · live chips · Fan overview · Battery · Custom PPT — 1060×680, dark libadwaita, captured offscreen</sub>
-</p>
-
-<p align="center">
-  <a href="docs/assets/screenshots/05-cooling.png"><img src="docs/assets/screenshots/05-cooling.png" alt="Cooling" width="275"></a>
-  <a href="docs/assets/screenshots/06-lighting-keyboard.png"><img src="docs/assets/screenshots/06-lighting-keyboard.png" alt="Lighting keyboard" width="275"></a>
-  <a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" alt="Battery" width="275"></a>
+  <a href="docs/assets/screenshots/01-home-overview.png"><img src="docs/assets/screenshots/01-home-overview.png" alt="Control center: power mode, temperatures, fans, battery, quick toggles" width="920"></a><br>
+  <sub>Power mode, live temperatures, fans, battery and the toggles you use most. Everything else lives on its own page.</sub>
 </p>
 
 ---
 
-## Screenshots — the whole app, no workflow interruption
+## Screenshots
 
-> Every image is a **real 1060×680 window** rendered headless (`Xvfb 1400×900 + openbox`, `LEGION_PAGE=…`, `xwd`→`png`). No compositor grab of your live session — the session stays untouched. Click any thumbnail for full resolution.
+Version 0.2.21 redesigns every page: one button style, plain wording, and no scrolling at the default size, and the window adapts to your screen. Click a thumbnail for full size.
 
 <table>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/01-home-overview.png"><img src="docs/assets/screenshots/01-home-overview.png" width="260" alt="Home"></a><br><b>Home</b><br><sub>chips · fans · battery</sub></td>
-<td align="center"><a href="docs/assets/screenshots/02-cpu-features.png"><img src="docs/assets/screenshots/02-cpu-features.png" width="260" alt="CPU Features"></a><br><b>CPU · Features</b><br><sub>boost · SMT</sub></td>
-<td align="center"><a href="docs/assets/screenshots/03-cpu-tuning.png"><img src="docs/assets/screenshots/03-cpu-tuning.png" width="260" alt="CPU Tuning"></a><br><b>CPU · Tuning</b><br><sub>thermal · CO · stability</sub></td>
+<td align="center"><a href="docs/assets/screenshots/02-cpu-features.png"><img src="docs/assets/screenshots/02-cpu-features.png" width="260" alt="Performance: Features"></a><br><b>Performance: Features</b><br><sub>Boost, hyperthreading, GPU mode</sub></td>
+<td align="center"><a href="docs/assets/screenshots/03-cpu-tuning.png"><img src="docs/assets/screenshots/03-cpu-tuning.png" width="260" alt="Performance: Tuning"></a><br><b>Performance: Tuning</b><br><sub>Temperature limit, Curve Optimizer</sub></td>
+<td align="center"><a href="docs/assets/screenshots/04-cpu-power.png"><img src="docs/assets/screenshots/04-cpu-power.png" width="260" alt="Performance: Power"></a><br><b>Performance: Power</b><br><sub>Custom power limits</sub></td>
 </tr>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/04-cpu-power.png"><img src="docs/assets/screenshots/04-cpu-power.png" width="260" alt="CPU Power"></a><br><b>CPU · Power</b><br><sub>read-only PPT preview</sub></td>
-<td align="center"><a href="docs/assets/screenshots/05-cooling.png"><img src="docs/assets/screenshots/05-cooling.png" width="260" alt="Cooling"></a><br><b>Cooling</b><br><sub>all fans at a glance</sub></td>
-<td align="center"><a href="docs/assets/screenshots/06-lighting-keyboard.png"><img src="docs/assets/screenshots/06-lighting-keyboard.png" width="260" alt="Lighting Keyboard"></a><br><b>Lighting · Keyboard</b><br><sub>zone + per-key</sub></td>
+<td align="center"><a href="docs/assets/screenshots/12-profiles.png"><img src="docs/assets/screenshots/12-profiles.png" width="260" alt="Profiles"></a><br><b>Profiles</b><br><sub>Save and restore a full setup</sub></td>
+<td align="center"><a href="docs/assets/screenshots/05-cooling.png"><img src="docs/assets/screenshots/05-cooling.png" width="260" alt="Cooling"></a><br><b>Cooling</b><br><sub>Fan curve per power mode</sub></td>
+<td align="center"><a href="docs/assets/screenshots/06-lighting-keyboard.png"><img src="docs/assets/screenshots/06-lighting-keyboard.png" width="260" alt="Lighting"></a><br><b>Lighting</b><br><sub>Effect, colour, brightness, per key</sub></td>
 </tr>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/07-lighting-front.png"><img src="docs/assets/screenshots/07-lighting-front.png" width="260" alt="Front"></a><br><b>Lighting · Front</b><br><sub>chin bar</sub></td>
-<td align="center"><a href="docs/assets/screenshots/08-lighting-rear.png"><img src="docs/assets/screenshots/08-lighting-rear.png" width="260" alt="Rear"></a><br><b>Lighting · Rear</b><br><sub>hinge bar</sub></td>
-<td align="center"><a href="docs/assets/screenshots/09-lighting-logo.png"><img src="docs/assets/screenshots/09-lighting-logo.png" width="260" alt="Logo"></a><br><b>Lighting · Logo</b><br><sub>lid star</sub></td>
+<td align="center"><a href="docs/assets/screenshots/10-lighting-more.png"><img src="docs/assets/screenshots/10-lighting-more.png" width="260" alt="Lighting: All lights"></a><br><b>Lighting: All lights</b><br><sub>One effect on every zone</sub></td>
+<td align="center"><a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" width="260" alt="Power"></a><br><b>Power</b><br><sub>Battery, charge limit, Fn lock, USB</sub></td>
+<td align="center"><a href="docs/assets/screenshots/14-health.png"><img src="docs/assets/screenshots/14-health.png" width="260" alt="Health"></a><br><b>Health</b><br><sub>Self-check, speakers, keyboard lighting</sub></td>
 </tr>
 <tr>
-<td align="center"><a href="docs/assets/screenshots/10-lighting-more.png"><img src="docs/assets/screenshots/10-lighting-more.png" width="260" alt="More"></a><br><b>Lighting · More</b><br><sub>brightness · all zones</sub></td>
-<td align="center"><a href="docs/assets/screenshots/11-battery.png"><img src="docs/assets/screenshots/11-battery.png" width="260" alt="Battery"></a><br><b>Battery</b><br><sub>health · limit · status</sub></td>
-<td align="center"><a href="docs/assets/screenshots/12-profiles.png"><img src="docs/assets/screenshots/12-profiles.png" width="260" alt="Profiles"></a><br><b>Profiles</b><br><sub>save · load · preset</sub></td>
-</tr>
-<tr>
-<td align="center"><a href="docs/assets/screenshots/13-settings-setup.png"><img src="docs/assets/screenshots/13-settings-setup.png" width="260" alt="Settings Setup"></a><br><b>Settings · Setup</b><br><sub>updates · daemon · diagnostics</sub></td>
-<td align="center"><a href="docs/assets/screenshots/14-settings-fix.png"><img src="docs/assets/screenshots/14-settings-fix.png" width="260" alt="Settings Fix"></a><br><b>Settings · Fix</b><br><sub>speakers · RGB · udev · logs</sub></td>
-<td align="center"><a href="docs/assets/screenshots/15-settings-hardware.png"><img src="docs/assets/screenshots/15-settings-hardware.png" width="260" alt="Settings Hardware"></a><br><b>Settings · Hardware</b><br><sub>DMI · EC · lighting</sub></td>
-</tr>
-<tr>
-<td align="center"><a href="docs/assets/screenshots/16-settings-help.png"><img src="docs/assets/screenshots/16-settings-help.png" width="260" alt="Settings Help"></a><br><b>Settings · Help</b><br><sub>links · legal</sub></td>
-<td align="center"><a href="docs/assets/screenshots/19-widget.png"><img src="docs/assets/screenshots/19-widget.png" width="260" alt="KDE Plasma widget"></a><br><b>KDE widget</b><br><sub>gauges · controls · plasma</sub></td>
-<td></td>
+<td align="center"><a href="docs/assets/screenshots/13-settings-setup.png"><img src="docs/assets/screenshots/13-settings-setup.png" width="260" alt="Settings"></a><br><b>Settings</b><br><sub>Updates, components, startup</sub></td>
+<td align="center"><a href="docs/assets/screenshots/15-settings-hardware.png"><img src="docs/assets/screenshots/15-settings-hardware.png" width="260" alt="Hardware"></a><br><b>Hardware</b><br><sub>Model, BIOS, CPU, GPU</sub></td>
+<td align="center"><a href="docs/assets/screenshots/16-settings-help.png"><img src="docs/assets/screenshots/16-settings-help.png" width="260" alt="Help"></a><br><b>Help</b><br><sub>Report an issue, legal</sub></td>
 </tr>
 </table>
 
+<p align="center">
+  <a href="docs/assets/screenshots/19-widget.png"><img src="docs/assets/screenshots/19-widget.png" width="260" alt="KDE Plasma widget"></a><br>
+  <b>KDE Plasma widget</b>
+</p>
+
 <details>
-<summary><b>How screenshots are taken without obscuring your workflow</b></summary>
+<summary><b>How these screenshots are made</b></summary>
 
-```bash
-# 1. Isolate — virtual display, no grab of your real Wayland session
-Xvfb :99 -screen 0 1400x900x24 -ac &
-DISPLAY=:99 openbox --sm-disable &
-
-# 2. Run each page headless, with a private window
-DISPLAY=:99 WAYLAND_DISPLAY= GDK_BACKEND=x11 GSK_RENDERER=cairo \
-  LEGION_PAGE=overview legion-settings &
-
-# 3. Capture the 1060×680 CSD window directly
-WIN=$(DISPLAY=:99 xdotool search --onlyvisible --name "Legion Control")
-DISPLAY=:99 xwd -id $WIN -out page.xwd
-magick page.xwd page.png
-
-# 4. Real session is untouched — the hidden tray instance is
-#    briefly replaced and then restarted automatically
-```
-
-All 17 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are produced this way. Run `scripts/capture-screenshots.sh` to regenerate.
+`scripts/capture-screenshots.sh [dark|light]` renders each page on a private Xvfb display with GTK forced to X11, so nothing opens on your desktop and your tray instance keeps running. It uses a temporary copy of your settings with diagnostics turned off.
 
 </details>
 

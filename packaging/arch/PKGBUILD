@@ -1,5 +1,5 @@
 pkgname=legion-control
-pkgver=0.2.17
+pkgver=0.2.21
 pkgrel=1
 pkgdesc='Lenovo Legion hardware control daemon, CLI, GTK app, and KDE widget'
 arch=('x86_64')
@@ -48,5 +48,9 @@ package() {
     "${pkgdir}/usr/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
   install -Dm644 data/icons/tray.svg \
     "${pkgdir}/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+  for mode in quiet balanced performance extreme; do
+    install -Dm644 "data/icons/tray-${mode}.svg" \
+      "${pkgdir}/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-${mode}.svg"
+  done
   install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
 }

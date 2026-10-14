@@ -52,7 +52,7 @@ The executable is [`src/settings/main.rs`](../src/settings/main.rs), and its Car
 - **Battery** — battery status/details and charge limit.
 - **Fix** — speaker diagnostics/repair, Spectrum RGB recovery, and daemon logs.
 - **Profiles** — named presets and restore-on-launch.
-- **About** — setup, hardware, storage, and help pages.
+- **Settings** — setup, hardware, storage, and help pages.
 
 If the daemon is offline, the GUI displays a service banner. Its **Start daemon** action tries `systemctl start legion-control`, then `run0 systemctl start legion-control`, then `pkexec systemctl start legion-control`, and waits for the control socket. The GUI disables controls that require the daemon while it is offline. Battery readouts and some local RGB operations can still work directly through `legion_core`.
 

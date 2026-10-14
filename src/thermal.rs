@@ -48,7 +48,7 @@ pub fn validate(max_temp: u8, acknowledge: bool) -> Result<(), String> {
         return Err(format!("max_temp {max_temp} out of 70..=98"));
     }
     if max_temp >= 96 && !acknowledge {
-        return Err("max_temp 96–98°C exceeds TjMax 95°C — pass --acknowledge".into());
+        return Err("max_temp 96–98°C exceeds TjMax 95°C: pass --acknowledge".into());
     }
     Ok(())
 }
@@ -101,7 +101,7 @@ impl TempFilter {
         if raw_mc >= limit_mc + URGENT_OVERSHOOT_MC {
             self.smoothed = Some(raw_mc);
             log::debug!(
-                "thermal: TempFilter urgent bypass: raw {raw_mc} ≥ limit {limit_mc} + {URGENT_OVERSHOOT_MC} — filter re-seeded"
+                "thermal: TempFilter urgent bypass: raw {raw_mc} ≥ limit {limit_mc} + {URGENT_OVERSHOOT_MC}: filter re-seeded"
             );
             raw_mc
         } else {
@@ -365,7 +365,7 @@ pub fn write_all_cpus(freq: u32) -> Result<(), String> {
             }
         }
     }
-    log::debug!("thermal: write_all_cpus({freq}) — {ok} write(s) ok, {failed} failed");
+    log::debug!("thermal: write_all_cpus({freq}): {ok} write(s) ok, {failed} failed");
     if !found {
         log::error!(
             "thermal: no cpu*/cpufreq/scaling_max_freq found under {}",
@@ -377,7 +377,7 @@ pub fn write_all_cpus(freq: u32) -> Result<(), String> {
         log::error!("thermal: write_all_cpus({freq}) failed: {e}");
         return Err(e);
     }
-    log::debug!("thermal: write_all_cpus({freq}) ok — all policy files written");
+    log::debug!("thermal: write_all_cpus({freq}) ok: all policy files written");
     Ok(())
 }
 

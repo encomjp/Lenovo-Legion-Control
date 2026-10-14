@@ -14,6 +14,7 @@ pub mod cpu_ids;
 pub mod device;
 pub mod dgpu;
 pub mod diagnostics;
+pub mod fan_curve;
 pub mod fans;
 pub mod fourzone;
 pub mod gpu_ids;

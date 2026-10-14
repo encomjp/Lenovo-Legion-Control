@@ -288,6 +288,11 @@ enum Commands {
         #[arg(long)]
         i_understand_instability_risk: bool,
     },
+    /// Software fan curve (per power mode): show | set | enable | disable
+    FanCurve {
+        #[command(subcommand)]
+        action: Option<FanCurveCmd>,
+    },
     /// Thermal throttle control
     Thermal {
         #[command(subcommand)]
@@ -319,6 +324,25 @@ enum Commands {
         #[arg(long, requires = "apply")]
         allow_downgrade: bool,
     },
+    /// Automatic power-mode switching: status | on | off | ac <mode> | battery <mode>
+    AutoMode {
+        #[command(subcommand)]
+        action: Option<AutoModeCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AutoModeCmd {
+    /// Show the stored rules and the live charger state (default)
+    Status,
+    /// Turn automatic switching on
+    On,
+    /// Turn automatic switching off
+    Off,
+    /// Mode while plugged in (quiet, balanced, performance, max-power, custom)
+    Ac { mode: String },
+    /// Mode on battery (quiet, balanced, or performance when supported)
+    Battery { mode: String },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -379,6 +403,26 @@ enum DiagAction {
 }
 
 #[derive(Subcommand)]
+enum FanCurveCmd {
+    /// Show stored curves and live engine status (default)
+    Show,
+    /// Store a curve: 8 `temp:pct` pairs, e.g. 30:0,40:15,50:25,60:38,70:52,80:68,90:86,100:100
+    Set {
+        /// Platform profile (balanced, performance, custom, low-power, …)
+        profile: String,
+        /// 8 comma-separated temp:pct pairs (20–100 °C rising, 0–100 % not falling, last = 100 % at ≥90 °C)
+        points: String,
+        /// Store without enabling
+        #[arg(long)]
+        keep_disabled: bool,
+    },
+    /// Enable the stored (or factory) curve for a profile
+    Enable { profile: String },
+    /// Disable the curve for a profile (fans return to firmware control)
+    Disable { profile: String },
+}
+
+#[derive(Subcommand)]
 enum ThermalCmd {
     /// Show thermal throttle status
     Status,
@@ -416,7 +460,7 @@ fn main() {
                 iteration += 1;
                 log::trace!("watch: iteration {iteration}");
                 print!("\x1B[2J\x1B[H");
-                println!("Legion Control — live sensors (Ctrl+C to quit)\n");
+                println!("Legion Control: live sensors (Ctrl+C to quit)\n");
                 let resp = send_command(DaemonCommand::GetSensors);
                 print_sensors(resp);
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -551,13 +595,13 @@ fn main() {
                     9,
                     z,
                 ) {
-                    Ok(()) => println!("effect → off · {}", z.name()),
+                    Ok(()) => println!("effect → off, {}", z.name()),
                     Err(e) => fail(e),
                 }
             } else if let Some(fx) = legion_core::keyboard::RgbEffect::from_name(&name) {
                 log::debug!("effect: '{name}' matched");
                 match legion_core::keyboard::set_rgb_effect_zone(fx, r, g, b, speed, 9, z) {
-                    Ok(()) => println!("effect → {name} · {}", z.name()),
+                    Ok(()) => println!("effect → {name}, {}", z.name()),
                     Err(e) => fail(e),
                 }
             } else {
@@ -643,7 +687,7 @@ fn main() {
                         println!("daemon      v{dver} (in sync with CLI v{cli_ver})");
                     }
                     Ok(dver) => {
-                        println!("daemon      v{dver} (MISMATCH: CLI is v{cli_ver} — restart daemon!)");
+                        println!("daemon      v{dver} (MISMATCH: CLI is v{cli_ver}: restart daemon!)");
                     }
                     Err(e) => {
                         println!("daemon      unknown / legacy ({e})");
@@ -684,7 +728,7 @@ fn main() {
                 }
                 for f in &info.capabilities.fans {
                     println!(
-                        "fan{:<8} {} · {}–{} RPM · now {}",
+                        "fan{:<8} {}, {}–{} RPM, now {}",
                         f.id, f.title, f.min_rpm, f.max_rpm, f.current_rpm
                     );
                 }
@@ -846,7 +890,7 @@ fn main() {
             }) = send_command(DaemonCommand::GetSmt)
             {
                 println!(
-                    "now         {} · {logical_cpus} logical CPUs",
+                    "now         {}, {logical_cpus} logical CPUs",
                     if active { "on" } else { "off" }
                 );
             }
@@ -891,7 +935,7 @@ fn main() {
             }
             other => {
                 if let Ok(DaemonResponse::Error(e)) | Err(e) = other {
-                    eprintln!("note: daemon probe unavailable ({e}) — local check");
+                    eprintln!("note: daemon probe unavailable ({e}): local check");
                 }
                 rgb_status_local();
             }
@@ -1021,6 +1065,7 @@ fn main() {
                 _ => fail("unexpected response from service"),
             }
         }
+        Commands::FanCurve { action } => fan_curve_cmd(action.unwrap_or(FanCurveCmd::Show)),
         Commands::Thermal { command } => match command {
             ThermalCmd::Status => match send_command(DaemonCommand::GetThermalStatus) {
                 Ok(DaemonResponse::ThermalStatus(s)) => print_thermal_status(&s),
@@ -1091,7 +1136,7 @@ fn main() {
                 log::debug!("diagnose selfcheck: {passed}/{total} passed");
                 for c in &checks {
                     let mark = if c.ok { "✓" } else { "✗" };
-                    println!("{mark} {} — {}", c.name, c.detail);
+                    println!("{mark} {}: {}", c.name, c.detail);
                 }
                 println!("{passed}/{total} passed");
                 if passed != total {
@@ -1125,7 +1170,7 @@ fn main() {
                         legion_core::selftest::Severity::Warning => "WARN",
                         legion_core::selftest::Severity::Info => "INFO",
                     };
-                    println!("[{sev}] {} — {}", f.id, f.detail);
+                    println!("[{sev}] {}: {}", f.id, f.detail);
                 }
                 if criticals > 0 {
                     std::process::exit(1);
@@ -1153,6 +1198,7 @@ fn main() {
             mode,
             yes_i_understand,
         } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
+        Commands::AutoMode { action } => auto_mode_cmd(action.unwrap_or(AutoModeCmd::Status)),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
@@ -1225,7 +1271,7 @@ fn main() {
                         println!("{}", legion_core::update::manual_update_hint());
                     }
                 } else if apply {
-                    println!("\nAlready up to date — nothing to apply.");
+                    println!("\nAlready up to date: nothing to apply.");
                 } else {
                     println!("\nLegion Control is up to date.");
                 }
@@ -1306,7 +1352,7 @@ fn rgb_status_local() {
         legion_core::rgb_panic::Health::HardwareBroken => "broken",
         legion_core::rgb_panic::Health::NotApplicable => "n/a",
     };
-    println!("status      {tag} (local — restart legion-control for full USB autofix)");
+    println!("status      {tag} (local: restart legion-control for full USB autofix)");
     println!("summary     {}", d.summary);
     println!("fixable     {}", d.fixable);
     for line in d.details {
@@ -1332,7 +1378,7 @@ fn print_thermal_status(s: &legion_core::thermal::ThermalStatus) {
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
     println!(
-        "Thermal: {} · max {}°C (restore {}°C) · cur {} kHz · CPU {} / CPU CCD 2 {} · {}",
+        "Thermal: {}, max {}°C (restore {}°C), cur {} kHz, CPU {} / CPU CCD 2 {}, {}",
         on_off, s.config.max_temp, s.restore_temp, s.cur_max_freq, cpu_temp, cpu_temp_2, state
     );
 }
@@ -1475,7 +1521,7 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
             if fans::rpm_estimated() && s.fan1_rpm.max(s.fan2_rpm).max(s.fan4_rpm) > 0 {
-                println!("│  (estimated — unverified EC fallback layout)       │");
+                println!("│  (estimated: unverified EC fallback layout)       │");
             }
             log::trace!(
                 "sensors: fans cpu {} gpu {} aux {} rpm",
@@ -1577,6 +1623,12 @@ fn cmd_label(cmd: &Commands) -> String {
         Commands::ResetUndervolt {
             i_understand_instability_risk,
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
+        Commands::FanCurve { action } => match action {
+            None | Some(FanCurveCmd::Show) => "fan-curve show".into(),
+            Some(FanCurveCmd::Set { profile, .. }) => format!("fan-curve set {profile}"),
+            Some(FanCurveCmd::Enable { profile }) => format!("fan-curve enable {profile}"),
+            Some(FanCurveCmd::Disable { profile }) => format!("fan-curve disable {profile}"),
+        },
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
         Commands::GpuMode {
@@ -1587,6 +1639,171 @@ fn cmd_label(cmd: &Commands) -> String {
             apply,
             allow_downgrade,
         } => format!("check-update apply={apply} allow_downgrade={allow_downgrade}"),
+        Commands::AutoMode { action } => match action {
+            None | Some(AutoModeCmd::Status) => "auto-mode status".into(),
+            Some(AutoModeCmd::On) => "auto-mode on".into(),
+            Some(AutoModeCmd::Off) => "auto-mode off".into(),
+            Some(AutoModeCmd::Ac { mode }) => format!("auto-mode ac {mode}"),
+            Some(AutoModeCmd::Battery { mode }) => format!("auto-mode battery {mode}"),
+        },
+    }
+}
+
+fn auto_mode_status() -> legion_core::profile::auto::AutoModeStatus {
+    match send_command(DaemonCommand::GetAutoMode) {
+        Ok(DaemonResponse::AutoMode(s)) => s,
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("the running service is too old for auto-mode: update it"),
+    }
+}
+
+fn print_auto_mode(st: &legion_core::profile::auto::AutoModeStatus) {
+    let c = &st.config;
+    println!("automatic switching: {}", if c.enabled { "on" } else { "off" });
+    println!("plugged in : {}", friendly_profile(&c.ac_mode));
+    println!("on battery : {}", friendly_profile(&c.battery_mode));
+    let power = match st.on_ac {
+        Some(true) => "plugged in",
+        Some(false) => "on battery",
+        None => "unknown",
+    };
+    println!("power now  : {power}");
+    if c.app_rules.is_empty() {
+        println!("app rules  : none");
+    } else {
+        let scope = if c.apps_on_battery { "always" } else { "plugged in only" };
+        println!("app rules  : ({scope})");
+        for r in &c.app_rules {
+            let live = if st.active_app.as_deref() == Some(r.process.as_str()) {
+                "  (running)"
+            } else {
+                ""
+            };
+            println!("  {} → {}{live}", r.process, friendly_profile(&r.mode));
+        }
+    }
+}
+
+fn auto_mode_cmd(action: AutoModeCmd) {
+    let mut cfg = match action {
+        AutoModeCmd::Status => return print_auto_mode(&auto_mode_status()),
+        _ => auto_mode_status().config,
+    };
+    match action {
+        AutoModeCmd::Status => unreachable!(),
+        AutoModeCmd::On => cfg.enabled = true,
+        AutoModeCmd::Off => cfg.enabled = false,
+        AutoModeCmd::Ac { mode } => cfg.ac_mode = normalize_profile(&mode),
+        AutoModeCmd::Battery { mode } => {
+            let mode = normalize_profile(&mode);
+            let ok = legion_core::profile::auto::battery_choices(&legion_core::profile::safe_choices());
+            if !ok.contains(&mode) {
+                usage_fail(format!(
+                    "'{mode}' is not available on battery (choose: {})",
+                    ok.join(", ")
+                ));
+            }
+            cfg.battery_mode = mode;
+        }
+    }
+    match send_command(DaemonCommand::SetAutoMode(cfg)) {
+        Ok(DaemonResponse::AutoMode(st)) => print_auto_mode(&st),
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("the running service is too old for auto-mode: update it"),
+    }
+}
+
+fn fan_curve_status() -> legion_core::fan_curve::FanCurveStatus {
+    match send_command(DaemonCommand::GetFanCurves) {
+        Ok(DaemonResponse::FanCurves(s)) => s,
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
+fn print_fan_curves(st: &legion_core::fan_curve::FanCurveStatus) {
+    println!("profile now : {}", st.current_profile);
+    let live = if st.active {
+        let temp = st.temp_c.map_or("?".into(), |t| format!("{t:.1} °C"));
+        let pct = st.pct.map_or("?".into(), |p| format!("{p} %"));
+        format!(
+            "curve active: {temp} → {pct}{}",
+            if st.safety { " (SAFETY: all fans max)" } else { "" }
+        )
+    } else if let Some(f) = &st.fault {
+        format!("firmware control: fault: {f}")
+    } else {
+        "firmware control".into()
+    };
+    println!("engine      : {live}");
+    if st.curves.is_empty() {
+        println!("no curves stored (factory shapes are used when you `enable` a profile)");
+    }
+    for (name, c) in &st.curves {
+        let pts: Vec<String> = c.points.iter().map(|(t, p)| format!("{t}:{p}")).collect();
+        println!(
+            "{name:<22} {}  {}",
+            if c.enabled { "enabled " } else { "disabled" },
+            pts.join(",")
+        );
+    }
+}
+
+fn fan_curve_cmd(action: FanCurveCmd) {
+    use legion_core::fan_curve as fc;
+    let send = |profile: String, points: fc::CurvePoints, enabled: bool| {
+        match send_command(DaemonCommand::SetFanCurve {
+            profile: profile.clone(),
+            points,
+            enabled,
+        }) {
+            Ok(DaemonResponse::FanCurves(st)) => {
+                println!(
+                    "fan curve for '{profile}' {}",
+                    if enabled { "enabled" } else { "disabled (firmware control)" }
+                );
+                print_fan_curves(&st);
+            }
+            Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+            _ => fail("unexpected response from service"),
+        }
+    };
+    let stored = |profile: &str| {
+        fan_curve_status()
+            .curves
+            .into_iter()
+            .find(|(n, _)| n == profile)
+            .map_or_else(|| fc::default_points(profile), |(_, c)| c.points)
+    };
+    match action {
+        FanCurveCmd::Show => print_fan_curves(&fan_curve_status()),
+        FanCurveCmd::Set {
+            profile,
+            points,
+            keep_disabled,
+        } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            match fc::parse_points(&points) {
+                Ok(p) => send(profile, p, !keep_disabled),
+                Err(e) => usage_fail(e),
+            }
+        }
+        FanCurveCmd::Enable { profile } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            let p = stored(&profile);
+            send(profile, p, true);
+        }
+        FanCurveCmd::Disable { profile } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            let p = stored(&profile);
+            send(profile, p, false);
+        }
     }
 }
 

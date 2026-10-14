@@ -43,7 +43,7 @@ impl ZoneEffect {
             RgbEffect::from_name(&self.effect).unwrap_or(RgbEffect::Static)
         };
         log::trace!(
-            "config::ZoneEffect::rgb_effect(effect={:?}) — result={fx:?} (unknown names fall back to Static)",
+            "config::ZoneEffect::rgb_effect(effect={:?}): result={fx:?} (unknown names fall back to Static)",
             self.effect
         );
         fx
@@ -51,7 +51,7 @@ impl ZoneEffect {
 
     pub fn colors(&self) -> Vec<(u8, u8, u8)> {
         if self.effect.eq_ignore_ascii_case("off") {
-            log::trace!("config::ZoneEffect::colors(effect=off) — returning black");
+            log::trace!("config::ZoneEffect::colors(effect=off): returning black");
             return vec![(0, 0, 0)];
         }
         let fx = self.rgb_effect();
@@ -66,7 +66,7 @@ impl ZoneEffect {
             Vec::new()
         };
         log::trace!(
-            "config::ZoneEffect::colors(effect={:?}, brightness={}) — computed {} color(s)",
+            "config::ZoneEffect::colors(effect={:?}, brightness={}): computed {} color(s)",
             self.effect,
             self.brightness,
             c.len()
@@ -208,6 +208,9 @@ pub struct AppConfig {
     pub welcome_seen: bool,
     #[serde(default)]
     pub thermal: ThermalConfig,
+    /// Software fan curves keyed by platform profile (daemon engine).
+    #[serde(default)]
+    pub fan_curves: std::collections::BTreeMap<String, crate::fan_curve::FanCurve>,
     /// Optional anonymous diagnostics (alpha) — enabled by default (opt-out);
     /// the user disables it in Settings.
     #[serde(default)]
@@ -215,6 +218,59 @@ pub struct AppConfig {
     /// Legacy 4-zone RGB keyboard state (experimental write path).
     #[serde(default)]
     pub four_zone: FourZoneConfig,
+    /// Automatic power-mode switching (AC / battery / per-app). The root
+    /// service acts on ITS copy (pushed over IPC with `SetAutoMode`).
+    #[serde(default)]
+    pub auto_mode: AutoModeConfig,
+    /// Show a small on-screen popup when the power mode changes (tray).
+    #[serde(default = "default_true")]
+    pub osd_mode_change: bool,
+    /// Last window size and maximized state of the settings app (0 = unset,
+    /// pick a size from the monitor).
+    #[serde(default)]
+    pub window_width: i32,
+    #[serde(default)]
+    pub window_height: i32,
+    #[serde(default)]
+    pub window_maximized: bool,
+}
+
+/// One per-app rule: while a process whose `comm` matches `process` runs,
+/// the power mode is `mode` (a platform_profile name).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AppRule {
+    pub process: String,
+    pub mode: String,
+}
+
+/// Automatic power-mode switching. Off by default; every field has a serde
+/// default so configs written before this existed still load unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoModeConfig {
+    pub enabled: bool,
+    /// Mode applied when the charger is plugged in (any available mode).
+    pub ac_mode: String,
+    /// Mode applied on battery (`low-power`, `balanced`, or `performance`
+    /// when the firmware lists it; see `profile::auto::battery_choices`).
+    pub battery_mode: String,
+    /// Per-app rules, first match wins.
+    pub app_rules: Vec<AppRule>,
+    /// Per-app rules also apply on battery (default: plugged in only).
+    pub apps_on_battery: bool,
+}
+
+impl Default for AutoModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ac_mode: "balanced".into(),
+            battery_mode: "low-power".into(),
+            app_rules: Vec::new(),
+            apps_on_battery: false,
+        }
+    }
 }
 
 /// Persisted 4-zone keyboard state (`crate::fourzone`). Names, not codes,
@@ -310,7 +366,7 @@ impl DiagnosticsConfig {
     /// send so the ID is stable from the first report onward.
     pub fn ensure_machine_id(&mut self) {
         if self.machine_id.is_empty() {
-            log::debug!("config::DiagnosticsConfig::ensure_machine_id — no machine_id present, generating one");
+            log::debug!("config::DiagnosticsConfig::ensure_machine_id: no machine_id present, generating one");
             use std::io::Read;
             let mut b = [0u8; 16];
             if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
@@ -335,12 +391,12 @@ impl DiagnosticsConfig {
                 b[10], b[11], b[12], b[13], b[14], b[15]
             );
             log::info!(
-                "config::DiagnosticsConfig::ensure_machine_id — generated new machine_id {}",
+                "config::DiagnosticsConfig::ensure_machine_id: generated new machine_id {}",
                 self.machine_id
             );
         } else {
             log::trace!(
-                "config::DiagnosticsConfig::ensure_machine_id — machine_id already present, preserved"
+                "config::DiagnosticsConfig::ensure_machine_id: machine_id already present, preserved"
             );
         }
     }
@@ -392,8 +448,14 @@ impl Default for AppConfig {
             active_profile: String::new(),
             welcome_seen: false,
             thermal: ThermalConfig::default(),
+            fan_curves: Default::default(),
             diagnostics: DiagnosticsConfig::default(),
             four_zone: FourZoneConfig::default(),
+            auto_mode: AutoModeConfig::default(),
+            osd_mode_change: true,
+            window_width: 0,
+            window_height: 0,
+            window_maximized: false,
         }
     }
 }
@@ -407,7 +469,7 @@ pub fn mark_welcome_seen() {
     log::trace!("config::mark_welcome_seen()");
     update(|cfg| {
         cfg.welcome_seen = true;
-        log::debug!("config::mark_welcome_seen — welcome_seen set to true");
+        log::debug!("config::mark_welcome_seen: welcome_seen set to true");
     });
 }
 
@@ -452,14 +514,14 @@ fn config_path() -> PathBuf {
             if home.is_empty() {
                 // No $HOME (systemd system service): "" + ".config" used to
                 // resolve to /.config at the filesystem root.
-                log::trace!("config::config_path — XDG_CONFIG_HOME/HOME unset, using {SYSTEM_STATE_DIR}");
+                log::trace!("config::config_path: XDG_CONFIG_HOME/HOME unset, using {SYSTEM_STATE_DIR}");
                 migrate_root_config_once();
                 return PathBuf::from(SYSTEM_STATE_DIR);
             }
             PathBuf::from(home).join(".config")
         });
     let p = base.join("legion-control").join("settings.json");
-    log::trace!("config::config_path — resolved to {}", p.display());
+    log::trace!("config::config_path: resolved to {}", p.display());
     p
 }
 
@@ -471,7 +533,7 @@ fn lock_path() -> PathBuf {
 fn ensure_parent_dir(path: &Path) {
     if let Some(parent) = path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
-            log::debug!("config — create_dir_all({}) failed: {e}", parent.display());
+            log::debug!("config: create_dir_all({}) failed: {e}", parent.display());
         }
     }
 }
@@ -486,7 +548,7 @@ fn settings_file_name(path: &Path) -> String {
 /// Best-effort temp-file cleanup after a failed write/rename.
 fn cleanup_tmp(tmp: &Path) {
     if let Err(re) = fs::remove_file(tmp) {
-        log::trace!("config — cleanup of {} returned None: {re}", tmp.display());
+        log::trace!("config: cleanup of {} returned None: {re}", tmp.display());
     }
 }
 
@@ -496,7 +558,7 @@ fn cleanup_tmp(tmp: &Path) {
 fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
     let path = lock_path();
     log::trace!(
-        "config::with_config_lock — acquiring lock at {}",
+        "config::with_config_lock: acquiring lock at {}",
         path.display()
     );
     ensure_parent_dir(&path);
@@ -526,12 +588,12 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
             }
             if !locked {
                 log::warn!(
-                    "config lock timeout after 500ms ({}) — proceeding under fallback",
+                    "config lock timeout after 500ms ({}): proceeding under fallback",
                     path.display()
                 );
             } else {
                 log::trace!(
-                    "config::with_config_lock — lock acquired ({})",
+                    "config::with_config_lock: lock acquired ({})",
                     path.display()
                 );
             }
@@ -541,7 +603,7 @@ fn with_config_lock<T>(f: impl FnOnce() -> T) -> T {
                     libc::flock(fd, libc::LOCK_UN);
                 }
                 log::trace!(
-                    "config::with_config_lock — lock released ({})",
+                    "config::with_config_lock: lock released ({})",
                     path.display()
                 );
             }
@@ -561,7 +623,7 @@ struct CachedConfig {
 }
 
 static STORE: std::sync::LazyLock<Mutex<CachedConfig>> = std::sync::LazyLock::new(|| {
-    log::trace!("config::store — initializing config store from disk");
+    log::trace!("config::store: initializing config store from disk");
     let (cfg, mtime) = with_config_lock(|| {
         let c = load_from_disk();
         let m = fs::metadata(config_path()).and_then(|meta| meta.modified()).ok();
@@ -587,12 +649,12 @@ fn load_from_disk() -> AppConfig {
 /// callers that write back must not replace it with defaults.
 fn try_load_from_disk() -> std::io::Result<AppConfig> {
     let path = config_path();
-    log::trace!("config::load_from_disk — reading {}", path.display());
+    log::trace!("config::load_from_disk: reading {}", path.display());
     Ok(match fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str::<AppConfig>(&s) {
             Ok(mut parsed) => {
                 log::debug!(
-                    "config::load_from_disk — loaded {} ({} bytes)",
+                    "config::load_from_disk: loaded {} ({} bytes)",
                     path.display(),
                     s.len()
                 );
@@ -620,11 +682,11 @@ fn try_load_from_disk() -> std::io::Result<AppConfig> {
                 ));
                 match fs::rename(&path, &backup) {
                     Ok(()) => log::error!(
-                        "config parse error — moved corrupt file to {}, using defaults: {e}",
+                        "config parse error: moved corrupt file to {}, using defaults: {e}",
                         backup.display()
                     ),
                     Err(re) => log::error!(
-                        "config parse error ({}): {e} — using defaults (could not preserve file: {re})",
+                        "config parse error ({}): {e}: using defaults (could not preserve file: {re})",
                         path.display()
                     ),
                 }
@@ -633,7 +695,7 @@ fn try_load_from_disk() -> std::io::Result<AppConfig> {
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             log::debug!(
-                "config::load_from_disk — no settings file at {}, using defaults",
+                "config::load_from_disk: no settings file at {}, using defaults",
                 path.display()
             );
             AppConfig::default()
@@ -648,7 +710,7 @@ fn try_load_from_disk() -> std::io::Result<AppConfig> {
 fn write_disk(cfg: &AppConfig) {
     let path = config_path();
     log::trace!(
-        "config::write_disk — writing version={} config to {}",
+        "config::write_disk: writing version={} config to {}",
         cfg.version,
         path.display()
     );
@@ -685,7 +747,7 @@ fn write_disk(cfg: &AppConfig) {
                     }
                 }
                 log::info!(
-                    "config::write_disk — settings written to {}",
+                    "config::write_disk: settings written to {}",
                     path.display()
                 );
                 log::debug!("config saved → {}", path.display());
@@ -723,7 +785,7 @@ pub fn get() -> AppConfig {
             g.config.clone()
         }
         Err(_) => {
-            log::warn!("config::get — config mutex poisoned, unwrap_or_default fallback used");
+            log::warn!("config::get: config mutex poisoned, unwrap_or_default fallback used");
             AppConfig::default()
         }
     }
@@ -734,7 +796,7 @@ pub fn update(f: impl FnOnce(&mut AppConfig)) {
     let mut g = match store().lock() {
         Ok(g) => g,
         Err(p) => {
-            log::warn!("config::update — config mutex poisoned, recovering inner state");
+            log::warn!("config::update: config mutex poisoned, recovering inner state");
             p.into_inner()
         }
     };
@@ -746,15 +808,15 @@ pub fn update(f: impl FnOnce(&mut AppConfig)) {
             Ok(c) => c,
             Err(e) => {
                 // Unreadable but present: never overwrite it with defaults.
-                log::error!("config::update — settings unreadable ({e}); change kept in memory only");
+                log::error!("config::update: settings unreadable ({e}); change kept in memory only");
                 f(&mut g.config);
                 return;
             }
         };
-        log::trace!("config::update — invoking caller closure");
+        log::trace!("config::update: invoking caller closure");
         f(&mut cfg);
         cfg.version = VERSION;
-        log::debug!("config::update — closure applied, writing updated config");
+        log::debug!("config::update: closure applied, writing updated config");
         write_disk(&cfg);
         let mtime = fs::metadata(config_path()).and_then(|m| m.modified()).ok();
         g.config = cfg;
@@ -768,7 +830,7 @@ pub fn config_dir_display() -> String {
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~/.config/legion-control".into());
-    log::trace!("config::config_dir_display — result={d:?}");
+    log::trace!("config::config_dir_display: result={d:?}");
     d
 }
 
@@ -791,7 +853,7 @@ pub fn snapshot_user_profile() -> UserProfile {
     p.ui_g = cfg.ui_g;
     p.ui_b = cfg.ui_b;
     log::debug!(
-        "config::snapshot_user_profile — captured fields: brightness={}, logo_on={}, lighting_mode={:?}, charge_limit={}, keyboard_layout={:?}, per_key={} keys, zones(k/f/r/l)=({:?},{:?},{:?},{:?}), ui_rgb=({},{},{})",
+        "config::snapshot_user_profile: captured fields: brightness={}, logo_on={}, lighting_mode={:?}, charge_limit={}, keyboard_layout={:?}, per_key={} keys, zones(k/f/r/l)=({:?},{:?},{:?},{:?}), ui_rgb=({},{},{})",
         p.brightness,
         p.logo_on,
         p.lighting_mode,
@@ -822,7 +884,7 @@ pub fn apply_profile_to_config(p: &UserProfile) {
     );
     update(|cfg| {
         log::debug!(
-            "config::apply_profile_to_config — applying profile fields (brightness={}, charge_limit={}, lighting_mode={:?}) to live config",
+            "config::apply_profile_to_config: applying profile fields (brightness={}, charge_limit={}, lighting_mode={:?}) to live config",
             p.brightness,
             p.charge_limit,
             p.lighting_mode
@@ -848,12 +910,12 @@ pub fn save_named_profile(name: &str) {
     log::trace!("config::save_named_profile(name={name:?})");
     let name = name.trim();
     if name.is_empty() {
-        log::debug!("config::save_named_profile — empty profile name, ignoring");
+        log::debug!("config::save_named_profile: empty profile name, ignoring");
         return;
     }
     let snap = snapshot_user_profile();
     log::debug!(
-        "config::save_named_profile — snapshot for {name:?}: brightness={}, charge_limit={}, lighting_mode={:?}",
+        "config::save_named_profile: snapshot for {name:?}: brightness={}, charge_limit={}, lighting_mode={:?}",
         snap.brightness,
         snap.charge_limit,
         snap.lighting_mode
@@ -863,7 +925,7 @@ pub fn save_named_profile(name: &str) {
         cfg.active_profile = name.to_string();
         cfg.last_session = snap;
         log::info!(
-            "config::save_named_profile — profile {name:?} saved and set active ({} profile(s) stored)",
+            "config::save_named_profile: profile {name:?} saved and set active ({} profile(s) stored)",
             cfg.profiles.len()
         );
     });
@@ -877,10 +939,10 @@ pub fn delete_named_profile(name: &str) {
             cfg.active_profile.clear();
         }
         if removed {
-            log::info!("config::delete_named_profile — deleted profile {name:?}");
+            log::info!("config::delete_named_profile: deleted profile {name:?}");
         } else {
             log::debug!(
-                "config::delete_named_profile — profile {name:?} not found, nothing deleted"
+                "config::delete_named_profile: profile {name:?} not found, nothing deleted"
             );
         }
     });
@@ -891,7 +953,7 @@ pub fn list_profile_names() -> Vec<String> {
     let mut names: Vec<String> = get().profiles.keys().cloned().collect();
     names.sort();
     log::trace!(
-        "config::list_profile_names — found {} profile(s)",
+        "config::list_profile_names: found {} profile(s)",
         names.len()
     );
     names
@@ -900,7 +962,7 @@ pub fn list_profile_names() -> Vec<String> {
 pub fn get_named_profile(name: &str) -> Option<UserProfile> {
     let r = get().profiles.get(name).cloned();
     log::trace!(
-        "config::get_named_profile(name={name:?}) — found={}",
+        "config::get_named_profile(name={name:?}): found={}",
         r.is_some()
     );
     r
@@ -927,7 +989,7 @@ pub fn remember_fan(fan: u8, rpm: u32) {
         2 => cfg.last_session.fan2 = rpm,
         // Third-fan slot: fan4 (lenovo_wmi_other) or fan3 (legion_hwmon).
         3 | 4 => cfg.last_session.fan4 = rpm,
-        _ => log::debug!("config::remember_fan — unknown fan id {fan}, ignored"),
+        _ => log::debug!("config::remember_fan: unknown fan id {fan}, ignored"),
     });
 }
 
@@ -987,7 +1049,7 @@ pub fn apply_zone_update(
         cfg.last_session.ui_g = cfg.ui_g;
         cfg.last_session.ui_b = cfg.ui_b;
     });
-    log::debug!("config::apply_zone_update — zone update persisted, returning fresh config");
+    log::debug!("config::apply_zone_update: zone update persisted, returning fresh config");
     get()
 }
 
@@ -1013,7 +1075,7 @@ pub fn set_charge_limit(pct: u32) {
         cfg.charge_limit = pct;
         cfg.last_session.charge_limit = pct;
     });
-    log::debug!("config::set_charge_limit — charge limit setting persisted as {pct}%");
+    log::debug!("config::set_charge_limit: charge limit setting persisted as {pct}%");
 }
 
 pub fn set_per_key_color(key: &str, r: u8, g: u8, b: u8) {
@@ -1096,6 +1158,48 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
             None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
         }
+    }
+
+    #[test]
+    fn auto_mode_config_roundtrip_and_old_configs_load() {
+        // A config written before auto switching existed: no auto_mode /
+        // osd_mode_change keys at all.
+        let mut old = serde_json::to_value(AppConfig::default()).unwrap();
+        let obj = old.as_object_mut().unwrap();
+        obj.remove("auto_mode");
+        obj.remove("osd_mode_change");
+        let parsed: AppConfig = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.auto_mode, AutoModeConfig::default());
+        assert!(!parsed.auto_mode.enabled, "off by default");
+        assert!(parsed.osd_mode_change, "popup on by default");
+
+        // Partial auto_mode object: missing fields take defaults.
+        let partial: AutoModeConfig =
+            serde_json::from_str(r#"{"enabled":true,"ac_mode":"performance"}"#).unwrap();
+        assert!(partial.enabled);
+        assert_eq!(partial.ac_mode, "performance");
+        assert_eq!(partial.battery_mode, "low-power");
+        assert!(partial.app_rules.is_empty());
+
+        // Full round trip.
+        let cfg = AppConfig {
+            osd_mode_change: false,
+            auto_mode: AutoModeConfig {
+                enabled: true,
+                ac_mode: "performance".into(),
+                battery_mode: "balanced".into(),
+                app_rules: vec![AppRule {
+                    process: "steam".into(),
+                    mode: "performance".into(),
+                }],
+                apps_on_battery: true,
+            },
+            ..Default::default()
+        };
+        let back: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.auto_mode, cfg.auto_mode);
+        assert!(!back.osd_mode_change);
     }
 
     #[test]

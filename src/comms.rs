@@ -150,6 +150,22 @@ pub enum DaemonCommand {
         mode: crate::gpu_mode::GpuMode,
         acknowledge: bool,
     },
+    // ── appended (software fan curves) ──
+    /// Stored per-profile fan curves plus live engine status.
+    GetFanCurves,
+    /// Store (and optionally enable) the curve for a platform profile.
+    SetFanCurve {
+        profile: String,
+        points: [(u8, u8); 8],
+        enabled: bool,
+    },
+    // ── appended (automatic power-mode switching, temperature history) ──
+    /// Stored auto-switching config plus live AC / app state.
+    GetAutoMode,
+    /// Store the auto-switching config in the service's own settings.
+    SetAutoMode(crate::config::AutoModeConfig),
+    /// The service's 1-hour temperature ring buffer (5 s samples).
+    GetTempHistory,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,6 +221,53 @@ pub enum DaemonResponse {
     DaemonVersion(String),
     // ── appended (GPU working mode / MUX) ──
     GpuMode(crate::gpu_mode::GpuModeStatus),
+    // ── appended (software fan curves) ──
+    FanCurves(crate::fan_curve::FanCurveStatus),
+    // ── appended (automatic power-mode switching, temperature history) ──
+    AutoMode(crate::profile::auto::AutoModeStatus),
+    TempHistory(TempHistory),
+}
+
+/// One temperature-history sample. Kept tiny on the wire (9 bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TempSample {
+    /// CPU °C.
+    pub cpu: f32,
+    /// GPU °C, -1 when unreadable or asleep.
+    pub gpu: f32,
+    /// Power mode, see [`mode_code`].
+    pub mode: u8,
+}
+
+/// Ring-buffer contents, oldest first, one sample every `interval_s`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TempHistory {
+    pub interval_s: u16,
+    pub samples: Vec<TempSample>,
+}
+
+/// Compact power-mode code for history samples (0 = unknown).
+pub fn mode_code(profile: &str) -> u8 {
+    match profile {
+        "low-power" | "quiet" => 1,
+        "balanced" => 2,
+        "performance" => 3,
+        "max-power" => 4,
+        "custom" => 5,
+        _ => 0,
+    }
+}
+
+/// Inverse of [`mode_code`]; `None` for unknown.
+pub fn mode_name(code: u8) -> Option<&'static str> {
+    Some(match code {
+        1 => "low-power",
+        2 => "balanced",
+        3 => "performance",
+        4 => "max-power",
+        5 => "custom",
+        _ => return None,
+    })
 }
 
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
@@ -221,7 +284,7 @@ fn user_socket() -> Option<PathBuf> {
             Some(path)
         }
         Err(_) => {
-            log::trace!("user_socket: XDG_RUNTIME_DIR unset — no per-user candidate");
+            log::trace!("user_socket: XDG_RUNTIME_DIR unset: no per-user candidate");
             None
         }
     }
@@ -241,7 +304,7 @@ pub fn bind_socket_path() -> Result<PathBuf, String> {
                 Ok(path)
             }
             None => {
-                let msg = "XDG_RUNTIME_DIR is not set — cannot pick a safe per-user socket path"
+                let msg = "XDG_RUNTIME_DIR is not set: cannot pick a safe per-user socket path"
                     .to_string();
                 log::warn!("bind_socket_path: {msg}");
                 Err(msg)
@@ -468,6 +531,19 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::SetGpuMode { mode, acknowledge } => {
             format!("SetGpuMode({},ack={acknowledge})", mode.as_str())
         }
+        DaemonCommand::GetFanCurves => "GetFanCurves".into(),
+        DaemonCommand::SetFanCurve {
+            profile, enabled, ..
+        } => format!("SetFanCurve({},enabled={enabled})", sanitize_log(profile)),
+        DaemonCommand::GetAutoMode => "GetAutoMode".into(),
+        DaemonCommand::SetAutoMode(c) => format!(
+            "SetAutoMode(on={},ac={},bat={},rules={})",
+            c.enabled,
+            sanitize_log(&c.ac_mode),
+            sanitize_log(&c.battery_mode),
+            c.app_rules.len()
+        ),
+        DaemonCommand::GetTempHistory => "GetTempHistory".into(),
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_label: {label}");
@@ -521,6 +597,11 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::SetUsbCharging(_) => "SetUsbCharging",
         DaemonCommand::GetGpuMode => "GetGpuMode",
         DaemonCommand::SetGpuMode { .. } => "SetGpuMode",
+        DaemonCommand::GetFanCurves => "GetFanCurves",
+        DaemonCommand::SetFanCurve { .. } => "SetFanCurve",
+        DaemonCommand::GetAutoMode => "GetAutoMode",
+        DaemonCommand::SetAutoMode(_) => "SetAutoMode",
+        DaemonCommand::GetTempHistory => "GetTempHistory",
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_kind: {kind}");
@@ -555,6 +636,9 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
         DaemonResponse::ThermalStatus(_) => "ThermalStatus",
         DaemonResponse::DaemonVersion(_) => "DaemonVersion",
         DaemonResponse::GpuMode(_) => "GpuMode",
+        DaemonResponse::FanCurves(_) => "FanCurves",
+        DaemonResponse::AutoMode(_) => "AutoMode",
+        DaemonResponse::TempHistory(_) => "TempHistory",
     }
 }
 
@@ -583,6 +667,8 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::SetFnLock(_)
             | DaemonCommand::SetUsbCharging(_)
             | DaemonCommand::SetGpuMode { .. }
+            | DaemonCommand::SetFanCurve { .. }
+            | DaemonCommand::SetAutoMode(_)
     );
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_is_write: {is_write}");
@@ -820,7 +906,7 @@ mod tests {
         let st = GpuModeStatus {
             supported: true,
             model_verified: true,
-            model_note: "SMCN20WW · verified (SMCN)".into(),
+            model_note: "SMCN20WW, verified (SMCN)".into(),
             gamezone_present: true,
             acpi_call_loaded: true,
             backend: "acpi_call:\\_SB.GZFD.WMAA".into(),
@@ -871,5 +957,127 @@ mod tests {
             }
             other => panic!("unexpected decode: {}", cmd_label(&other)),
         }
+    }
+
+    /// Fan-curve variants are appended after SetGpuMode / GpuMode.
+    #[test]
+    fn fan_curve_ipc_is_appended_and_round_trips() {
+        let idx = |c: &DaemonCommand| bincode_opts().serialize(c).unwrap()[0];
+        // SetGpuMode is index 42 → GetFanCurves 43, SetFanCurve 44.
+        assert_eq!(
+            idx(&DaemonCommand::SetGpuMode {
+                mode: crate::gpu_mode::GpuMode::Hybrid,
+                acknowledge: false
+            }),
+            42
+        );
+        assert_eq!(idx(&DaemonCommand::GetFanCurves), 43);
+        let set = DaemonCommand::SetFanCurve {
+            profile: "balanced".into(),
+            points: crate::fan_curve::default_points("balanced"),
+            enabled: true,
+        };
+        assert_eq!(idx(&set), 44);
+        let bytes = bincode_opts().serialize(&set).unwrap();
+        match bincode_opts().deserialize::<DaemonCommand>(&bytes).unwrap() {
+            DaemonCommand::SetFanCurve {
+                profile,
+                points,
+                enabled,
+            } => {
+                assert_eq!(profile, "balanced");
+                assert_eq!(points, crate::fan_curve::default_points("balanced"));
+                assert!(enabled);
+            }
+            other => panic!("unexpected decode: {}", cmd_label(&other)),
+        }
+        assert!(cmd_is_write(&set));
+        assert!(!cmd_is_write(&DaemonCommand::GetFanCurves));
+        assert_eq!(cmd_kind(&set), "SetFanCurve");
+        assert_eq!(cmd_label(&set), "SetFanCurve(balanced,enabled=true)");
+
+        // DaemonResponse: GpuMode was index 25 → FanCurves 26.
+        let resp = DaemonResponse::FanCurves(crate::fan_curve::FanCurveStatus {
+            curves: vec![],
+            current_profile: "balanced".into(),
+            active: false,
+            temp_c: None,
+            pct: None,
+            safety: false,
+            fault: Some("x".into()),
+        });
+        let bytes = bincode_opts().serialize(&resp).unwrap();
+        assert_eq!(bytes[0], 26);
+        assert!(matches!(
+            bincode_opts().deserialize::<DaemonResponse>(&bytes).unwrap(),
+            DaemonResponse::FanCurves(_)
+        ));
+        assert_eq!(response_kind(&resp), "FanCurves");
+    }
+
+    /// Auto-mode and history variants are appended after the fan curves.
+    #[test]
+    fn auto_mode_and_history_ipc_is_appended_and_round_trips() {
+        let idx = |c: &DaemonCommand| bincode_opts().serialize(c).unwrap()[0];
+        assert_eq!(idx(&DaemonCommand::GetAutoMode), 45);
+        let cfg = crate::config::AutoModeConfig {
+            enabled: true,
+            app_rules: vec![crate::config::AppRule {
+                process: "steam".into(),
+                mode: "performance".into(),
+            }],
+            ..Default::default()
+        };
+        let set = DaemonCommand::SetAutoMode(cfg.clone());
+        assert_eq!(idx(&set), 46);
+        assert_eq!(idx(&DaemonCommand::GetTempHistory), 47);
+        let bytes = bincode_opts().serialize(&set).unwrap();
+        match bincode_opts().deserialize::<DaemonCommand>(&bytes).unwrap() {
+            DaemonCommand::SetAutoMode(back) => assert_eq!(back, cfg),
+            other => panic!("unexpected decode: {}", cmd_label(&other)),
+        }
+        assert!(cmd_is_write(&set));
+        assert!(!cmd_is_write(&DaemonCommand::GetAutoMode));
+        assert!(!cmd_is_write(&DaemonCommand::GetTempHistory));
+
+        let st = crate::profile::auto::AutoModeStatus {
+            config: cfg,
+            on_ac: Some(true),
+            active_app: Some("steam".into()),
+        };
+        let bytes = bincode_opts()
+            .serialize(&DaemonResponse::AutoMode(st.clone()))
+            .unwrap();
+        assert_eq!(bytes[0], 27);
+        match bincode_opts().deserialize::<DaemonResponse>(&bytes).unwrap() {
+            DaemonResponse::AutoMode(back) => assert_eq!(back, st),
+            other => panic!("unexpected decode: {}", response_kind(&other)),
+        }
+
+        // A full hour stays small: 720 samples of 9 bytes plus framing.
+        let hist = TempHistory {
+            interval_s: 5,
+            samples: vec![
+                TempSample {
+                    cpu: 61.5,
+                    gpu: -1.0,
+                    mode: mode_code("balanced"),
+                };
+                720
+            ],
+        };
+        let bytes = bincode_opts()
+            .serialize(&DaemonResponse::TempHistory(hist.clone()))
+            .unwrap();
+        assert_eq!(bytes[0], 28);
+        assert!(bytes.len() < 720 * 9 + 32, "payload {} B", bytes.len());
+        match bincode_opts().deserialize::<DaemonResponse>(&bytes).unwrap() {
+            DaemonResponse::TempHistory(back) => assert_eq!(back, hist),
+            other => panic!("unexpected decode: {}", response_kind(&other)),
+        }
+        for m in ["low-power", "balanced", "performance", "max-power", "custom"] {
+            assert_eq!(mode_name(mode_code(m)), Some(m));
+        }
+        assert_eq!(mode_name(mode_code("weird")), None);
     }
 }

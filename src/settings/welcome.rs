@@ -36,13 +36,12 @@ pub(crate) fn push_telemetry_to_daemon(enabled: bool) {
     });
 }
 
-/// First-launch welcome — a real window (not a cramped alert): brand header,
-/// short intro, one compact telemetry opt-out switch, and horizontal actions.
-/// Any close path marks the welcome seen, so it shows exactly once.
+/// First-launch welcome: one compact window with the app mark, a single
+/// sentence, the diagnostics switch and Start. Optional components are
+/// offered later on the Health page. Any close path marks the welcome seen,
+/// so it shows exactly once.
 pub(crate) fn show_welcome_if_needed(
     parent: &impl glib::object::IsA<gtk::Widget>,
-    stack: &adw::ViewStack,
-    about_tabs: Option<&adw::ViewStack>,
     consent: &Rc<Cell<bool>>,
     share_switch: Option<&adw::SwitchRow>,
     sync: &Rc<Cell<bool>>,
@@ -52,10 +51,10 @@ pub(crate) fn show_welcome_if_needed(
     }
 
     let win = adw::Window::builder()
-        .title("Welcome to Legion Control")
+        .title("Legion Control")
         .modal(true)
-        .default_width(600)
-        .default_height(440)
+        .default_width(440)
+        .resizable(false)
         .build();
     let root = parent.as_ref().root();
     if let Some(host) = root.and_then(|r| r.downcast::<gtk::Window>().ok()) {
@@ -63,40 +62,22 @@ pub(crate) fn show_welcome_if_needed(
     }
 
     // ── brand ──
-    let brand = gtk::Box::new(Orientation::Horizontal, 16);
-    brand.set_valign(Align::Center);
-    brand.append(&color_icon(
-        include_bytes!("../../data/icons/app-mark.svg"),
-        48,
-    ));
-    let brand_text = gtk::Box::new(Orientation::Vertical, 2);
-    let title = gtk::Label::new(Some("Welcome to Legion Control"));
-    title.add_css_class("title-2");
-    title.set_halign(Align::Start);
-    title.set_wrap(true);
-    title.set_xalign(0.0);
+    let mark = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 64);
+    mark.set_halign(Align::Center);
+    let title = gtk::Label::new(Some("Legion Control"));
+    title.add_css_class("title-1");
+    title.set_halign(Align::Center);
     let tagline = gtk::Label::new(Some(
-        "Unofficial community tool for Lenovo Legion laptops — not affiliated with Lenovo. Use at your own risk.",
+        "Unofficial tool for Lenovo Legion laptops. Not affiliated with Lenovo.",
     ));
-    tagline.add_css_class("page-sub");
-    tagline.set_halign(Align::Start);
     tagline.set_wrap(true);
-    tagline.set_xalign(0.0);
-    brand_text.append(&title);
-    brand_text.append(&tagline);
-    brand.append(&brand_text);
+    tagline.set_justify(gtk::Justification::Center);
+    tagline.set_halign(Align::Center);
 
-    let intro = gtk::Label::new(Some(
-        "Choose optional components now, or change everything later under Settings → Setup.",
-    ));
-    intro.set_halign(Align::Start);
-    intro.set_wrap(true);
-    intro.set_xalign(0.0);
-
-    // ── telemetry — one compact switch instead of a wall of buttons ──
+    // ── diagnostics ──
     let telemetry_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
-        .subtitle("Anonymized hardware stats · opt out any time")
+        .subtitle("Anonymous hardware stats. Opt out any time.")
         .active(legion_core::config::get().diagnostics.enabled)
         .build();
     tip(
@@ -104,17 +85,10 @@ pub(crate) fn show_welcome_if_needed(
         "One anonymized report per minute: hardware model, distro/kernel, sensors, \
          fan/battery stats, self-check results. NEVER included: hostname, username, \
          serials, MACs, IPs, key colors, custom profile names. \
-         Change any time under Settings → Setup.",
+         Change any time under Settings, Setup.",
     );
-    let telemetry_group = pref_group("Alpha telemetry", None);
+    let telemetry_group = pref_group("", None);
     telemetry_group.add(&telemetry_row);
-    let privacy_link = gtk::LinkButton::with_label(
-        "https://github.com/encomjp/Lenovo-Legion-Control#alpha-telemetry-opt-out",
-        "Privacy policy — what is sent and what is never collected",
-    );
-    privacy_link.add_css_class("flat");
-    privacy_link.set_halign(Align::Start);
-    privacy_link.set_margin_start(4);
 
     let consent_c0 = consent.clone();
     let share_c0 = share_switch.cloned();
@@ -143,111 +117,49 @@ pub(crate) fn show_welcome_if_needed(
     });
 
     // ── actions ──
-    let actions = gtk::Box::new(Orientation::Horizontal, 12);
-    actions.set_halign(Align::End);
-    let later_btn = gtk::Button::with_label("Not now");
-    later_btn.add_css_class("pill-btn");
-    tip(&later_btn, "Skip for now — nothing else changes");
-    let setup_btn = primary_button_tip(
-        "First-time setup",
-        Some("Guided walkthrough: service, startup & tuning, hardware, self-check"),
+    let privacy_btn = gtk::Button::with_label("Privacy policy");
+    privacy_btn.add_css_class("pill-btn");
+    tip(
+        &privacy_btn,
+        "What is sent and what is never collected. Opens GitHub in your browser.",
     );
-    actions.append(&later_btn);
-    actions.append(&setup_btn);
+    privacy_btn.connect_clicked(|_| {
+        open_uri("https://github.com/encomjp/Lenovo-Legion-Control#alpha-telemetry-opt-out");
+    });
+    let start_btn = primary_button_tip("Start", Some("Open Legion Control"));
+    let actions = gtk::Box::new(Orientation::Horizontal, 12);
+    let spacer = gtk::Box::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    actions.append(&privacy_btn);
+    actions.append(&spacer);
+    actions.append(&start_btn);
 
     // ── layout ──
-    let page = gtk::Box::new(Orientation::Vertical, 22);
-    page.set_margin_top(24);
+    let page = gtk::Box::new(Orientation::Vertical, 16);
+    page.set_margin_top(12);
     page.set_margin_bottom(24);
     page.set_margin_start(28);
     page.set_margin_end(28);
-    page.append(&brand);
-    page.append(&intro);
-
-    // ── what's new — fetched from the GitHub release (silent on failure) ──
-    // First-launch context: users see the latest changes without hunting
-    // through the releases page.
-    let page_whats_new = page.clone();
-    {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(legion_core::update::check_latest_release());
-        });
-        glib::timeout_add_local(Duration::from_millis(300), move || match rx.try_recv() {
-            Ok(Ok(info)) => {
-                let highlights: String = info
-                    .body
-                    .lines()
-                    .filter(|l| {
-                        let t = l.trim_start();
-                        t.starts_with("- ") && !t.starts_with("|")
-                    })
-                    .take(4)
-                    .map(|l| format!("• {}", l.trim_start_matches('-').trim()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !highlights.is_empty() {
-                    let label = gtk::Label::new(Some(&format!(
-                        "What's new in v{}\n{highlights}",
-                        info.version
-                    )));
-                    label.set_halign(Align::Start);
-                    label.set_wrap(true);
-                    label.set_xalign(0.0);
-                    label.set_margin_start(4);
-                    label.add_css_class("page-sub");
-                    page_whats_new.append(&label);
-                }
-                glib::ControlFlow::Break
-            }
-            Ok(Err(_)) | Err(_) => glib::ControlFlow::Break,
-        });
-    }
+    page.append(&mark);
+    page.append(&title);
+    page.append(&tagline);
     page.append(&telemetry_group);
-    page.append(&privacy_link);
     page.append(&actions);
 
-    let clamp = libadwaita::Clamp::builder().maximum_size(560).build();
-    clamp.set_child(Some(&page));
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .child(&clamp)
-        .build();
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&scroll));
+    let header = adw::HeaderBar::new();
+    header.set_show_title(false);
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&page));
     win.set_content(Some(&toolbar));
 
-    // Any close path records the welcome as seen — it shows exactly once.
+    // Any close path records the welcome as seen: it shows exactly once.
     win.connect_close_request(|_| {
         legion_core::config::mark_welcome_seen();
         glib::Propagation::Proceed
     });
-
-    let win_later = win.clone();
-    later_btn.connect_clicked(move |_| {
-        legion_core::config::mark_welcome_seen();
-        win_later.close();
-    });
-    let win_setup = win.clone();
-    let stack_c = stack.clone();
-    let about_tabs_c = about_tabs.cloned();
-    let consent_c = consent.clone();
-    let share_c = share_switch.cloned();
-    let sync_c = sync.clone();
-    setup_btn.connect_clicked(move |_| {
-        legion_core::config::mark_welcome_seen();
-        win_setup.close();
-        run_guided_setup(
-            &stack_c,
-            about_tabs_c.as_ref(),
-            &consent_c,
-            share_c.as_ref(),
-            &sync_c,
-        );
-    });
+    let win_start = win.clone();
+    start_btn.connect_clicked(move |_| win_start.close());
 
     win.present();
 }
@@ -315,6 +227,8 @@ pub(crate) struct SetupCtx {
 /// startup & tuning, hardware identity, self-check, summary). Every probe
 /// runs on a `dispatch_async` worker thread; each dialog appears once its
 /// result is in.
+/// Kept for a future entry point (the welcome window no longer starts it).
+#[allow(dead_code)]
 pub(crate) fn run_guided_setup(
     stack: &adw::ViewStack,
     about_tabs: Option<&adw::ViewStack>,
@@ -370,11 +284,12 @@ impl SetupCtx {
     /// dialog abandons the rest of the walkthrough — welcome-seen is already
     /// recorded, nothing is lost.
     fn retryable_failure(&self, step: SetupStep, topic: &str, problem: &str, hint: &str) {
-        let body = format!("⚠ {problem}\n\n{hint}");
-        let dialog = setup_step_dialog(
+        let dialog = status_step_dialog(
             step,
             topic,
-            &body,
+            false,
+            problem,
+            hint,
             [("continue", "Continue anyway"), ("retry", "Retry")],
             "retry",
         );
@@ -396,12 +311,12 @@ impl SetupCtx {
             "Service probe stopped without a result",
             move |result| match result {
                 Ok(()) => {
-                    let dialog = setup_step_dialog(
+                    let dialog = status_step_dialog(
                         SetupStep::Daemon,
-                        "Control service",
-                        "✓ Control service is running.\n\n\
-                         Fans, power profiles, and charge limits are handled \
-                         by the privileged legion-control service.",
+                        "Background service",
+                        true,
+                        "The background service is running",
+                        "It handles fans, power modes and charge limits.",
                         [("continue", "Continue")],
                         "continue",
                     );
@@ -410,11 +325,10 @@ impl SetupCtx {
                 Err(_) => {
                     let dialog = setup_step_dialog(
                         SetupStep::Daemon,
-                        "Control service",
-                        "Control service is not running.\n\n\
-                         Enable it now? One system prompt will install and start \
-                         the privileged service.\n\n\
-                         You can continue without it — detection and self-checks work.",
+                        "Background service",
+                        "The background service is not running.\n\n\
+                         Enable it now? One system prompt will install and start it.\n\n\
+                         You can continue without it. Detection and self-checks still work.",
                         [
                             ("enable", "Enable service"),
                             ("continue", "Continue anyway"),
@@ -435,10 +349,12 @@ impl SetupCtx {
                                     "Enable service stopped without a result",
                                     move |res| match res {
                                         Ok(()) => {
-                                            let ok_dialog = setup_step_dialog(
+                                            let ok_dialog = status_step_dialog(
                                                 SetupStep::Daemon,
-                                                "Control service",
-                                                "✓ Control service enabled and running.",
+                                                "Background service",
+                                                true,
+                                                "The background service is enabled and running",
+                                                "",
                                                 [("continue", "Continue")],
                                                 "continue",
                                             );
@@ -446,8 +362,8 @@ impl SetupCtx {
                                         }
                                         Err(e) => ctx2.retryable_failure(
                                             SetupStep::Daemon,
-                                            "Control service",
-                                            "Could not enable service.",
+                                            "Background service",
+                                            "Couldn't enable the service",
                                             &e,
                                         ),
                                     },
@@ -470,8 +386,8 @@ impl SetupCtx {
         let dialog = setup_step_dialog(
             SetupStep::Startup,
             "Startup & tuning",
-            "Pick what Legion Control sets up now — change it any time under \
-             Settings → Setup.",
+            "Pick what Legion Control sets up now. You can change it any time under \
+             Settings, Setup.",
             [("apply", "Apply"), ("skip", "Skip")],
             "apply",
         );
@@ -483,9 +399,8 @@ impl SetupCtx {
             .build();
         tip(
             &autostart_switch,
-            "Adds Legion Control to Desktop autostart (~/.config/autostart) and \
-             enables the legion-control systemd unit so the hardware daemon also \
-             starts on boot.",
+            "Adds Legion Control to your desktop autostart (~/.config/autostart) and \
+             turns on the legion-control service so it also starts on boot.",
         );
         // ryzen_smu is only useful where Curve Optimizer is validated, and its
         // DKMS build fails on fresh installs without dkms + kernel headers —
@@ -540,10 +455,10 @@ impl SetupCtx {
                                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                                     .unwrap_or_default();
                                 if enabled == "enabled" {
-                                    report.push("Daemon already enabled for boot".into());
+                                    report.push("Service already starts on boot".into());
                                 } else {
                                     run_setup_helper_blocking("enable-daemon")?;
-                                    report.push("Daemon enabled for boot".into());
+                                    report.push("Service now starts on boot".into());
                                 }
                                 if !daemon_ok() {
                                     start_legion_control()?;
@@ -554,12 +469,12 @@ impl SetupCtx {
                                 // rest of the step — report it and carry on.
                                 match run_setup_helper_blocking("install-ryzen-smu") {
                                     Ok(_) => report.push(
-                                        "AMD tuning backend installed — Curve Optimizer is \
-                                         on the CPU page"
+                                        "AMD tuning driver installed. Curve Optimizer is \
+                                         on the Performance page"
                                             .into(),
                                     ),
                                     Err(e) => report.push(format!(
-                                        "⚠ AMD tuning backend not installed (optional): {e}{}",
+                                        "AMD tuning driver not installed (optional): {e}{}",
                                         dkms_prereqs_missing()
                                             .map(|cmd| format!("\n   Install the prerequisites with: {cmd}"))
                                             .unwrap_or_default()
@@ -571,16 +486,20 @@ impl SetupCtx {
                         "Startup setup stopped without a result",
                         move |result| match result {
                             Ok(report) => {
-                                let body = if report.is_empty() {
-                                    "Nothing selected — you can change this later \
-                                     under Settings → Setup."
-                                        .to_string()
+                                let (headline, body) = if report.is_empty() {
+                                    (
+                                        "Nothing selected",
+                                        "You can change this later under Settings, Setup."
+                                            .to_string(),
+                                    )
                                 } else {
-                                    format!("✓ Done.\n\n{}", report.join("\n"))
+                                    ("Done", report.join("\n"))
                                 };
-                                let ok_dialog = setup_step_dialog(
+                                let ok_dialog = status_step_dialog(
                                     SetupStep::Startup,
                                     "Startup & tuning",
+                                    true,
+                                    headline,
                                     &body,
                                     [("continue", "Continue")],
                                     "continue",
@@ -590,7 +509,7 @@ impl SetupCtx {
                             Err(e) => ctx2.retryable_failure(
                                 SetupStep::Startup,
                                 "Startup & tuning",
-                                "Setup could not complete.",
+                                "Setup couldn't finish",
                                 &e,
                             ),
                         },
@@ -622,8 +541,7 @@ impl SetupCtx {
                     let fan_count = info.capabilities.fans.len();
                     let plural = if fan_count == 1 { "" } else { "s" };
                     let body = format!(
-                        "✓ Hardware detected.\n\n\
-                         Model: {}\n\
+                        "Model: {}\n\
                          Machine type: {}\n\
                          CPU: {}\n\
                          GPU: {}\n\
@@ -635,9 +553,11 @@ impl SetupCtx {
                         fan_count,
                         plural,
                     );
-                    let dialog = setup_step_dialog(
+                    let dialog = status_step_dialog(
                         SetupStep::Hardware,
                         "Your hardware",
+                        true,
+                        "Hardware detected",
                         &body,
                         [("continue", "Continue")],
                         "continue",
@@ -647,7 +567,7 @@ impl SetupCtx {
                 Err(error) => self.retryable_failure(
                     SetupStep::Hardware,
                     "Your hardware",
-                    "Hardware detection failed.",
+                    "Hardware detection failed",
                     &error,
                 ),
             },
@@ -669,31 +589,36 @@ impl SetupCtx {
                 Ok((checks, faults)) => {
                     let total = checks.len();
                     let passed = checks.iter().filter(|c| c.ok).count();
-                    let mut lines =
-                        vec![format!("✓ Self-check finished: {passed} / {total} passed.")];
+                    let mut lines: Vec<String> = Vec::new();
 
                     let criticals: Vec<_> = faults
                         .iter()
                         .filter(|f| f.severity == legion_core::selftest::Severity::Critical)
                         .collect();
                     if criticals.is_empty() {
-                        lines.push("No critical faults found.".into());
+                        lines.push("No serious problems found.".into());
                     } else {
-                        lines.push(format!("⚠ {} critical fault(s):", criticals.len()));
+                        lines.push(format!(
+                            "{} serious problem{}:",
+                            criticals.len(),
+                            if criticals.len() == 1 { "" } else { "s" }
+                        ));
                         const MAX_LISTED: usize = 6;
                         for fault in criticals.iter().take(MAX_LISTED) {
-                            lines.push(format!("⚠ {}", fault.detail));
+                            lines.push(fault.detail.to_string());
                         }
                         let hidden = criticals.len().saturating_sub(MAX_LISTED);
                         if hidden > 0 {
-                            lines.push(format!("…and {hidden} more"));
+                            lines.push(format!("and {hidden} more"));
                         }
                     }
 
                     let body = lines.join("\n");
-                    let dialog = setup_step_dialog(
+                    let dialog = status_step_dialog(
                         SetupStep::SelfCheck,
                         "Self-check",
+                        criticals.is_empty(),
+                        &format!("Self-check finished: {passed} of {total} passed"),
                         &body,
                         [("continue", "Continue")],
                         "continue",
@@ -703,7 +628,7 @@ impl SetupCtx {
                 Err(error) => self.retryable_failure(
                     SetupStep::SelfCheck,
                     "Self-check",
-                    "Self-check could not run.",
+                    "Self-check couldn't run",
                     &error,
                 ),
             },
@@ -727,10 +652,12 @@ impl SetupCtx {
     /// Step 5 — farewell. Close returns to the main view; the secondary
     /// button keeps the old Settings → Setup shortcut within reach.
     fn done_step(self) {
-        let dialog = setup_step_dialog(
+        let dialog = status_step_dialog(
             SetupStep::Done,
             "All done",
-            "✓ Setup complete.\n\nYou can change all of these later under Setup.",
+            true,
+            "Setup complete",
+            "You can change all of these later under Setup.",
             [("opensetup", "Open Setup"), ("done", "Close")],
             "done",
         );
@@ -762,7 +689,7 @@ pub(crate) fn setup_step_dialog(
     suggested: &'static str,
 ) -> adw::AlertDialog {
     let title = format!(
-        "First-time setup ({}/{}) — {topic}",
+        "Setup ({}/{}): {topic}",
         step.number(),
         SetupStep::Done.number()
     );
@@ -775,10 +702,48 @@ pub(crate) fn setup_step_dialog(
     dialog
 }
 
+/// Like [`setup_step_dialog`], but leads with a symbolic status icon and a
+/// bold headline instead of a text glyph; `rest` is the plain detail text.
+pub(crate) fn status_step_dialog(
+    step: SetupStep,
+    topic: &str,
+    ok: bool,
+    headline: &str,
+    rest: &str,
+    responses: impl IntoIterator<Item = (&'static str, &'static str)>,
+    suggested: &'static str,
+) -> adw::AlertDialog {
+    let dialog = setup_step_dialog(step, topic, "", responses, suggested);
+    let col = gtk::Box::new(Orientation::Vertical, 10);
+    let head = gtk::Box::new(Orientation::Horizontal, 8);
+    head.set_halign(Align::Center);
+    let icon = gtk::Image::from_icon_name(if ok {
+        "emblem-ok-symbolic"
+    } else {
+        "dialog-warning-symbolic"
+    });
+    icon.add_css_class(if ok { "success" } else { "warning" });
+    let title = gtk::Label::new(Some(headline));
+    title.add_css_class("heading");
+    title.set_wrap(true);
+    head.append(&icon);
+    head.append(&title);
+    col.append(&head);
+    if !rest.is_empty() {
+        let detail = gtk::Label::new(Some(rest));
+        detail.set_wrap(true);
+        detail.set_justify(gtk::Justification::Center);
+        detail.set_max_width_chars(48);
+        col.append(&detail);
+    }
+    dialog.set_extra_child(Some(&col));
+    dialog
+}
+
 /// `Some(install command)` when the ryzen_smu DKMS build cannot work yet
 /// because `dkms` or the running kernel's headers are missing; `None` when
 /// both are present. The command matches the distro and kernel flavour.
-fn dkms_prereqs_missing() -> Option<String> {
+pub(crate) fn dkms_prereqs_missing() -> Option<String> {
     let release = std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|s| s.trim().to_string())
         .unwrap_or_default();

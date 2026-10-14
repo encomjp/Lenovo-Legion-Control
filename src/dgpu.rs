@@ -50,7 +50,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
     // nvidia-smi resumes a runtime-suspended card; polling it every few
     // seconds would keep the dGPU awake and drain the battery on hybrid.
     if nvidia_runtime_suspended() {
-        log::trace!("nvidia-smi: dGPU runtime-suspended — not waking it");
+        log::trace!("nvidia-smi: dGPU runtime-suspended: not waking it");
         return None;
     }
     let started = Instant::now();
@@ -73,7 +73,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
     };
     let pid = child.id();
     log::trace!(
-        "nvidia-smi: pid {pid} running — arming {}s timeout",
+        "nvidia-smi: pid {pid} running: arming {}s timeout",
         SMI_TIMEOUT.as_secs()
     );
     let (tx, rx) = mpsc::channel();
@@ -83,7 +83,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
         if tx.send(child.wait_with_output()).is_err() {
             log::debug!(
                 "nvidia-smi: reaper for pid {pid} finished but receiver is gone \
-                 (timeout path already returned) — child reaped anyway"
+                 (timeout path already returned): child reaped anyway"
             );
         }
     });
@@ -97,7 +97,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
             );
             let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if s.is_empty() {
-                log::debug!("nvidia-smi: empty stdout — treated as no data");
+                log::debug!("nvidia-smi: empty stdout: treated as no data");
                 None
             } else {
                 Some(s)
@@ -121,7 +121,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
         }
         Err(_) => {
             log::warn!(
-                "nvidia-smi timed out after {}s — killing pid {pid}",
+                "nvidia-smi timed out after {}s: killing pid {pid}",
                 SMI_TIMEOUT.as_secs()
             );
             // SAFETY: kill(pid, SIGKILL) is a plain syscall; the pid belongs
@@ -279,6 +279,43 @@ pub fn discrete_state() -> &'static str {
         // Never live this boot AND nvidia-smi absent → likely no dGPU or
         // driver unloaded; either way the card never reported in.
         "off"
+    }
+}
+
+/// dGPU temperature as seen by the fan-curve engine.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThermalState {
+    /// No discrete GPU, or no way to read it (no nvidia-smi / non-NVIDIA
+    /// without an amdgpu hwmon) — contributes nothing.
+    NotApplicable,
+    /// Runtime-suspended: cold by definition, and we must not wake it.
+    Asleep,
+    /// Awake with a plausible reading (°C).
+    Temp(f64),
+    /// Awake but the reading failed — callers must treat as a sensor fault.
+    Failed,
+}
+
+/// Temperature for safety/curve decisions. Never wakes a sleeping dGPU.
+pub fn thermal_state() -> ThermalState {
+    if !discrete_present() {
+        return ThermalState::NotApplicable;
+    }
+    if crate::device::gpu_inventory().discrete_vendor.as_deref() != Some("NVIDIA") {
+        return match crate::sensors::amd_dgpu_temp_c() {
+            Some(t) => ThermalState::Temp(t),
+            None => ThermalState::NotApplicable,
+        };
+    }
+    if find_nvidia_smi().is_none() {
+        return ThermalState::NotApplicable;
+    }
+    if nvidia_runtime_suspended() {
+        return ThermalState::Asleep;
+    }
+    match read_metrics_batch().temp {
+        Some(t) if t.is_finite() && t > 0.0 => ThermalState::Temp(t),
+        _ => ThermalState::Failed,
     }
 }
 

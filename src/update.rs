@@ -245,6 +245,24 @@ pub fn changelog_headline(body: &str) -> String {
 }
 
 /// Full notes for the What's new tab (tables stripped).
+/// Short plain-text highlights from release notes: the bold title of each
+/// top-level bullet (or the bullet text without markdown), at most `n`.
+pub fn release_highlights(body: &str, n: usize) -> Vec<String> {
+    body.lines()
+        .filter(|l| l.starts_with("- ") || l.starts_with("* "))
+        .map(|l| {
+            let t = l[2..].trim();
+            let t = match (t.strip_prefix("**"), t.find("**:")) {
+                (Some(rest), Some(_)) => rest.split("**").next().unwrap_or(rest),
+                _ => t,
+            };
+            t.replace("**", "").replace('`', "").trim().trim_end_matches(':').to_string()
+        })
+        .filter(|t| !t.is_empty())
+        .take(n)
+        .collect()
+}
+
 pub fn changelog_notes(body: &str) -> String {
     let notes = body
         .lines()
@@ -402,7 +420,7 @@ fn parse_release_json(bytes: &[u8]) -> Result<ReleaseInfo, String> {
     if body_str.contains("Not Found")
         || body_str.contains("\"message\"") && !body_str.contains("\"tag_name\"")
     {
-        log::debug!("update: no formal releases found on GitHub repo — current version is latest");
+        log::debug!("update: no formal releases found on GitHub repo: current version is latest");
         return Ok(empty_release(CURRENT_VERSION));
     }
 
@@ -1943,5 +1961,14 @@ mod tests {
         fs::write(dir.join("install.sh"), "#!/bin/sh\n").unwrap();
         assert!(looks_like_source_tree(&dir));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn release_highlights_strip_markdown() {
+        let body = "## v1\n- **GPU mode (MUX)**: switch between `hybrid` and dGPU\n  - nested detail\n- Plain `item`\n| table |";
+        assert_eq!(
+            super::release_highlights(body, 4),
+            vec!["GPU mode (MUX)".to_string(), "Plain item".to_string()]
+        );
     }
 }
