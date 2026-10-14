@@ -78,6 +78,8 @@ pub fn build_lighting(
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
 
     let tabs = adw::ViewStack::new();
+    tabs.set_hhomogeneous(false);
+    tabs.set_vhomogeneous(false);
     tabs.set_vhomogeneous(false);
     tabs.set_vexpand(true);
     tabs.add_titled_with_icon(

@@ -262,6 +262,8 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     header.add_css_class("flat");
 
     let stack = adw::ViewStack::new();
+    stack.set_hhomogeneous(false);
+    stack.set_vhomogeneous(false);
     stack.set_vexpand(true);
 
     let release = gtk::Box::new(Orientation::Vertical, 12);

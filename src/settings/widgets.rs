@@ -47,7 +47,7 @@ pub fn page_shell_width(
 ) -> gtk::ScrolledWindow {
     use gtk::PolicyType;
     let max = match width {
-        PageWidth::Standard => 760,
+        PageWidth::Standard => 820,
         PageWidth::Wide => 1120,
     };
     let clamp = libadwaita::Clamp::builder()
@@ -65,7 +65,7 @@ pub fn page_shell_width(
 }
 
 pub fn page_box(title: &str, subtitle: &str) -> gtk::Box {
-    let page = gtk::Box::new(Orientation::Vertical, 18);
+    let page = gtk::Box::new(Orientation::Vertical, 12);
     page.add_css_class("page");
     page.set_vexpand(true);
 
@@ -163,30 +163,158 @@ pub fn string_combo_row(
 }
 
 pub fn section_tip(title: &str, blurb: Option<&str>) -> (gtk::Box, gtk::Box) {
-    let wrap = gtk::Box::new(Orientation::Vertical, 0);
-    wrap.add_css_class("section");
-    let head = gtk::Box::new(Orientation::Vertical, 0);
-    head.add_css_class("section-head");
+    let wrap = gtk::Box::new(Orientation::Vertical, 6);
     let label = gtk::Label::new(Some(title));
-    label.add_css_class("section-label");
+    label.add_css_class("section-title");
     label.set_halign(Align::Start);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::None);
-    label.set_wrap(true);
-    head.append(&label);
+    label.set_xalign(0.0);
+    wrap.append(&label);
     if let Some(b) = blurb {
         if !b.is_empty() {
             let sub = gtk::Label::new(Some(b));
-            sub.add_css_class("section-sub");
+            sub.add_css_class("section-note");
             sub.set_halign(Align::Start);
+            sub.set_xalign(0.0);
             sub.set_wrap(true);
-            head.append(&sub);
+            wrap.append(&sub);
         }
     }
-    wrap.append(&head);
     let card = gtk::Box::new(Orientation::Vertical, 0);
-    card.add_css_class("card");
+    card.add_css_class("panel");
     wrap.append(&card);
     (wrap, card)
+}
+
+/// Section title label (sentence case) used above panels and groups.
+pub fn section_title(text: &str) -> gtk::Label {
+    let l = gtk::Label::new(Some(text));
+    l.add_css_class("section-title");
+    l.set_halign(Align::Start);
+    l.set_xalign(0.0);
+    l
+}
+
+/// Linked segmented toggle group with radio semantics for mutually
+/// exclusive choices. `active` starts checked (`u32::MAX` = none).
+pub fn segmented(labels: &[String], active: u32) -> (gtk::Box, Vec<gtk::ToggleButton>) {
+    let bx = gtk::Box::builder()
+        .orientation(Orientation::Horizontal)
+        .accessible_role(gtk::AccessibleRole::RadioGroup)
+        .build();
+    bx.add_css_class("linked");
+    bx.add_css_class("segmented");
+    bx.set_halign(Align::Start);
+    let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
+    for (i, label) in labels.iter().enumerate() {
+        let b = gtk::ToggleButton::builder()
+            .label(label)
+            .accessible_role(gtk::AccessibleRole::Radio)
+            .build();
+        b.add_css_class("seg-btn");
+        if let Some(first) = buttons.first() {
+            b.set_group(Some(first));
+        }
+        b.set_active(i as u32 == active);
+        bx.append(&b);
+        buttons.push(b);
+    }
+    (bx, buttons)
+}
+
+/// Secondary button: subtle fill + border. The default for every action.
+pub fn secondary_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
+    let btn = gtk::Button::with_label(label);
+    btn.add_css_class("pill-btn");
+    btn.set_valign(Align::Center);
+    if let Some(tt) = tooltip {
+        tip(&btn, tt);
+    }
+    btn
+}
+
+/// Destructive button (red text on a subtle fill).
+pub fn destructive_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
+    let btn = secondary_button_tip(label, tooltip);
+    btn.add_css_class("destructive-action");
+    btn
+}
+
+/// Square icon button; `label` is the accessible name and tooltip.
+pub fn icon_button(icon_name: &str, label: &str) -> gtk::Button {
+    let btn = gtk::Button::from_icon_name(icon_name);
+    btn.add_css_class("icon-btn");
+    btn.set_valign(Align::Center);
+    btn.update_property(&[gtk::accessible::Property::Label(label)]);
+    tip(&btn, label);
+    btn
+}
+
+/// Small status indicator: coloured dot + body-size text.
+/// `kind` is "ok", "warn", "bad" or anything else for neutral.
+pub fn status_line(text: &str, kind: &str) -> (gtk::Box, gtk::Label) {
+    let row = gtk::Box::new(Orientation::Horizontal, 6);
+    row.set_valign(Align::Center);
+    let dot = gtk::Box::new(Orientation::Vertical, 0);
+    dot.add_css_class("status-dot");
+    if matches!(kind, "ok" | "warn" | "bad") {
+        dot.add_css_class(kind);
+    }
+    dot.set_valign(Align::Center);
+    let label = gtk::Label::new(Some(text));
+    label.add_css_class("row-sub");
+    label.set_xalign(0.0);
+    label.set_wrap(true);
+    label.set_hexpand(true);
+    row.append(&dot);
+    row.append(&label);
+    (row, label)
+}
+
+/// Re-colour a bundled single-colour SVG to the current foreground so it
+/// follows light/dark. Fills of pure white become the cut-out colour.
+fn recolor_svg(svg: &[u8], dark: bool) -> glib::Bytes {
+    let text = String::from_utf8_lossy(svg).to_string();
+    let (fg, cut) = if dark {
+        ("#e6e6e6", "#2b2b2b")
+    } else {
+        ("#3d3d3d", "#ffffff")
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(i) = rest.find("fill=\"#") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + 7..];
+        let end = tail.find('"').unwrap_or(0);
+        let colour = &tail[..end];
+        let is_white = colour.eq_ignore_ascii_case("fff") || colour.eq_ignore_ascii_case("ffffff");
+        out.push_str(&format!("fill=\"{}\"", if is_white { cut } else { fg }));
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
+    glib::Bytes::from_owned(out.into_bytes())
+}
+
+/// Monochrome icon from a bundled SVG that tracks the colour scheme.
+pub fn mono_icon(svg: &'static [u8], size: i32) -> gtk::Image {
+    let image = gtk::Image::new();
+    image.set_pixel_size(size);
+    let apply = {
+        let image = image.clone();
+        move |dark: bool| {
+            if let Ok(tex) = gtk::gdk::Texture::from_bytes(&recolor_svg(svg, dark)) {
+                image.set_paintable(Some(&tex));
+            }
+        }
+    };
+    let style = adw::StyleManager::default();
+    apply(style.is_dark());
+    let weak = image.downgrade();
+    style.connect_dark_notify(move |s| {
+        if weak.upgrade().is_some() {
+            apply(s.is_dark());
+        }
+    });
+    image
 }
 
 /// Hover text for Spectrum lighting effects.
@@ -236,7 +364,7 @@ pub fn labeled_row_tip(
     tooltip: Option<&str>,
 ) -> gtk::Box {
     let row = gtk::Box::new(Orientation::Vertical, 8);
-    row.add_css_class("row");
+    row.add_css_class("panel-row");
     row.set_hexpand(true);
     tip(&row, tooltip.unwrap_or(""));
 
@@ -269,11 +397,6 @@ pub fn labeled_row_tip(
         w.set_hexpand(true);
         w.set_halign(Align::Fill);
         wrap.append(&w);
-        let marks = gtk::Label::new(Some("0  ·  3  ·  6  ·  9"));
-        marks.add_css_class("scale-marks");
-        marks.set_halign(Align::Fill);
-        marks.set_xalign(0.5);
-        wrap.append(&marks);
         row.append(&top);
         row.append(&wrap);
     } else {
@@ -339,7 +462,7 @@ pub fn primary_button_tip(label: &str, tooltip: Option<&str>) -> gtk::Button {
     let btn = gtk::Button::with_label(label);
     btn.add_css_class("suggested-action");
     btn.add_css_class("pill-btn");
-    btn.set_halign(Align::Start);
+    btn.set_valign(Align::Center);
     if let Some(tt) = tooltip {
         tip(&btn, tt);
     }

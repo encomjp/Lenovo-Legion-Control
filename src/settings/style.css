@@ -1,518 +1,469 @@
-/* Legion Control — Garage Lab Console */
+/* Legion Control — restrained libadwaita styling.
+ *
+ * Design system
+ *   Surfaces   window = @window_bg_color, panels = @card_bg_color with a
+ *              1px hairline border. No gradients, glows or drop shadows.
+ *   Accent     red (@accent_bg_color) only for the one primary action per
+ *              view and for the active state of segmented controls/sliders.
+ *   Type       sentence case. Titles 600-700, captions 0.82rem at 65%
+ *              opacity, numbers use tabular figures in the UI font.
+ *   Buttons    .pill-btn          secondary: subtle fill + 1px border
+ *              .suggested-action  primary: filled accent (max one a view)
+ *              .destructive-action destructive: red text on subtle fill
+ *              .icon-btn          34x34 square icon button
+ *              .segmented         linked toggle group for exclusive choices
+ *   Status     .status-pill (text) and .status-dot, semantic colours only
+ *              (@success_color / @warning_color / @error_color).
+ */
 
-/* ── Palette + Glass — Alacritty-clean transparency ─────────────── */
 @define-color accent_color #c8102e;
 @define-color accent_bg_color #c8102e;
 @define-color accent_fg_color #ffffff;
-@define-color lab_amber #d9981a;
-@define-color lab_amber_fg #1a1404;
-@define-color lab_steel #6b7280;
-@define-color lab_surface #f3eee6;
-@define-color lab_rule alpha(currentColor, 0.10);
-@define-color lab_rule_strong alpha(currentColor, 0.14);
-@define-color glass_bg @theme_base_color;
-@define-color glass_border alpha(@window_fg_color, 0.10);
-@define-color glass_highlight alpha(@window_fg_color, 0.06);
-
-.glass-card {
-    background: @theme_base_color;
-    border: 1px solid alpha(@window_fg_color, 0.10);
-    border-radius: 16px;
-    box-shadow: 0 8px 28px alpha(black, 0.12);
-}
-
-.glass-panel {
-    background: @theme_base_color;
-    border: 1px solid alpha(@window_fg_color, 0.09);
-    border-radius: 14px;
-    box-shadow: 0 6px 20px alpha(black, 0.10);
-}
 
 /* ── Type ─────────────────────────────────────────────────────────── */
 .numeric {
-    font-feature-settings: "tnum" 1, "ss01" 1;
     font-variant-numeric: tabular-nums;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-window.background {
-    background-color: @theme_bg_color;
+/* Header — keep the title legible, quiet */
+headerbar windowtitle label.title {
+    font-weight: 700;
 }
 
-window {
-    background-color: @theme_bg_color;
-    opacity: 1;
-}
-
-/* Header — keep title legible at a glance */
-headerbar windowtitle label.title,
-headerbar windowtitle .title {
-    font-weight: 800;
-    letter-spacing: -0.02em;
-}
-headerbar windowtitle label.subtitle,
-headerbar windowtitle .subtitle {
-    opacity: 0.60;
-    font-size: 0.82rem;
-}
-
-.navigation-sidebar:not(.sidebar-child):not(.nav-glass) row {
-    min-height: 44px;
-}
-
-/* ── Sidebar — instrument rail ───────────────────────────────────── */
+/* ── Sidebar ──────────────────────────────────────────────────────── */
 .sidebar-brand {
-    padding: 18px 16px 14px;
-    border-bottom: 1px solid alpha(@window_fg_color, 0.07);
+    padding: 14px 14px 10px;
 }
 
 .sidebar-brand .brand-name {
-    font-size: 1.02rem;
-    font-weight: 800;
-    letter-spacing: -0.04em;
-    text-transform: uppercase;
-}
-
-.sidebar-brand .brand-sub {
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    opacity: 0.42;
-    margin-top: 3px;
-}
-
-.sidebar-foot {
-    padding: 12px 14px 14px;
-    border-top: 1px solid alpha(@window_fg_color, 0.09);
-    background: alpha(@theme_base_color, 0.36);
-    border-radius: 14px;
-    margin: 8px 10px 10px 10px;
-    box-shadow: 0 8px 24px alpha(black, 0.08), 0 1px 0 alpha(@window_fg_color, 0.06) inset;
-}
-
-.sidebar-foot .conn-label {
-    font-size: 0.70rem;
-    font-weight: 800;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-}
-
-.sidebar-foot .conn-sub {
-    font-size: 0.68rem;
-    opacity: 0.50;
-    margin-top: 2px;
-    line-height: 1.3;
-}
-
-.conn-dot {
-    min-width: 10px;
-    min-height: 10px;
-    border-radius: 99px;
-    background: #2ecc71;
-    box-shadow: 0 0 0 4px alpha(#2ecc71, 0.18);
-    margin-top: 3px;
-    margin-right: 4px;
-}
-
-.conn-dot.off {
-    background: #e86a6a;
-    box-shadow: 0 0 0 4px alpha(#e86a6a, 0.18);
-}
-
-.navigation-sidebar row {
-    border-radius: 10px;
-    margin: 1px 8px;
-    border: 1px solid transparent;
-    min-height: 42px;
-    padding: 2px 0;
-    /* NN/g: simple feedback ~100 ms feels immediate; 150 ms is the sweet spot
-       for selection highlight — perceptible but not sluggish. Ease-out on
-       entrance so the highlight decelerates into place. */
-    transition: background 150ms cubic-bezier(0.2, 0, 0, 1),
-        border-color 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.navigation-sidebar row:hover {
-    background: alpha(@window_fg_color, 0.07);
-    border-color: alpha(@window_fg_color, 0.06);
-}
-
-.navigation-sidebar row:selected {
-    background: alpha(@theme_selected_bg_color, 0.18);
-    border-color: alpha(@theme_selected_bg_color, 0.22);
-    box-shadow: none;
-}
-
-.navigation-sidebar row:selected label.title {
-    color: @theme_selected_fg_color;
-    font-weight: 700;
-}
-
-.navigation-sidebar row:selected label.subtitle {
-    color: alpha(@theme_selected_fg_color, 0.70);
-    opacity: 1.0;
-}
-
-.navigation-sidebar row:selected image {
-    color: @theme_selected_fg_color;
-}
-
-/* Flat rail — one row per destination, no expandable sections. */
-.sidebar-flat row label.title {
     font-size: 0.98rem;
     font-weight: 700;
 }
 
-/* ── Pages — a touch more air, cards breathe ─────────────────────── */
-.page {
-    padding: 20px 24px 44px;
+.navigation-sidebar row {
+    border-radius: 8px;
+    margin: 1px 8px;
+    min-height: 34px;
+    padding: 0;
 }
 
-.page-title {
-    font-size: 1.45rem;
-    font-weight: 800;
-    letter-spacing: -0.04em;
-    text-transform: uppercase;
+.navigation-sidebar row:hover {
+    background: alpha(@window_fg_color, 0.06);
+}
+
+.navigation-sidebar row:selected {
+    background: alpha(@window_fg_color, 0.11);
+}
+
+.navigation-sidebar row:selected label.title {
+    font-weight: 700;
+}
+
+.sidebar-flat row label.title {
+    font-size: 0.93rem;
+    font-weight: 500;
+}
+
+.sidebar-foot {
+    padding: 10px 16px 12px;
+    border-top: 1px solid alpha(@window_fg_color, 0.09);
+}
+
+.sidebar-foot .conn-label {
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.sidebar-foot .conn-sub {
+    font-size: 0.78rem;
+    opacity: 0.65;
+}
+
+.conn-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 99px;
+    background: @success_color;
+    margin-top: 5px;
+    margin-right: 2px;
+}
+
+.conn-dot.off {
+    background: @error_color;
+}
+
+.conn-dot.warn {
+    background: @warning_color;
+}
+
+/* ── Pages ────────────────────────────────────────────────────────── */
+.page {
+    padding: 12px 18px 16px;
+}
+
+.page-lede {
+    font-size: 0.86rem;
+    opacity: 0.65;
 }
 
 .page-sub {
     font-size: 0.86rem;
-    opacity: 0.58;
-    margin-top: 3px;
-    margin-bottom: 2px;
-    line-height: 1.4;
+    opacity: 0.65;
 }
 
-.page-sub-solo {
-    margin-top: 0;
-    margin-bottom: 4px;
-}
-
-.page-lede {
-    font-size: 0.88rem;
-    opacity: 0.62;
-    margin-bottom: 10px;
-    line-height: 1.45;
-}
-
-/* ── Sections — rule-led, not card-only ───────────────────────── */
-.section {
-    margin-bottom: 22px;
-}
-
-.section-head {
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid alpha(currentColor, 0.09);
-}
-
-.section-label {
-    font-size: 0.95rem;
+/* Section title above a panel (sentence case, quiet) */
+.section-title {
+    font-size: 0.92rem;
     font-weight: 700;
-    opacity: 0.95;
 }
 
-.section-sub {
-    font-size: 0.78rem;
-    opacity: 0.55;
-    margin-top: 3px;
-    line-height: 1.35;
+.section-note {
+    font-size: 0.82rem;
+    opacity: 0.65;
 }
 
+/* Panel: the one surface used for grouped content */
+.panel,
 .card {
-    background: @theme_base_color;
-    border: 1px solid alpha(@window_fg_color, 0.08);
-    border-radius: 16px;
-    padding: 16px 16px;
-    box-shadow: 0 8px 24px alpha(black, 0.10);
+    background: @card_bg_color;
+    border: 1px solid alpha(@window_fg_color, 0.11);
+    border-radius: 10px;
+    box-shadow: none;
+    padding: 10px 14px;
 }
 
-.card + .card {
-    margin-top: 10px;
+.panel.flush {
+    padding: 0;
 }
 
-.card-head {
-    margin-bottom: 8px;
+/* Rows inside a panel separated by hairlines */
+.panel-row {
+    padding: 8px 0;
+    border-top: 1px solid alpha(@window_fg_color, 0.08);
 }
 
-.card-head-title {
-    font-weight: 750;
-    font-size: 0.96rem;
-    letter-spacing: -0.02em;
-}
-
-/* Alt: inset control strip — for dense operate rows */
-.card.inset {
-    background: alpha(currentColor, 0.02);
-    border-style: dashed;
-}
-
-.row {
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-}
-
-.row:last-child {
-    margin-bottom: 0;
-}
-
-.row:hover {
-    background: alpha(currentColor, 0.03);
-    border-color: alpha(currentColor, 0.08);
+.panel-row.first {
+    border-top: none;
 }
 
 .row-title {
-    font-weight: 700;
-    font-size: 0.90rem;
-    letter-spacing: -0.01em;
+    font-weight: 600;
+    font-size: 0.92rem;
 }
 
-.row-sub {
-    font-size: 0.78rem;
-    opacity: 0.55;
-    margin-top: 2px;
-    line-height: 1.35;
+.row-sub,
+.caption-text {
+    font-size: 0.82rem;
+    opacity: 0.65;
 }
 
-/* ── Metric chips — bench readouts ──────────────────────────────── */
-.metric-grid {
-    margin-bottom: 10px;
+/* Native boxed lists: tighter rows, hairline border, no shadow */
+list.boxed-list,
+.boxed-list {
+    box-shadow: none;
+    border: 1px solid alpha(@window_fg_color, 0.11);
+    border-radius: 10px;
 }
 
+preferencesgroup > box > box > label.heading,
+preferencesgroup .heading {
+    font-size: 0.92rem;
+}
+
+row.action > box.header,
+row.expander > box > box.header,
+row.combo > box.header,
+row.entry > box.header {
+    min-height: 40px;
+}
+
+row.action > box.header > box.title label.subtitle {
+    font-size: 0.80rem;
+}
+
+/* ── Stat cards (live metrics) ────────────────────────────────────── */
 .metric-grid > flowboxchild {
     padding: 0;
 }
 
 .metric-chip {
-    background: linear-gradient(180deg, alpha(@theme_base_color, 0.46), alpha(@theme_base_color, 0.34));
+    background: @card_bg_color;
     border: 1px solid alpha(@window_fg_color, 0.11);
-    border-left-width: 4px;
-    border-radius: 16px;
-    padding: 14px 16px;
-    min-width: 148px;
-    box-shadow: 0 10px 28px alpha(black, 0.10), 0 1px 0 alpha(@window_fg_color, 0.07) inset;
-    /* Micro-interactions: 150 ms per NN/g — fast enough to feel immediate,
-       slow enough to be perceivable. Material standard curve. */
-    transition: border-color 150ms cubic-bezier(0.2, 0, 0, 1),
-        background 150ms cubic-bezier(0.2, 0, 0, 1), transform 150ms cubic-bezier(0.2, 0, 0, 1),
-        box-shadow 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.metric-chip:hover {
-    border-color: alpha(@window_fg_color, 0.16);
-    background: linear-gradient(180deg, alpha(@theme_base_color, 0.52), alpha(@theme_base_color, 0.40));
-    transform: translateY(-1px);
-    box-shadow: 0 14px 32px alpha(black, 0.13), 0 1px 0 alpha(@window_fg_color, 0.08) inset;
-}
-
-/* Cross-fade metric values so 2-3 s data refreshes don't hard-snap —
-   NN/g Heuristic 1: visibility of system status with *continuous* feedback.
-   Keep it subtle: 180 ms < 200 ms threshold where animation drags. */
-.metric-chip .value,
-.metric-chip .detail {
-    transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1), color 180ms cubic-bezier(0.2, 0, 0, 1);
+    border-radius: 10px;
+    padding: 10px 14px 10px;
+    min-width: 0;
 }
 
 .metric-chip .label {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: alpha(@card_fg_color, 0.75);
+    font-size: 0.82rem;
+    font-weight: 500;
+    opacity: 0.72;
 }
 
 .metric-chip .value {
-    font-size: 1.45rem;
-    font-weight: 800;
-    margin-top: 6px;
-    letter-spacing: -0.04em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
 }
 
 .metric-chip .detail {
-    font-size: 0.72rem;
-    opacity: 0.52;
-    margin-top: 2px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.80rem;
+    opacity: 0.65;
+    margin-top: 1px;
 }
 
-/* Left-edge status — steel by default, amber/red by state */
-.metric-chip.hot {
-    border-left-color: @accent_bg_color;
-}
-.metric-chip.hot .value {
-    color: #ff6b7e;
-}
-
-.metric-chip.warm {
-    border-left-color: @lab_amber;
-}
 .metric-chip.warm .value {
-    color: #f5c542;
+    color: @warning_color;
 }
 
-/* ── Status pills — sharper, technical ──────────────────────────── */
+.metric-chip.hot .value {
+    color: @error_color;
+}
+
+/* ── Status ───────────────────────────────────────────────────────── */
 .status-pill {
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    min-width: 36px;
-    min-height: 28px;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid alpha(@window_fg_color, 0.09);
-    background: alpha(@theme_base_color, 0.38);
-    box-shadow: 0 4px 14px alpha(black, 0.07);
-}
-
-.status-pill.status-warn,
-.status-pill.status-bad {
-    padding: 0 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    min-height: 0;
+    padding: 2px 9px;
+    border-radius: 99px;
+    background: alpha(@window_fg_color, 0.08);
 }
 
 .status-ok {
-    color: #46f08a;
-    background: alpha(#2ecc71, 0.16);
-    border-color: alpha(#2ecc71, 0.30);
+    color: @success_color;
+    background: alpha(@success_color, 0.14);
 }
 
 .status-warn {
-    color: #f5c542;
-    background: alpha(@lab_amber, 0.18);
-    border-color: alpha(@lab_amber, 0.32);
+    color: @warning_color;
+    background: alpha(@warning_color, 0.16);
 }
 
 .status-bad {
-    color: #ff6b7e;
-    background: alpha(@accent_bg_color, 0.16);
-    border-color: alpha(@accent_bg_color, 0.30);
+    color: @error_color;
+    background: alpha(@error_color, 0.14);
 }
 
 .status-muted {
-    opacity: 0.60;
+    opacity: 0.8;
 }
 
-/* ── Buttons — instrument controls ──────────────────────────────── */
-.pill-btn {
-    min-height: 36px;
-    padding-left: 16px;
-    padding-right: 16px;
-    border-radius: 10px;
-    font-weight: 750;
-    font-size: 0.88rem;
-    letter-spacing: -0.01em;
-    border: 1px solid alpha(@window_fg_color, 0.09);
-    background: alpha(@theme_base_color, 0.38);
-    box-shadow: 0 4px 14px alpha(black, 0.07);
-    transition: background 150ms cubic-bezier(0.2, 0, 0, 1),
-        border-color 150ms cubic-bezier(0.2, 0, 0, 1), transform 120ms cubic-bezier(0.2, 0, 0, 1);
+.status-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 99px;
+    background: alpha(@window_fg_color, 0.35);
 }
 
-/* Breathing room inside boxed-list rows and cards. */
-row .pill-btn,
-row button {
-    margin-top: 4px;
-    margin-bottom: 4px;
+.status-dot.ok { background: @success_color; }
+.status-dot.warn { background: @warning_color; }
+.status-dot.bad { background: @error_color; }
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+/* Secondary (default for every action button) */
+button.pill-btn {
+    min-height: 22px;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: @window_fg_color;
+    background: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.16);
+    box-shadow: none;
+    transition: background 120ms ease-out, border-color 120ms ease-out;
 }
 
-row .pill-btn + .pill-btn {
-    margin-left: 8px;
+button.pill-btn:hover {
+    background: alpha(@window_fg_color, 0.12);
+    border-color: alpha(@window_fg_color, 0.24);
 }
 
-/* Quiet link-style opener for external destinations. */
-button.open-btn {
-    font-weight: 700;
-    padding: 6px 14px;
+button.pill-btn:active {
+    background: alpha(@window_fg_color, 0.16);
 }
 
-.pill-btn:hover {
-    border-color: alpha(currentColor, 0.16);
+button.pill-btn:disabled {
+    opacity: 0.45;
 }
 
-.pill-btn:active {
-    transform: scale(0.98);
-}
-
-.pill-btn.suggested-action {
-    background-color: @accent_bg_color;
+/* Primary: at most one per view */
+button.pill-btn.suggested-action {
+    background: @accent_bg_color;
     color: @accent_fg_color;
-    border-color: alpha(@accent_bg_color, 0.0);
+    border-color: transparent;
+    font-weight: 600;
 }
 
-.pill-btn.suggested-action:hover {
-    background-color: shade(@accent_bg_color, 1.06);
+button.pill-btn.suggested-action:hover {
+    background: shade(@accent_bg_color, 1.10);
 }
 
-.pill-btn.suggested-action:active {
-    background-color: shade(@accent_bg_color, 0.96);
+button.pill-btn.suggested-action:active {
+    background: shade(@accent_bg_color, 0.92);
 }
 
-/* Destructive stays destructive — no red-as-accent inflation */
-button.destructive-action {
+button.pill-btn.suggested-action:disabled {
+    opacity: 0.45;
+}
+
+/* Destructive: quiet until hovered */
+button.pill-btn.destructive-action {
+    color: @error_color;
+    background: alpha(@error_color, 0.10);
+    border-color: alpha(@error_color, 0.35);
+}
+
+button.pill-btn.destructive-action:hover {
+    background: alpha(@error_color, 0.18);
+}
+
+/* Icon button: same height as the text buttons */
+button.icon-btn {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 5px;
     border-radius: 8px;
+    background: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.16);
+    box-shadow: none;
+}
+
+button.icon-btn:hover {
+    background: alpha(@window_fg_color, 0.12);
+}
+
+/* Plain adw buttons placed in rows (ActionRow suffixes, banners) */
+row button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle) {
+    min-height: 22px;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-weight: 500;
+    background: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.16);
+    box-shadow: none;
+}
+
+row button.suggested-action {
+    min-height: 22px;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    box-shadow: none;
+}
+
+/* Segmented control: linked toggle group for exclusive choices */
+.segmented {
+    background: alpha(@window_fg_color, 0.06);
+    border: 1px solid alpha(@window_fg_color, 0.12);
+    border-radius: 9px;
+    padding: 2px;
+}
+
+.segmented button,
+.segmented .seg-btn {
+    min-height: 22px;
+    min-width: 0;
+    padding: 4px 12px;
+    border-radius: 7px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    background: transparent;
+    border: 1px solid transparent;
+    box-shadow: none;
+    margin: 0;
+}
+
+.segmented button:hover:not(:checked) {
+    background: alpha(@window_fg_color, 0.08);
+}
+
+.segmented button:checked {
+    background: @accent_bg_color;
+    color: @accent_fg_color;
+    font-weight: 600;
+}
+
+.segmented button:disabled {
+    opacity: 0.45;
+}
+
+/* Reset spacing libadwaita's .linked adds between our own rounded segments */
+.segmented.linked > button,
+.segmented.linked > button:first-child,
+.segmented.linked > button:last-child {
+    border-radius: 7px;
+}
+
+.segmented.linked > button:not(:first-child) {
+    margin-left: 2px;
+}
+
+/* ── Detail / hint text ───────────────────────────────────────────── */
+.detail-body {
+    font-size: 0.80rem;
+    opacity: 0.75;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.09);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.hint {
+    font-size: 0.82rem;
+    opacity: 0.7;
+}
+
+.dim-label {
+    opacity: 0.65;
+}
+
+.cc-hint,
+.cc-mode-value {
+    font-size: 0.82rem;
+    opacity: 0.68;
+}
+
+.cc-section {
+    font-size: 0.92rem;
     font-weight: 700;
 }
 
-.btn-row {
-    margin-top: 14px;
+.scale-value {
+    font-weight: 600;
+    font-size: 0.86rem;
+    min-width: 3.4rem;
+    font-variant-numeric: tabular-nums;
 }
 
-.profile-blurb {
-    font-size: 0.80rem;
-    opacity: 0.58;
-    margin-top: 4px;
-    margin-bottom: 4px;
-    line-height: 1.4;
+.scale-marks {
+    font-size: 0.72rem;
+    opacity: 0.5;
 }
 
-.ppt-block {
-    margin-top: 12px;
-    padding-top: 14px;
-    border-top: 1px solid alpha(currentColor, 0.10);
+.fan-rpm {
+    font-size: 0.92rem;
+    font-weight: 600;
+    min-width: 4.6rem;
+    font-variant-numeric: tabular-nums;
 }
 
-.ppt-title {
-    font-weight: 750;
-    font-size: 0.84rem;
-    letter-spacing: -0.01em;
-    text-transform: uppercase;
-    opacity: 0.72;
-    margin-bottom: 4px;
-}
-
-.detail-toggle {
-    margin-top: 8px;
-}
-
-.detail-body {
-    font-size: 0.74rem;
-    opacity: 0.62;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    margin-top: 8px;
-    line-height: 1.45;
-    background: alpha(currentColor, 0.04);
-    border: 1px solid alpha(currentColor, 0.07);
-    border-radius: 8px;
-    padding: 10px 12px;
-}
-
-/* ── Swatches — tighter, technical ─────────────────────────────── */
+/* ── Swatches (lighting) ──────────────────────────────────────────── */
 .swatch {
-    min-width: 34px;
-    min-height: 34px;
-    border-radius: 8px;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 99px;
     padding: 0;
-    border: 1px solid alpha(currentColor, 0.12);
-    transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1);
+    border: 1px solid alpha(@window_fg_color, 0.20);
+    box-shadow: none;
 }
 
 .swatch:hover {
-    transform: translateY(-1px);
-    border-color: alpha(currentColor, 0.18);
+    border-color: alpha(@window_fg_color, 0.45);
 }
 
 .swatch-c8102e { background: #c8102e; }
@@ -522,240 +473,94 @@ button.destructive-action {
 .swatch-a020f0 { background: #a020f0; }
 .swatch-00e65a { background: #00e65a; }
 .swatch-ff8c00 { background: #ff8c00; }
-.swatch-000000 { background: #1a1a1e; border-color: alpha(currentColor, 0.22); }
-
-.charge-pill {
-    min-width: 84px;
-    min-height: 36px;
-    border-radius: 8px;
-    font-weight: 800;
-    font-size: 0.92rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    border: 1px solid alpha(currentColor, 0.10);
-}
-
-.charge-pill.suggested-action {
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
-    border-color: transparent;
-}
-
-.battery-pct {
-    font-size: 2.4rem;
-    font-weight: 800;
-    letter-spacing: -0.05em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.battery-status {
-    opacity: 0.52;
-    margin-top: 4px;
-    font-size: 0.82rem;
-}
-
-.battery-details {
-    border-top: 1px solid alpha(currentColor, 0.10);
-    padding-top: 14px;
-}
-
-.hint {
-    font-size: 0.78rem;
-    opacity: 0.54;
-    margin-top: 10px;
-    line-height: 1.4;
-    border-left: 2px solid alpha(@accent_bg_color, 0.22);
-    padding-left: 10px;
-    background: alpha(@theme_base_color, 0.38);
-    border-radius: 0 10px 10px 0;
-    padding-top: 6px;
-    padding-bottom: 6px;
-    padding-right: 10px;
-}
-
-.amp-ok { color: #1a7a3a; }
-.amp-soft { color: #8a5a00; }
-.amp-broken { color: #a70e26; }
-.amp-na { opacity: 0.62; }
-
-.lighting-switcher {
-    margin-bottom: 10px;
-}
-
-.lighting-switcher button {
-    border-radius: 10px;
-    font-weight: 700;
-    background: alpha(@theme_base_color, 0.52);
-    border: 1px solid alpha(@window_fg_color, 0.08);
-    box-shadow: 0 2px 10px alpha(black, 0.05);
-}
-
-.lighting-switcher button:checked {
-    background: @accent_bg_color;
-    color: @accent_fg_color;
-    border-color: transparent;
-}
-
-.nav-glass {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    padding-bottom: 6px;
-    border-bottom: 1px solid alpha(@window_fg_color, 0.07);
-    margin-bottom: 8px;
-}
+.swatch-000000 { background: #1a1a1e; }
 
 .colour-picker {
-    min-width: 48px;
-    min-height: 36px;
-    padding: 0;
+    min-width: 40px;
+    min-height: 22px;
+    padding: 4px;
     border-radius: 8px;
-    border: 1px solid alpha(currentColor, 0.10);
-}
-
-.colour-picker > * {
-    min-width: 44px;
-    min-height: 32px;
-    border-radius: 6px;
 }
 
 .perkey-canvas {
-    border-radius: 10px;
-    border: 1px solid alpha(currentColor, 0.10);
-    min-height: 150px;
+    border-radius: 8px;
+    border: 1px solid alpha(@window_fg_color, 0.11);
+    min-height: 120px;
     min-width: 0;
-    background: alpha(currentColor, 0.02);
+    background: alpha(@window_fg_color, 0.03);
 }
 
 .perkey-tools {
     margin-top: 6px;
 }
 
-.dim-label {
-    opacity: 0.58;
+/* Battery */
+.battery-pct {
+    font-size: 2rem;
     font-weight: 700;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.84rem;
+    font-variant-numeric: tabular-nums;
 }
 
-.fan-rpm {
-    font-size: 0.98rem;
-    font-weight: 750;
-    min-width: 5.2rem;
-    opacity: 0.78;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.battery-status {
+    opacity: 0.65;
+    font-size: 0.86rem;
 }
 
-list.navigation-sidebar row {
-    padding: 4px 0;
-}
+.amp-ok { color: @success_color; }
+.amp-soft { color: @warning_color; }
+.amp-broken { color: @error_color; }
+.amp-na { opacity: 0.62; }
 
-.sidebar-child row {
-    padding: 2px 0;
-}
-
-/* ── Focus — visible, offset, consistent ─────────────────────────── */
+/* ── Focus ────────────────────────────────────────────────────────── */
 *:focus:focus-visible {
-    outline: 2px solid alpha(@accent_bg_color, 0.55);
-    outline-offset: 2px;
+    outline: 2px solid alpha(@accent_bg_color, 0.65);
+    outline-offset: 1px;
 }
 
-/* ── Banner — lab warning strip ─────────────────────────────────── */
-banner {
-    border-bottom: 1px solid alpha(@accent_bg_color, 0.18);
-}
-
-/* ── Hub tab bar — horizontal sub-navigation pinned above each page ── */
+/* ── Hub tab bar ──────────────────────────────────────────────────── */
 .hub-bar {
-    padding: 8px 18px;
-    border-bottom: 1px solid alpha(@window_fg_color, 0.07);
-    background: alpha(@theme_base_color, 0.30);
+    padding: 6px 12px;
+    border-bottom: 1px solid alpha(@window_fg_color, 0.08);
 }
 
-/* ── Toasts — failures read differently from confirmations ─────── */
+/* ── Toasts ───────────────────────────────────────────────────────── */
 toast label.toast-error {
-    font-weight: 800;
-    color: #ff97a6;
+    font-weight: 700;
 }
 
-/* ── Scales — bench sliders (always a bar, never a dot) ────────────── */
+/* ── Scales: bar track, accent fill ───────────────────────────────── */
 scale trough {
-    min-height: 8px;
+    min-height: 6px;
     border-radius: 99px;
-    background: alpha(currentColor, 0.10);
-    border: 1px solid alpha(@window_fg_color, 0.06);
+    background: alpha(@window_fg_color, 0.12);
 }
 
 scale highlight {
     background: @accent_bg_color;
     border-radius: 99px;
-    min-height: 8px;
+    min-height: 6px;
 }
 
 scale slider {
-    min-width: 16px;
-    min-height: 16px;
+    min-width: 14px;
+    min-height: 14px;
     border-radius: 99px;
     background: white;
-    border: 1px solid alpha(black, 0.10);
-    box-shadow: 0 1px 4px alpha(black, 0.18), 0 0 0 3px alpha(@accent_bg_color, 0.0);
-    transition: box-shadow 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-scale slider:hover {
-    box-shadow: 0 2px 8px alpha(black, 0.20), 0 0 0 4px alpha(@accent_bg_color, 0.14);
-}
-
-scale slider:active {
-    box-shadow: 0 1px 6px alpha(black, 0.22), 0 0 0 4px alpha(@accent_bg_color, 0.22);
-}
-
-/* Ensure the trough bar is always visible even at 0 and when unfocused */
-scale trough highlight {
-    opacity: 1;
-}
-
-/* Numeric value + marks helper row */
-.scale-marks {
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    opacity: 0.42;
-    margin-top: 2px;
-}
-
-.scale-value {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-weight: 800;
-    font-size: 0.82rem;
-    min-width: 3.2rem;
-}
-
-/* Thermal slider: muted when throttling off */
-.thermal-scale.muted trough {
-    background: alpha(currentColor, 0.08);
+    border: 1px solid alpha(black, 0.18);
+    box-shadow: 0 1px 2px alpha(black, 0.20);
 }
 
 .thermal-scale.muted {
-    opacity: 0.42;
+    opacity: 0.45;
 }
 
 .thermal-scale.muted highlight {
-    background: alpha(currentColor, 0.12);
+    background: alpha(@window_fg_color, 0.18);
 }
 
 .thermal-scale .tjmax-mark {
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    color: #a70e26;
-    opacity: 0.72;
-}
-
-.thermal-validate-row {
-    margin-top: 8px;
-    border-left: 2px solid alpha(@lab_amber, 0.22);
-    padding-left: 10px;
+    font-size: 0.70rem;
+    color: @error_color;
 }
 
 .thermal-tctl-dot {
@@ -763,73 +568,36 @@ scale trough highlight {
     min-height: 8px;
     border-radius: 99px;
     background: white;
-    border: 1px solid alpha(black, 0.14);
-    box-shadow: 0 0 0 3px alpha(#2d7dd6, 0.18);
+    border: 1px solid alpha(black, 0.25);
     margin-top: -6px;
 }
 
-.thermal-tctl-dot.hot {
-    background: @accent_bg_color;
-    box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.20);
-}
+.thermal-tctl-dot.hot { background: @error_color; }
+.thermal-tctl-dot.warm { background: @warning_color; }
 
-.thermal-tctl-dot.warm {
-    background: @lab_amber;
-    box-shadow: 0 0 0 3px alpha(@lab_amber, 0.22);
-}
-
-/* ── Motion & a11y ───────────────────────────────────────────────
-   NN/g: excessive or long animations harm users with vestibular
-   disorders and feel sluggish to everyone else. We keep every
-   transition in the 100–300 ms window, use ease-out (Material
-   cubic-bezier 0.2,0,0,1) on entrance, and honor the platform
-   "reduce motion" preference. */
-/* GTK CSS has no ::before/::after pseudo-elements and no !important —
-   a bare * plus the class selectors this file gives transitions is what
-   actually parses and wins specificity. */
-/* ── Updates row — compact status + equal buttons ─────────────────── */
+/* ── Updates row / dialog ─────────────────────────────────────────── */
 .updates-row .subtitle {
-    font-size: 0.78rem;
-    opacity: 0.62;
-    line-height: 1.3;
-}
-.updates-row .title {
-    font-size: 0.90rem;
-}
-.updates-row button.pill-btn {
-    font-size: 0.84rem;
-    min-height: 32px;
-    padding-left: 12px;
-    padding-right: 12px;
-}
-/* Adwaita keeps the accent fill on suggested-action:disabled; opacity
-   alone still reads as a clickable red button. Neutralize the fill. */
-button.pill-btn.suggested-action:disabled {
-    opacity: 1;
-    color: alpha(@window_fg_color, 0.45);
-    background: alpha(@theme_base_color, 0.38);
-    border-color: alpha(@window_fg_color, 0.09);
-    box-shadow: none;
+    font-size: 0.80rem;
+    opacity: 0.68;
 }
 
-/* Update dialog — compact card, notes on a second tab */
 .update-dialog {
-    min-width: 480px;
+    min-width: 420px;
 }
+
 .update-dialog .update-version {
-    font-size: 1.28rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
+    font-size: 1.2rem;
+    font-weight: 700;
 }
+
 .update-dialog .update-blurb {
-    font-size: 0.95rem;
-    opacity: 0.78;
-    line-height: 1.35;
+    font-size: 0.92rem;
+    opacity: 0.8;
 }
+
 .update-dialog .update-notes {
     font-size: 0.86rem;
-    line-height: 1.45;
-    opacity: 0.88;
+    line-height: 1.4;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -837,117 +605,83 @@ button.pill-btn.suggested-action:disabled {
         transition-duration: 0.01ms;
         animation-duration: 0.01ms;
     }
-    .navigation-sidebar row,
-    .sidebar-chevron,
-    .metric-chip,
-    .metric-chip .value,
-    .metric-chip .detail,
-    .pill-btn,
-    .swatch {
-        transition-duration: 0.01ms;
-    }
 }
 
-
-/* ── Control center ─────────────────────────────────────────────── */
-.cc-header {
-    margin-bottom: 4px;
-}
-.cc-model {
-    font-size: 1.5rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-}
-.cc-machine {
-    font-size: 0.80rem;
-    opacity: 0.62;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.cc-health-btn {
-    padding: 2px;
-    border-radius: 999px;
-    min-height: 0;
-}
-.cc-section {
-    font-size: 0.66rem;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    opacity: 0.60;
-}
-.cc-hint {
-    font-size: 0.78rem;
-    opacity: 0.58;
-}
-.cc-block {
-    margin-top: 2px;
-}
-.cc-link {
-    font-size: 0.80rem;
-    font-weight: 700;
-    color: @accent_bg_color;
-    min-height: 0;
-    padding: 2px 8px;
-}
-.cc-mode-value {
-    font-weight: 800;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    margin-end: 8px;
+/* ── Control center ───────────────────────────────────────────────── */
+.live-panel {
+    padding: 2px 14px;
 }
 
-/* Segmented control (power mode, charge limit) */
-.segmented .seg-btn {
-    min-height: 36px;
-    min-width: 84px;
-    padding: 0 18px;
+.live-row {
+    min-height: 38px;
+}
+
+.live-row + .live-row {
+    border-top: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.live-name {
+    font-size: 0.92rem;
+    font-weight: 500;
+}
+
+.live-row .value {
+    font-size: 1rem;
     font-weight: 700;
 }
-.segmented .seg-btn:checked {
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
-}
 
-/* Live cards: thin usage bar */
-.live-card progressbar.card-bar trough,
-.live-card progressbar.card-bar progress {
+.live-row.warm .value { color: @warning_color; }
+.live-row.hot .value { color: @error_color; }
+
+.live-row progressbar.card-bar trough,
+.live-row progressbar.card-bar progress {
     min-height: 4px;
-    border-radius: 999px;
+    border-radius: 99px;
 }
-.live-card progressbar.card-bar trough {
-    background-color: alpha(currentColor, 0.10);
+
+.live-row progressbar.card-bar trough {
+    background-color: alpha(@window_fg_color, 0.12);
 }
-.live-card progressbar.card-bar progress {
+
+.live-row progressbar.card-bar progress {
     background-color: @accent_bg_color;
 }
-.live-card.warm progressbar.card-bar progress {
-    background-color: @lab_amber;
+
+.live-row.warm progressbar.card-bar progress {
+    background-color: @warning_color;
 }
 
-/* Temperature chart card */
-.cc-chart {
-    background: alpha(@theme_base_color, 0.45);
-    border: 1px solid alpha(@window_fg_color, 0.11);
-    border-radius: 14px;
-    padding: 12px 14px 8px 14px;
+.section-expander title {
+    font-weight: 600;
+    font-size: 0.9rem;
 }
+
 .cc-legend label {
-    font-size: 0.74rem;
-    font-weight: 700;
+    font-size: 0.80rem;
+    font-weight: 600;
 }
-.legend-cpu { color: #c8102e; }
-.legend-gpu { color: #d9981a; }
 
-/* Quick toggles */
+.legend-cpu { color: @accent_bg_color; }
+.legend-gpu { color: @warning_color; }
+
 .quick-tile {
-    background: alpha(@theme_base_color, 0.45);
+    background: @card_bg_color;
     border: 1px solid alpha(@window_fg_color, 0.11);
-    border-radius: 14px;
-    padding: 12px 16px;
+    border-radius: 10px;
+    padding: 8px 14px;
 }
+
 .quick-name {
-    font-weight: 700;
+    font-weight: 600;
+    font-size: 0.92rem;
 }
+
 .quick-hint {
-    font-size: 0.74rem;
-    opacity: 0.58;
+    font-size: 0.80rem;
+    opacity: 0.65;
+}
+
+.fan-card .fan-state {
+    font-size: 0.82rem;
+    opacity: 0.7;
 }
