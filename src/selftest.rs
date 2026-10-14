@@ -12,8 +12,11 @@
 //! [`run_deployment_checks`] validates install state: user group membership,
 //! daemon unit enabled, udev rule applied, socket permissions, binary path.
 
-use crate::{battery, comms, config, device, fans, keyboard, profile, sensors, thermal, undervolt};
+use crate::{
+    battery, comms, config, device, fans, ideapad, keyboard, profile, sensors, thermal, undervolt,
+};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SelfCheck {
@@ -54,6 +57,38 @@ fn check(name: &'static str, ok: bool, detail: impl Into<String>) -> SelfCheck {
         detail: detail.into(),
     }
 }
+
+/// Pure: capability backends that are model-table guesses, not hardware.
+fn is_placeholder_fan_backend(backend: &str) -> bool {
+    backend.starts_with("profile-fallback") || backend == "none"
+}
+
+fn all_backend_unavailable(states: &[fans::FanRpmState]) -> bool {
+    !states.is_empty()
+        && states
+            .iter()
+            .all(|s| *s == fans::FanRpmState::BackendUnavailable)
+}
+
+/// Pure: `fan_rpms_readable` verdict. Fails on any unreadable attribute or
+/// when no channel has an RPM backend at all (82JY/82K2 on Fedora used to
+/// pass with "fan1 backend-unavailable · fan2 backend-unavailable").
+fn fan_rpms_ok(states: &[fans::FanRpmState]) -> bool {
+    !states.contains(&fans::FanRpmState::Unreadable) && !all_backend_unavailable(states)
+}
+
+/// Pure: consecutive-sample counter — `hit` extends the streak, a miss resets it.
+fn next_streak(prev: u32, hit: bool) -> u32 {
+    if hit {
+        prev.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// `fans_off_while_hot` needs this many consecutive fault scans: single
+/// transient zero reads at 90 °C on 83F5 idle fan-stop raised false faults.
+const FANS_OFF_MIN_SAMPLES: u32 = 2;
 
 fn plaus(v: f64, lo: f64, hi: f64) -> bool {
     (-20.0..=hi).contains(&v) && v >= lo || v == -1.0 // -1 = "no reading" sentinel
@@ -112,28 +147,43 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
         format!("{limit}% via {source}"),
     ));
 
-    // Fans.
+    // Fans. Profile-fallback / static placeholder channels are model-table
+    // guesses, not enumerated hardware.
     let channels = fans::channels();
+    let cap_backend = device::detect().capabilities.fan_backend;
+    let placeholder = is_placeholder_fan_backend(&cap_backend);
     out.push(check(
         "fans_enumerated",
-        !channels.is_empty(),
-        format!("{} channel(s) via {}", channels.len(), fans::backend_name()),
+        !channels.is_empty() && !placeholder,
+        if placeholder {
+            format!(
+                "no fan hwmon — {} placeholder channel(s) from {cap_backend}",
+                channels.len()
+            )
+        } else {
+            format!("{} channel(s) via {}", channels.len(), fans::backend_name())
+        },
     ));
-    // Missing RPM support is a capability state, not a failed read. Only an
-    // attribute that exists but cannot be read indicates a broken backend.
-    let mut rpm_ok = true;
+    // A single missing RPM attribute is a capability state, not a failed
+    // read; an attribute that exists but cannot be read, or no RPM backend
+    // for any channel, means the fans cannot be monitored.
+    let mut states = Vec::new();
     let mut detail_parts: Vec<String> = Vec::new();
     for f in &channels {
         let (rpm, state) = fans::rpm_status(f.id);
-        if state == fans::FanRpmState::Unreadable {
-            rpm_ok = false;
-        }
+        states.push(state);
         match rpm {
             Some(rpm) => detail_parts.push(format!("fan{} {rpm} rpm", f.id)),
             None => {
                 detail_parts.push(format!("fan{} {}", f.id, state.as_str()));
             }
         }
+    }
+    let rpm_ok = fan_rpms_ok(&states);
+    if !rpm_ok && all_backend_unavailable(&states) {
+        detail_parts.push("no RPM backend".into());
+    } else if fans::rpm_estimated() && states.contains(&fans::FanRpmState::Readable) {
+        detail_parts.push("estimated (unverified EC layout)".into());
     }
     out.push(check("fan_rpms_readable", rpm_ok, detail_parts.join(" · ")));
 
@@ -179,10 +229,16 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             b <= 9,
             format!("brightness {b}/9"),
         )),
+        // Absent controller = model without per-key RGB: not a failure.
+        None if !keyboard::spectrum_present() => out.push(check(
+            "spectrum_controller",
+            true,
+            "not present on this model (no Spectrum RGB)",
+        )),
         None => out.push(check(
             "spectrum_controller",
             false,
-            "048d:c197 not detected (optional component)",
+            "048d:c197 present but unreadable — udev rule / permissions",
         )),
     }
     match keyboard::camera_power() {
@@ -200,6 +256,21 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             true,
             "not exposed (physical shutter or no ideapad attr)",
         )),
+    }
+
+    for (name, toggle) in [
+        ("fn_lock", ideapad::Toggle::FnLock),
+        ("usb_charging", ideapad::Toggle::UsbCharging),
+    ] {
+        out.push(check(
+            name,
+            true,
+            match ideapad::get(toggle) {
+                Some(true) => "on (ideapad attr)",
+                Some(false) => "off (ideapad attr)",
+                None => "not exposed (optional)",
+            },
+        ));
     }
 
     // Platform profile.
@@ -235,17 +306,9 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     } else {
         let co = undervolt::status();
         let is_root = unsafe { libc::geteuid() } == 0;
-        out.push(check(
-            "curve_optimizer",
-            co.available || !is_root,
-            if co.available {
-                format!("available ({})", co.reason)
-            } else if is_root {
-                format!("root probe failed: {}", co.reason)
-            } else {
-                format!("unavailable without root (expected): {}", co.reason)
-            },
-        ));
+        let (ok, detail) =
+            curve_optimizer_verdict(undervolt::applicability(), co.available, &co.reason, is_root);
+        out.push(check("curve_optimizer", ok, detail));
     }
 
     // cpufreq inputs + dynamic scaling policy check (bounds check against hardware capability).
@@ -360,6 +423,26 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     out
 }
 
+/// Curve Optimizer self-check verdict. Only fails when it is applicable
+/// (validated AMD machine with ryzen_smu present) and the probe still broke.
+fn curve_optimizer_verdict(
+    applicable: Result<(), String>,
+    available: bool,
+    reason: &str,
+    is_root: bool,
+) -> (bool, String) {
+    if let Err(why) = applicable {
+        return (true, format!("not applicable / optional driver not installed: {why}"));
+    }
+    if available {
+        (true, format!("available ({reason})"))
+    } else if is_root {
+        (false, format!("root probe failed: {reason}"))
+    } else {
+        (true, format!("unavailable without root (expected): {reason}"))
+    }
+}
+
 // ═══ Machine fault detection (anomalies, distinct from pass/fail) ═════════
 
 /// Scan for active machine anomalies. Read-only; typical cost is one
@@ -396,27 +479,41 @@ pub fn scan_faults() -> Vec<Fault> {
     let readings: Vec<Option<u32>> = fan_ids.iter().map(|id| fans::read_rpm(*id)).collect();
     let any_readable = readings.iter().any(|r| r.is_some());
     let any_airflow = readings.iter().any(|r| r.unwrap_or(0) > 0);
-    if hottest >= 80.0 && any_readable && !any_airflow {
+    static FANS_OFF_STREAK: AtomicU32 = AtomicU32::new(0);
+    let streak = next_streak(
+        FANS_OFF_STREAK.load(Ordering::Relaxed),
+        hottest >= 80.0 && any_readable && !any_airflow,
+    );
+    FANS_OFF_STREAK.store(streak, Ordering::Relaxed);
+    if streak >= FANS_OFF_MIN_SAMPLES {
         out.push(fault(
             "fans_off_while_hot",
             Severity::Warning,
-            format!("package at {hottest:.0}°C with all fans reading 0 rpm"),
+            format!(
+                "package at {hottest:.0}°C with all fans reading 0 rpm ({streak} consecutive scans)"
+            ),
         ));
+    } else if streak > 0 {
+        log::debug!("fault scan: fans read 0 rpm at {hottest:.0}°C — sample {streak}/{FANS_OFF_MIN_SAMPLES}");
     }
 
     // ── NVMe thermals ───────────────────────────────────────────────────
-    for t in &s.ssd_composite {
-        if *t >= 84.0 {
+    // Thresholds come from each drive's own tempN_max/tempN_crit (70/84 °C
+    // only when the drive reports none).
+    for r in sensors::nvme_readings() {
+        let t = r.temp;
+        let (warn, critical) = sensors::nvme_fault_thresholds(r.max, r.crit);
+        if t >= critical {
             out.push(fault(
                 "nvme_overheat",
                 Severity::Critical,
-                format!("NVMe at {t:.0}°C — approaching throttle/limit"),
+                format!("NVMe at {t:.0}°C — at its {critical:.0}°C limit"),
             ));
-        } else if *t >= 70.0 {
+        } else if t >= warn {
             out.push(fault(
                 "nvme_hot",
                 Severity::Warning,
-                format!("NVMe at {t:.0}°C"),
+                format!("NVMe at {t:.0}°C (warns from {warn:.0}°C)"),
             ));
         }
     }
@@ -813,13 +910,14 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         .contains("AMD");
     if is_amd {
         let smu = std::path::Path::new("/sys/kernel/ryzen_smu_drv").exists();
+        // Optional driver: absence is not a failure.
         out.push(check(
             "ryzen_smu_module",
-            smu,
+            true,
             if smu {
                 "loaded".to_string()
             } else {
-                "not loaded (needed for Curve Optimizer only)".to_string()
+                "not installed (optional, Curve Optimizer only)".to_string()
             },
         ));
     } else {
@@ -833,4 +931,59 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
     let passed = out.iter().filter(|c| c.ok).count();
     log::debug!("deployment checks: done — {passed}/{} passed", out.len());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fans::FanRpmState::{BackendUnavailable, NotExposed, Readable, Unreadable};
+    use super::curve_optimizer_verdict as verdict;
+
+    #[test]
+    fn curve_optimizer_not_applicable_is_ok() {
+        let (ok, d) = verdict(Err("driver not loaded".into()), false, "x", true);
+        assert!(ok && d.contains("not applicable"), "{d}");
+        let (ok, _) = verdict(Err("codename 14 not validated".into()), false, "x", false);
+        assert!(ok);
+    }
+
+    #[test]
+    fn curve_optimizer_fails_only_when_applicable_and_broken() {
+        assert!(verdict(Ok(()), true, "ok", true).0);
+        assert!(!verdict(Ok(()), false, "smu read failed", true).0);
+        // Non-root cannot run the probe: expected, not a failure.
+        assert!(verdict(Ok(()), false, "needs root", false).0);
+    }
+
+    #[test]
+    fn fan_rpms_fail_when_no_channel_has_a_backend() {
+        assert!(!fan_rpms_ok(&[BackendUnavailable, BackendUnavailable]));
+        assert!(!fan_rpms_ok(&[Readable, Unreadable]));
+        assert!(fan_rpms_ok(&[Readable, NotExposed]));
+        assert!(fan_rpms_ok(&[Readable, BackendUnavailable]));
+        assert!(fan_rpms_ok(&[]), "no channels is fans_enumerated's failure");
+    }
+
+    #[test]
+    fn placeholder_fan_backends_are_not_enumerated_hardware() {
+        assert!(is_placeholder_fan_backend("profile-fallback (GKCN)"));
+        assert!(is_placeholder_fan_backend("none"));
+        assert!(!is_placeholder_fan_backend("lenovo_wmi_other"));
+        assert!(!is_placeholder_fan_backend("legion_hwmon"));
+        assert!(!is_placeholder_fan_backend("ec-fallback"));
+    }
+
+    #[test]
+    fn fans_off_needs_consecutive_samples() {
+        let mut s = next_streak(0, true);
+        assert!(
+            s < FANS_OFF_MIN_SAMPLES,
+            "one transient sample must not fire"
+        );
+        s = next_streak(s, false);
+        assert_eq!(s, 0, "a normal sample resets the streak");
+        s = next_streak(next_streak(s, true), true);
+        assert!(s >= FANS_OFF_MIN_SAMPLES);
+        assert_eq!(next_streak(u32::MAX, true), u32::MAX);
+    }
 }

@@ -3,10 +3,14 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.13.md`](v0.2.13.md), [`v0.2.12.md`](v0.2.12.md), [`v0.2.11.md`](v0.2.11.md), [`v0.2.10.md`](v0.2.10.md), [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.16.md`](v0.2.16.md), [`v0.2.15.md`](v0.2.15.md), [`v0.2.14.md`](v0.2.14.md), [`v0.2.13.md`](v0.2.13.md), [`v0.2.12.md`](v0.2.12.md), [`v0.2.11.md`](v0.2.11.md), [`v0.2.10.md`](v0.2.10.md), [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
 
-## Unreleased
+## 0.2.16 - 2026-10-14
+
+Security, privacy and hardware-support release — see [`v0.2.16.md`](v0.2.16.md).
+
+## Unreleased (pre-0.2.16 notes)
 
 - Catalog: promoted the 7 stub MTs into 9 real product rows (83EW/EG/EF split) with PSREF names + lighting enums; BIOS prefixes filled only from live/firmware-tracker sources (RYCN, NSCN, RLCN, NMCN, M3CN, MACN, M2CN); 83EF/83EG/83EX stay empty until live dmidecode; 83Q7 lighting set to sku_variant (1-zone RGB or 24-zone per Spec PDF).
 

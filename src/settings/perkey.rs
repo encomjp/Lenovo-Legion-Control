@@ -1832,7 +1832,7 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
             ticket.set(t);
             let ticket = ticket.clone();
             glib::timeout_add_local_once(std::time::Duration::from_millis(90), move || {
-                if ticket.get() == t {
+                if ticket.get() == t && legion_core::keyboard::spectrum_present() {
                     legion_core::keyboard::restore_lighting_async();
                 }
             });
@@ -1900,7 +1900,9 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     clear.connect_clicked(move |_| {
         colors_c.borrow_mut().clear();
         area_cl.queue_draw();
-        legion_core::keyboard::clear_per_key_async();
+        if legion_core::keyboard::spectrum_present() {
+            legion_core::keyboard::clear_per_key_async();
+        }
     });
     tools.append(&clear);
 
@@ -1926,7 +1928,9 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
         };
         legion_core::config::set_per_key_colors(&batch);
         area_f.queue_draw();
-        legion_core::keyboard::restore_lighting_async();
+        if legion_core::keyboard::spectrum_present() {
+            legion_core::keyboard::restore_lighting_async();
+        }
     });
     tools.append(&fill);
 

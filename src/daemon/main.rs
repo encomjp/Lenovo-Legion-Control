@@ -10,8 +10,8 @@ use legion_core::comms::{
 };
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
-    battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
-    undervolt,
+    battery, config, cpu, device, fans, ideapad, keyboard, logging, profile, rgb_panic, sensors,
+    thermal, undervolt,
 };
 
 use std::collections::HashMap;
@@ -93,6 +93,56 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
 
 /// GID of the `legion` system group, if it exists. Socket access is gated by
 /// group membership (0660 root:legion); root always passes kernel checks.
+/// True when `uid` is a member of group `legion` RIGHT NOW (NSS lookup via
+/// getgrouplist — reflects a fresh `usermod -aG legion` without re-login,
+/// unlike the peer's cached supplementary groups).
+fn uid_in_legion_group(uid: u32) -> bool {
+    let Some(legion) = legion_group_gid() else {
+        return false;
+    };
+    // SAFETY: getpwuid_r writes into our stack buffers; we read pw_name and
+    // pw_gid only when it reports success with a non-null result.
+    unsafe {
+        let mut pwd: libc::passwd = std::mem::zeroed();
+        let mut buf = vec![0 as libc::c_char; 4096];
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        if libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result) != 0
+            || result.is_null()
+        {
+            return false;
+        }
+        let mut groups = vec![0 as libc::gid_t; 256];
+        let mut n = groups.len() as libc::c_int;
+        if libc::getgrouplist(pwd.pw_name, pwd.pw_gid, groups.as_mut_ptr(), &mut n) < 0 {
+            return false;
+        }
+        groups[..n.max(0) as usize].contains(&legion)
+    }
+}
+
+/// True when `uid` owns the foreground session on a local seat — the same
+/// `allow_active` rule polkit and udev `uaccess` apply. Remote (SSH) logins
+/// are "online", never "active".
+fn uid_has_active_local_session(uid: u32) -> bool {
+    std::process::Command::new("loginctl")
+        .args(["show-user", &uid.to_string(), "-p", "State", "--value"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false)
+}
+
+/// Authorisation for hardware-WRITE commands on the root daemon. The socket
+/// is 0666 so any user can read sensors without re-login after install;
+/// writes need root, the `legion` group, or the active local seat user.
+fn peer_may_write(uid: Option<u32>) -> bool {
+    match uid {
+        None => false,
+        Some(0) => true,
+        Some(u) => uid_in_legion_group(u) || uid_has_active_local_session(u),
+    }
+}
+
 fn legion_group_gid() -> Option<u32> {
     let name = std::ffi::CString::new("legion").ok()?;
     // SAFETY: getgrnam returns a pointer into static storage; we only read
@@ -131,6 +181,19 @@ fn main() {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("legion-daemon {}", env!("CARGO_PKG_VERSION"));
         return;
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "legion-daemon {} — Legion Control hardware daemon\n\n\
+             Usage: legion-daemon [--version | --help]\n\n\
+             Normally started by systemd: sudo systemctl enable --now legion-control",
+            env!("CARGO_PKG_VERSION")
+        );
+        return;
+    }
+    if let Some(bad) = args.iter().skip(1).find(|a| a.starts_with('-')) {
+        eprintln!("legion-daemon: unknown option {bad:?} (try --help)");
+        std::process::exit(2);
     }
     logging::init("legion-daemon");
     // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
@@ -207,9 +270,10 @@ fn main() {
         }
     };
 
-    // Socket permissions: root daemon → 0660 owned by group `legion` so only
-    // root and legion-group members can issue privileged commands. Never
-    // world-writable. Non-root daemon → umask default in XDG_RUNTIME_DIR.
+    // Socket permissions: root daemon → 0666 group `legion` so every local
+    // user can READ sensors without re-login after install; hardware WRITES
+    // are authorised per peer in handle_client (`peer_may_write`). Non-root
+    // daemon → umask default in the owner's 0700 XDG_RUNTIME_DIR.
     #[cfg(unix)]
     if euid == 0 {
         use std::os::unix::fs::PermissionsExt;
@@ -525,9 +589,10 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
     }
     log::debug!("client I/O timeout set to {CLIENT_IO_TIMEOUT:?}");
 
-    // Audit who connected. Kernel socket permissions (0660 root:legion)
-    // already gate access; this makes abuse visible in the journal.
-    if let Some(uid) = peer_uid(&stream) {
+    // Audit who connected. The root socket is 0666 (reads are open);
+    // write commands are authorised per peer below via SO_PEERCRED.
+    let peer = peer_uid(&stream);
+    if let Some(uid) = peer {
         log::debug!("client connected (uid={uid})");
     }
 
@@ -555,6 +620,30 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
 
     let kind = cmd_kind(&cmd);
     let is_write = cmd_is_write(&cmd);
+    // Log level and log tail are not hardware writes, but flooding the
+    // journal or reading log lines (paths, errors) is still privileged.
+    let needs_auth = is_write
+        || matches!(
+            cmd,
+            DaemonCommand::SetLogLevel(_)
+                | DaemonCommand::GetRecentLogs(_)
+                | DaemonCommand::SetTelemetry(_)
+        );
+    // A non-root daemon's socket lives in the owner's 0700 XDG_RUNTIME_DIR,
+    // so only the root daemon needs the per-peer write check.
+    // SAFETY: geteuid() is a pure POSIX syscall.
+    if needs_auth && unsafe { libc::geteuid() } == 0 && !peer_may_write(peer) {
+        log::warn!("denied write cmd {kind} from uid {peer:?} (not root, legion group or active seat)");
+        let _ = send_response(
+            &mut stream,
+            DaemonResponse::Error(
+                "Permission denied: hardware changes need the active desktop user or group \
+                 'legion' (sudo usermod -aG legion $USER)"
+                    .into(),
+            ),
+        );
+        return;
+    }
     log::debug!("dispatching cmd kind={kind} write={is_write}");
     let t0 = Instant::now();
     // Copy the throttle-log state out under a SHORT lock: process_command can
@@ -876,6 +965,14 @@ fn process_command(
             Ok(()) => DaemonResponse::Ok,
             Err(e) => DaemonResponse::Error(e),
         },
+        DaemonCommand::SetFnLock(on) => match ideapad::set(ideapad::Toggle::FnLock, on) {
+            Ok(()) => DaemonResponse::Ok,
+            Err(e) => DaemonResponse::Error(e),
+        },
+        DaemonCommand::SetUsbCharging(on) => match ideapad::set(ideapad::Toggle::UsbCharging, on) {
+            Ok(()) => DaemonResponse::Ok,
+            Err(e) => DaemonResponse::Error(e),
+        },
         DaemonCommand::GetBattery => DaemonResponse::Battery {
             capacity: battery::capacity().unwrap_or(0),
             status: battery::status().unwrap_or_default(),
@@ -959,6 +1056,13 @@ fn process_command(
         DaemonCommand::GetRecentLogs(n) => {
             let text = logging::recent_logs_text(n);
             DaemonResponse::RecentLogs(text)
+        }
+        DaemonCommand::SetTelemetry(enabled) => {
+            // The telemetry scheduler re-reads config every loop, so this
+            // takes effect before the next push.
+            legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+            log::info!("telemetry {} by user request", if enabled { "enabled" } else { "disabled" });
+            DaemonResponse::Ok
         }
         DaemonCommand::SetLogLevel(level) => {
             let lvl = match level.to_ascii_lowercase().as_str() {

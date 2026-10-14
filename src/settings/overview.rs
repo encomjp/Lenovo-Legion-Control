@@ -15,6 +15,12 @@ pub(crate) fn build_overview(
     trend_feed_slot: &Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>>,
 ) -> gtk::Box {
     let page = page_lede("");
+    if !legion_core::device::vendor_supported() {
+        let info = legion_core::device::detect();
+        let banner = adw::Banner::new(&info.profile_notes);
+        banner.set_revealed(true);
+        page.append(&banner);
+    }
 
     let metrics = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
@@ -40,18 +46,20 @@ pub(crate) fn build_overview(
     metrics.append(&bat_chip);
 
     let fan_channels = legion_core::fans::channels();
+    let aux_fan =
+        legion_core::fans::aux_id_from(&fan_channels.iter().map(|c| c.id).collect::<Vec<_>>());
     let mut fan_metric_labels: Vec<(u8, gtk::Label, gtk::Label)> = Vec::new();
     for ch in &fan_channels {
         let tip_txt = match ch.id {
             1 => "CPU fan speed in RPM (Auto = firmware curve)",
             2 => "GPU fan speed in RPM (Auto = firmware curve)",
-            4 => "Auxiliary chassis fan speed in RPM",
+            id if Some(id) == aux_fan => "Auxiliary chassis fan speed in RPM",
             _ => "Fan speed in RPM (Auto = firmware curve)",
         };
         let short = match ch.id {
             1 => "Fan · CPU".to_string(),
             2 => "Fan · GPU".to_string(),
-            4 => "Fan · Aux".to_string(),
+            id if Some(id) == aux_fan => "Fan · Aux".to_string(),
             _ => format!("Fan · {}", ch.id),
         };
         let (chip, v, d) = metric_chip_tip(&short, Some(tip_txt));
@@ -60,13 +68,19 @@ pub(crate) fn build_overview(
     }
     page.append(&metrics);
 
-    let power = pref_group("Power mode", None);
+    let blocked = legion_core::profile::blocked_choices();
+    let blocked_note = blocked
+        .iter()
+        .map(|(c, why)| format!("{} is hidden: {why}", friendly_profile(c)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let power = pref_group("Power mode", Some(blocked_note.as_str()));
     tip(
         &power,
         "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
     );
 
-    let choices = legion_core::profile::choices();
+    let choices = legion_core::profile::safe_choices();
     *profile_choices_slot.borrow_mut() = choices.clone();
     let labels: Vec<String> = choices.iter().map(|c| friendly_profile(c)).collect();
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
@@ -713,17 +727,25 @@ pub(crate) fn set_fan_metrics_from_sensors(
     labels: &[(u8, gtk::Label, gtk::Label)],
     s: &legion_core::sensors::SensorReadings,
 ) {
+    let ids: Vec<u8> = labels.iter().map(|(id, _, _)| *id).collect();
+    let aux = legion_core::fans::aux_id_from(&ids);
+    let estimated = legion_core::fans::rpm_estimated();
     for (id, value, detail) in labels {
         let (rpm, target) = match id {
             1 => (s.fan1_rpm, s.fan1_target),
             2 => (s.fan2_rpm, s.fan2_target),
-            4 => (s.fan4_rpm, s.fan4_target),
+            id if Some(*id) == aux => (s.fan4_rpm, s.fan4_target),
             _ => (
                 legion_core::fans::read_rpm(*id).unwrap_or(0),
                 legion_core::fans::read_target(*id).unwrap_or(0),
             ),
         };
+        let target = legion_core::fans::effective_target(target, legion_core::fans::read_max(*id));
         set_fan_metric(value, detail, rpm, target);
+        if estimated && rpm > 0 {
+            // Unverified EC-fallback layout — don't present it as a real tach.
+            detail.set_text(&format!("{} · est.", detail.text()));
+        }
     }
 }
 

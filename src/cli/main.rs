@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 use legion_core::{
     comms::{send_command, DaemonCommand, DaemonResponse},
-    diagnostics, selftest,
+    diagnostics, fans, selftest,
 };
 
 /// Print an operational-failure banner to stderr and exit 1 (stdout stays empty).
@@ -31,6 +31,35 @@ fn expect_ok(resp: Result<DaemonResponse, String>) -> Result<(), String> {
 /// Send a command and fail with exit 1 unless the daemon answers Ok.
 fn send_ok(cmd: DaemonCommand) -> Result<(), String> {
     expect_ok(send_command(cmd))
+}
+
+/// Show (no state) or set (on|off via the daemon) an ideapad_acpi toggle.
+fn ideapad_toggle(
+    name: &str,
+    toggle: legion_core::ideapad::Toggle,
+    state: Option<&str>,
+    make_cmd: fn(bool) -> DaemonCommand,
+) {
+    if !legion_core::ideapad::supported(toggle) {
+        fail(format!("{name} is not supported on this laptop"));
+    }
+    match state {
+        None => match legion_core::ideapad::get(toggle) {
+            Some(on) => println!("{name:<12} {}", if on { "on" } else { "off" }),
+            None => fail(format!("cannot read {name}")),
+        },
+        Some(s) => {
+            let on = match s.to_lowercase().as_str() {
+                "on" | "true" | "1" => true,
+                "off" | "false" | "0" => false,
+                _ => usage_fail(format!("unknown state '{s}' (use on|off)")),
+            };
+            if let Err(e) = send_ok(make_cmd(on)) {
+                fail(e);
+            }
+            println!("{name} → {}", if on { "on" } else { "off" });
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -62,7 +91,7 @@ enum Commands {
     Fan,
     /// Set fan target RPM (0 = auto)
     SetFan {
-        /// Fan number: 1 (CPU), 2 (GPU), or 4 (Aux)
+        /// Fan number: 1 (CPU), 2 (GPU), or 3/4 (Aux — fan3 on legion_hwmon)
         fan: u8,
         /// Target RPM (0 for auto)
         rpm: u32,
@@ -136,6 +165,16 @@ enum Commands {
         /// on or off
         state: String,
     },
+    /// Show or set Fn Lock (ideapad_acpi): no argument shows, on|off sets
+    FnLock {
+        /// on or off
+        state: Option<String>,
+    },
+    /// Show or set always-on USB charging (ideapad_acpi): no argument shows, on|off sets
+    UsbCharging {
+        /// on or off
+        state: Option<String>,
+    },
     /// Show recent daemon log lines
     Logs {
         /// Number of lines to fetch (default 50)
@@ -169,7 +208,7 @@ enum Commands {
         #[command(subcommand)]
         command: ThermalCmd,
     },
-    /// Anonymous diagnostics (alpha) — off unless enabled in Settings.
+    /// Anonymous diagnostics (alpha) — on by default; turn off in Settings → Setup.
     Diagnose {
         #[command(subcommand)]
         action: DiagAction,
@@ -197,6 +236,10 @@ enum DiagAction {
         #[arg(long)]
         endpoint: Option<String>,
     },
+    /// Turn anonymous telemetry on (for this user and the root daemon)
+    Enable,
+    /// Turn anonymous telemetry off (for this user and the root daemon)
+    Disable,
 }
 
 #[derive(Subcommand)]
@@ -251,6 +294,9 @@ fn main() {
         },
         Commands::SetProfile { name } => {
             let name = normalize_profile(&name);
+            if let Some(why) = legion_core::profile::blocked_reason(&name) {
+                fail(format!("refusing to set '{name}': {why}"));
+            }
             if name == "max-power" {
                 eprintln!(
                     "warning: Max Power / Extreme can overheat this laptop and wear hardware.\n\
@@ -262,7 +308,8 @@ fn main() {
             println!("profile → {}", friendly_profile(&name));
         }
         Commands::Fan => {
-            for (fan, name) in [(1u8, "CPU"), (2, "GPU"), (4, "Aux")] {
+            let [f1, f2, aux] = fans::slot_ids();
+            for (fan, name) in [(f1, "CPU"), (f2, "GPU"), (aux, "Aux")] {
                 match send_command(DaemonCommand::GetFanRpm(fan)) {
                     Ok(DaemonResponse::FanRpm(r)) => println!("{name:>3} fan: {r:>5} RPM"),
                     Ok(DaemonResponse::Error(e)) => eprintln!("{name} fan: {e}"),
@@ -272,9 +319,9 @@ fn main() {
             }
         }
         Commands::SetFan { fan, rpm } => {
-            if !matches!(fan, 1 | 2 | 4) {
+            if !matches!(fan, 1..=4) {
                 usage_fail(format!(
-                    "invalid fan index '{fan}'. Valid fan channels: 1 (CPU), 2 (GPU), 4 (Aux)"
+                    "invalid fan index '{fan}'. Valid fan channels: 1 (CPU), 2 (GPU), 3 or 4 (Aux)"
                 ));
             }
             if rpm > 8000 {
@@ -287,11 +334,14 @@ fn main() {
                 println!("fan {fan} → auto");
             } else {
                 println!("fan {fan} → {rpm} RPM");
+                if fans::manual_target_may_persist() {
+                    eprintln!("warning: {}", fans::GEN10_MANUAL_TARGET_WARNING);
+                }
             }
         }
         Commands::FanAuto => {
             let mut errors: Vec<String> = Vec::new();
-            for fan in [1u8, 2, 4] {
+            for fan in fans::slot_ids() {
                 log::debug!("fan-auto: fan {fan} → auto (attempt)");
                 match send_command(DaemonCommand::SetFanTarget(fan, 0)) {
                     Ok(DaemonResponse::Ok) => log::debug!("fan-auto: fan {fan} ok"),
@@ -513,6 +563,9 @@ fn main() {
                         info.capabilities.platform_profiles.join(", ")
                     );
                 }
+                for (profile, why) in legion_core::profile::blocked_choices() {
+                    println!("blocked     {profile}: {why}");
+                }
             }
             Ok(DaemonResponse::Error(e)) => fail(e),
             Err(e) => fail(e),
@@ -536,6 +589,7 @@ fn main() {
                 legion_core::audio::Health::SoftIssue => "soft-issue",
                 legion_core::audio::Health::HardwareBroken => "broken",
                 legion_core::audio::Health::NotApplicable => "n/a",
+                legion_core::audio::Health::DriverMissing => "driver-missing",
             };
             println!("status      {tag}");
             println!("summary     {}", d.summary);
@@ -562,7 +616,11 @@ fn main() {
             for line in &d.details {
                 println!("· {line}");
             }
-            if d.health == legion_core::audio::Health::HardwareBroken {
+            if matches!(
+                d.health,
+                legion_core::audio::Health::HardwareBroken
+                    | legion_core::audio::Health::DriverMissing
+            ) {
                 std::process::exit(2);
             }
             if d.health == legion_core::audio::Health::SoftIssue {
@@ -583,10 +641,15 @@ fn main() {
                 legion_core::audio::Health::SoftIssue => "soft-issue",
                 legion_core::audio::Health::HardwareBroken => "broken",
                 legion_core::audio::Health::NotApplicable => "n/a",
+                legion_core::audio::Health::DriverMissing => "driver-missing",
             };
             println!("status      {tag}");
             println!("summary     {}", d.summary);
-            if d.health == legion_core::audio::Health::HardwareBroken {
+            if matches!(
+                d.health,
+                legion_core::audio::Health::HardwareBroken
+                    | legion_core::audio::Health::DriverMissing
+            ) {
                 std::process::exit(2);
             }
             if d.health == legion_core::audio::Health::SoftIssue || !report.errors.is_empty() {
@@ -730,6 +793,18 @@ fn main() {
             send_ok(DaemonCommand::SetLogo(on)).ok();
             println!("logo → {}", if on { "on" } else { "off" });
         }
+        Commands::FnLock { state } => ideapad_toggle(
+            "fn-lock",
+            legion_core::ideapad::Toggle::FnLock,
+            state.as_deref(),
+            DaemonCommand::SetFnLock,
+        ),
+        Commands::UsbCharging { state } => ideapad_toggle(
+            "usb-charging",
+            legion_core::ideapad::Toggle::UsbCharging,
+            state.as_deref(),
+            DaemonCommand::SetUsbCharging,
+        ),
         Commands::Logs { n } => match send_command(DaemonCommand::GetRecentLogs(n)) {
             Ok(DaemonResponse::RecentLogs(text)) => {
                 if text.is_empty() {
@@ -838,6 +913,16 @@ fn main() {
             }
         },
         Commands::Diagnose { action } => match action {
+            DiagAction::Enable | DiagAction::Disable => {
+                let on = matches!(action, DiagAction::Enable);
+                legion_core::config::update(|c| c.diagnostics.enabled = on);
+                println!("telemetry {} for this user", if on { "enabled" } else { "disabled" });
+                match send_command(DaemonCommand::SetTelemetry(on)) {
+                    Ok(DaemonResponse::Ok) => println!("daemon: telemetry {}", if on { "enabled" } else { "disabled" }),
+                    Ok(DaemonResponse::Error(e)) | Err(e) => fail(format!("daemon not updated: {e}")),
+                    _ => fail("daemon not updated: unexpected response"),
+                }
+            }
             DiagAction::Dump => {
                 let json = serde_json::to_string_pretty(&diagnostics::collect())
                     .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
@@ -1210,6 +1295,9 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 "│  CPU {:>5}   GPU {:>5}   Aux {:>5} rpm             │",
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
+            if fans::rpm_estimated() && s.fan1_rpm.max(s.fan2_rpm).max(s.fan4_rpm) > 0 {
+                println!("│  (estimated — unverified EC fallback layout)       │");
+            }
             log::trace!(
                 "sensors: fans cpu {} gpu {} aux {} rpm",
                 s.fan1_rpm,
@@ -1297,6 +1385,8 @@ fn cmd_label(cmd: &Commands) -> String {
         Commands::RgbFix => "rgb-fix".into(),
         Commands::Logo => "logo".into(),
         Commands::SetLogo { state } => format!("set-logo state={state}"),
+        Commands::FnLock { state } => format!("fn-lock state={state:?}"),
+        Commands::UsbCharging { state } => format!("usb-charging state={state:?}"),
         Commands::Logs { n } => format!("logs n={n}"),
         Commands::SetLogLevel { level } => format!("set-log-level level={level}"),
         Commands::Undervolt => "undervolt".into(),
@@ -1334,6 +1424,8 @@ fn diag_action_label(action: &DiagAction) -> String {
         DiagAction::Dump => "dump".into(),
         DiagAction::Selfcheck => "selfcheck".into(),
         DiagAction::Faults => "faults".into(),
+        DiagAction::Enable => "enable".into(),
+        DiagAction::Disable => "disable".into(),
         DiagAction::Send { endpoint } => format!(
             "send override={}",
             if endpoint.is_some() { "set" } else { "unset" }
