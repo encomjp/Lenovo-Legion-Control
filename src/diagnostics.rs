@@ -564,8 +564,8 @@ fn read_os_release() -> OsInfo {
 /// embed `path.display()`, so a failed config write leaks `$HOME` into the
 /// ring buffer. Collapses to `~`: the literal HOME dir of this process,
 /// any `/home/<user>` prefix (other users included) and any
-/// `/run/user/<uid>` prefix. Applied to the daemon log tail only — every
-/// other field is anonymous by construction.
+/// `/run/user/<uid>` prefix. Applied to the daemon log tail, fault details
+/// and self-check details — every other field is anonymous by construction.
 fn redact_home_paths(text: &str) -> String {
     let mut replacements = 0usize;
     let mut out = text.to_string();
@@ -792,7 +792,15 @@ pub fn collect() -> DiagnosticsReport {
         },
         log_digest: digest,
         faults,
-        self_checks: run_self_checks(),
+        // Check details embed socket/config paths (e.g. the daemon_version
+        // check's `/run/user/<uid>/legion-control.socket`) — scrub like faults.
+        self_checks: run_self_checks()
+            .into_iter()
+            .map(|mut c| {
+                c.detail = redact_home_paths(&c.detail);
+                c
+            })
+            .collect(),
         system_info,
         hardware,
         power,
@@ -1105,11 +1113,18 @@ fn collect_deep(reason: &str) -> DeepReport {
     if let Ok(entries) = std::fs::read_dir("/sys/bus/hid/devices") {
         for e in entries.flatten() {
             let hid_id = e.file_name().to_string_lossy().into_owned();
+            // Bluetooth (bus 0005) names are user-assigned ("Alice's
+            // Keyboard") — keep only the bus:vendor:product id for those.
+            let user_named = hid_id.starts_with("0005:");
             let mut info = Vec::new();
             if let Ok(uevent) = std::fs::read_to_string(e.path().join("uevent")) {
                 for line in uevent.lines() {
                     if let Some(name) = line.strip_prefix("HID_NAME=") {
-                        info.push(name.to_string());
+                        info.push(if user_named {
+                            "[bluetooth name redacted]".to_string()
+                        } else {
+                            name.to_string()
+                        });
                     } else if let Some(driver) = line.strip_prefix("DRIVER=") {
                         info.push(format!("driver={driver}"));
                     }
