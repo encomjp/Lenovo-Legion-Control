@@ -49,6 +49,10 @@ install -Dm644 data/icons/app-mark.svg \
     %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg
 install -Dm644 data/icons/tray.svg \
     %{buildroot}%{_datadir}/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg
+for mode in quiet balanced performance extreme; do
+    install -Dm644 data/icons/tray-$mode.svg \
+        %{buildroot}%{_datadir}/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$mode.svg
+done
 
 %post
 %systemd_post legion-control.service
@@ -100,6 +104,7 @@ fi
 %{_datadir}/applications/com.encomjp.legion-settings.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg
 %{_datadir}/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg
+%{_datadir}/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-*.svg
 
 %changelog
 * Sun Jul 26 2026 europeanpepe <noreply@github.com> - 0.1.0-1
