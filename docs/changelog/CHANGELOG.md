@@ -3,8 +3,12 @@
 Single repo since 2026-08-25 (outer monorepo merged under `meta/`).
 Newest first. Pre-attribution SHAs live on branch `backup/pre-attribution`.
 
-Per-release GitHub notes: [`v0.2.21.md`](v0.2.21.md), [`v0.2.17.md`](v0.2.17.md), [`v0.2.16.md`](v0.2.16.md), [`v0.2.15.md`](v0.2.15.md), [`v0.2.14.md`](v0.2.14.md), [`v0.2.13.md`](v0.2.13.md), [`v0.2.12.md`](v0.2.12.md), [`v0.2.11.md`](v0.2.11.md), [`v0.2.10.md`](v0.2.10.md), [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
+Per-release GitHub notes: [`v0.2.22.md`](v0.2.22.md), [`v0.2.21.md`](v0.2.21.md), [`v0.2.17.md`](v0.2.17.md), [`v0.2.16.md`](v0.2.16.md), [`v0.2.15.md`](v0.2.15.md), [`v0.2.14.md`](v0.2.14.md), [`v0.2.13.md`](v0.2.13.md), [`v0.2.12.md`](v0.2.12.md), [`v0.2.11.md`](v0.2.11.md), [`v0.2.10.md`](v0.2.10.md), [`v0.2.4.md`](v0.2.4.md), [`v0.2.3.md`](v0.2.3.md), [`v0.2.2.md`](v0.2.2.md), [`v0.2.1.md`](v0.2.1.md), [`v0.2.0.md`](v0.2.0.md), [`v0.1.9.md`](v0.1.9.md), [`v0.1.8.md`](v0.1.8.md).
 The app does not read this folder; in-app update text comes from the GitHub release body.
+
+## 0.2.22 - 2026-10-14
+
+Gen 10 safety: fan curve re-applied after sleep and verified, pauses on battery, Custom power limits saved and re-applied, Max power only where supported. See [`v0.2.22.md`](v0.2.22.md).
 
 ## 0.2.21 - 2026-10-14
 

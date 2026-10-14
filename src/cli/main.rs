@@ -161,7 +161,11 @@ enum Commands {
     /// Monitor sensors live (2s refresh)
     Watch,
     /// Show current platform profile
-    Profile,
+    Profile {
+        /// Also print the modes this laptop offers ("choices: a b c")
+        #[arg(long)]
+        with_choices: bool,
+    },
     /// Set platform profile
     SetProfile {
         /// Profile name: quiet/low-power, balanced, performance, max-power, custom
@@ -329,6 +333,13 @@ enum Commands {
         #[command(subcommand)]
         action: Option<AutoModeCmd>,
     },
+    /// Custom-mode power limits: list them, or set one (Custom mode only)
+    PowerLimit {
+        /// Attribute name, e.g. ppt_pl1_spl (omit to list)
+        name: Option<String>,
+        /// New value in W or °C
+        value: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -466,8 +477,15 @@ fn main() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }
         }
-        Commands::Profile => match send_command(DaemonCommand::GetProfile) {
-            Ok(DaemonResponse::Profile(p)) => println!("{}", friendly_profile(&p)),
+        Commands::Profile { with_choices } => match send_command(DaemonCommand::GetProfile) {
+            Ok(DaemonResponse::Profile(p)) => {
+                println!("{}", friendly_profile(&p));
+                if with_choices {
+                    // Same list the GUI and tray offer (firmware choices
+                    // minus modes withheld on this machine).
+                    println!("choices: {}", legion_core::profile::safe_choices().join(" "));
+                }
+            }
             Ok(DaemonResponse::Error(e)) => fail(e),
             Err(e) => fail(e),
             _ => fail("unexpected response from service"),
@@ -476,6 +494,13 @@ fn main() {
             let name = normalize_profile(&name);
             if let Some(why) = legion_core::profile::blocked_reason(&name) {
                 fail(format!("refusing to set '{name}': {why}"));
+            }
+            let available = legion_core::profile::safe_choices();
+            if !available.is_empty() && !available.contains(&name) {
+                usage_fail(format!(
+                    "'{name}' is not available on this laptop. Available modes: {}",
+                    available.join(", ")
+                ));
             }
             if name == "max-power" {
                 eprintln!(
@@ -1199,6 +1224,7 @@ fn main() {
             yes_i_understand,
         } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
         Commands::AutoMode { action } => auto_mode_cmd(action.unwrap_or(AutoModeCmd::Status)),
+        Commands::PowerLimit { name, value } => power_limit_cmd(name, value),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
@@ -1578,7 +1604,7 @@ fn cmd_label(cmd: &Commands) -> String {
     match cmd {
         Commands::Status => "status".into(),
         Commands::Watch => "watch".into(),
-        Commands::Profile => "profile".into(),
+        Commands::Profile { with_choices } => format!("profile with_choices={with_choices}"),
         Commands::SetProfile { name } => format!("set-profile name={name}"),
         Commands::Fan => "fan".into(),
         Commands::SetFan { fan, rpm } => format!("set-fan fan={fan} rpm={rpm}"),
@@ -1646,6 +1672,55 @@ fn cmd_label(cmd: &Commands) -> String {
             Some(AutoModeCmd::Ac { mode }) => format!("auto-mode ac {mode}"),
             Some(AutoModeCmd::Battery { mode }) => format!("auto-mode battery {mode}"),
         },
+        Commands::PowerLimit { name, value } => format!("power-limit {name:?} {value:?}"),
+    }
+}
+
+/// `power-limit` (list) and `power-limit <name> <value>` (set).
+fn power_limit_cmd(name: Option<String>, value: Option<u32>) {
+    use legion_core::{power_limits, profile};
+    let limits = profile::all_ppt_limits();
+    let custom = profile::current() == "custom";
+    match (name, value) {
+        (None, _) => {
+            if limits.is_empty() {
+                fail("this laptop's firmware does not expose power limits");
+            }
+            for l in &limits {
+                println!(
+                    "{:<18} {:>4} {:<3} range {}  ({})",
+                    l.id,
+                    l.current,
+                    l.unit.symbol(),
+                    l.range_label(),
+                    l.label
+                );
+            }
+            if !custom {
+                println!("{}", power_limits::SWITCH_FIRST);
+            }
+        }
+        (Some(_), None) => usage_fail("give a value, e.g. legion-cli power-limit ppt_pl1_spl 80"),
+        (Some(name), Some(v)) => {
+            if !profile::is_known_fw_attr(&name) {
+                usage_fail(format!("unknown power limit '{name}'"));
+            }
+            if let Some(l) = limits.iter().find(|l| l.id == name) {
+                if !(l.min..=l.max).contains(&v) {
+                    usage_fail(format!("{name}: {v} is outside {}", l.range_label()));
+                }
+            }
+            // Same message the service answers with, without a round trip.
+            if !custom {
+                fail(power_limits::SWITCH_FIRST);
+            }
+            send_ok(DaemonCommand::SetFwAttr {
+                name: name.clone(),
+                value: v.to_string(),
+            })
+            .ok();
+            println!("{name} → {v} {}", profile::limit_unit(&name).symbol());
+        }
     }
 }
 
@@ -1731,7 +1806,17 @@ fn print_fan_curves(st: &legion_core::fan_curve::FanCurveStatus) {
             if st.safety { " (SAFETY: all fans max)" } else { "" }
         )
     } else if let Some(f) = &st.fault {
-        format!("firmware control: fault: {f}")
+        use legion_core::fan_curve::CurveCondition;
+        match st.condition() {
+            CurveCondition::OnBattery => {
+                "firmware control: needs charger (the firmware controls the fans on battery)".into()
+            }
+            CurveCondition::NotAccepted => {
+                "firmware control: the firmware did not accept the curve, fans back on automatic"
+                    .into()
+            }
+            _ => format!("firmware control: fault: {f}"),
+        }
     } else {
         "firmware control".into()
     };

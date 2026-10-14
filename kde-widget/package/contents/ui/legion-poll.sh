@@ -2,7 +2,7 @@
 # Legion Control sensor poller — outputs key=value lines for the QML widget.
 #
 # Cost matters: this runs every few seconds inside Plasma. Exactly THREE
-# legion-cli invocations per tick (status / profile / battery) — temps,
+# legion-cli invocations per tick (status / profile --with-choices / battery) — temps,
 # powers, and fan RPMs are all parsed from the single `status` dump, and
 # kbd/logo were dropped entirely (the widget never displayed them).
 # Plus at most ONE conditional `nvidia-smi` query (only when the daemon's
@@ -28,7 +28,12 @@ if [[ -z "$status" ]]; then
   exit 0
 fi
 printf 'LEGION_OK=1\n'
-profile="$(timeout 3 "$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+# One call gives the mode and the modes this laptop offers (the same list as
+# the app: firmware choices minus withheld ones). Older CLIs lack the flag.
+profile_out="$(timeout 3 "$CLI" profile --with-choices 2>/dev/null | grep -v '^[0-9]\{4\}-' || true)"
+[[ -z "$profile_out" ]] && profile_out="$(timeout 3 "$CLI" profile 2>/dev/null | grep -v '^[0-9]\{4\}-' || true)"
+profile="$(printf '%s\n' "$profile_out" | grep -v '^choices:' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+choices="$(printf '%s\n' "$profile_out" | grep '^choices:' | head -1 | sed -e 's/^choices:[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
 battery="$(timeout 2 "$CLI" battery 2>/dev/null || true)"
 
 value() {
@@ -80,6 +85,7 @@ value FAN_GPU "$(printf '%s\n' "$fans_line" | grep -oP 'GPU\s+\K[0-9]+' | head -
 value FAN_AUX "$(printf '%s\n' "$fans_line" | grep -oP 'Aux\s+\K[0-9]+' | head -1 || true)"
 
 value PROFILE "$profile"
+value MODES "$choices"
 
 # Keyboard backlight ("backlight: low (1)") -> numeric level for the popup.
 kbd_level="$(timeout 2 "$CLI" kbd 2>/dev/null | grep -oP '\(\K[0-9]+(?=\))' | head -1 || true)"

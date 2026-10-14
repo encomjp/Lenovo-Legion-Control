@@ -116,7 +116,11 @@ fn flush(inner: Rc<Inner>) {
             }) {
                 Ok(DaemonResponse::Ok) => {
                     let unit = legion_core::profile::limit_unit(&name);
-                    ok_bits.push(format!("{name} → {value} {}", unit.symbol()));
+                    ok_bits.push(format!(
+                        "{} set to {value} {}",
+                        legion_core::profile::limit_label(&name),
+                        unit.symbol()
+                    ));
                 }
                 Ok(DaemonResponse::Error(e)) | Err(e) => {
                     log::warn!("apply-queue {name}: {e}");

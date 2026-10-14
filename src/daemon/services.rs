@@ -1,9 +1,11 @@
 //! Background services that must run while the GUI is closed:
-//! automatic power-mode switching and the 1-hour temperature history.
+//! automatic power-mode switching, the 1-hour temperature history and
+//! re-applying settings after suspend / resume.
 
 use legion_core::comms::{mode_code, TempHistory, TempSample};
 use legion_core::profile::auto::{self, AutoModeStatus, Switcher};
-use legion_core::{config, fan_curve, profile, thermal};
+use legion_core::resume::ResumeDetector;
+use legion_core::{battery, config, fan_curve, power_limits, profile, resume, thermal};
 
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
@@ -146,6 +148,65 @@ pub fn auto_mode_worker(shutdown: Arc<AtomicBool>) {
         }
     }
     log::info!("auto-mode thread stopped");
+}
+
+/// Wait after a resume before writing anything: the firmware and the
+/// drivers are still settling and drop early writes.
+const RESUME_SETTLE: Duration = Duration::from_secs(2);
+
+/// Everything the service keeps applied that the firmware may lose across
+/// suspend: fan curve targets, Custom-mode power limits and the charge
+/// limit. (Lighting has its own watchdog; the CPU frequency cap lives in
+/// the kernel and survives suspend.)
+fn reapply_after_resume() {
+    fan_curve::request_reapply();
+    log::info!("resume: fan curve targets will be rewritten on the next tick");
+    power_limits::kick();
+    log::info!("resume: saved Custom power limits will be re-applied if the mode is Custom");
+    match battery::reassert_configured_limit() {
+        Ok(true) => log::info!("resume: charge limit re-applied (the firmware had cleared it)"),
+        Ok(false) => log::debug!("resume: charge limit still in place"),
+        Err(e) => log::warn!("resume: charge limit re-apply failed: {e}"),
+    }
+}
+
+/// Detect resume from suspend (see `legion_core::resume`) about once a
+/// second and re-apply settings [`RESUME_SETTLE`] later.
+pub fn resume_worker(shutdown: Arc<AtomicBool>) {
+    let slice = Duration::from_millis(250);
+    let mut det = ResumeDetector::default();
+    let mut warned = false;
+    loop {
+        match resume::suspended_total() {
+            Some(total) => {
+                if let Some(slept) = det.observe(total) {
+                    log::info!(
+                        "resume: woke after about {} s asleep: re-applying settings in {} s",
+                        slept.as_secs(),
+                        RESUME_SETTLE.as_secs()
+                    );
+                    if super::sleep_interruptible(&shutdown, RESUME_SETTLE, slice) {
+                        break;
+                    }
+                    reapply_after_resume();
+                }
+            }
+            None if !warned => {
+                log::warn!("resume: cannot read the system clocks: resume detection off");
+                warned = true;
+            }
+            None => {}
+        }
+        if super::sleep_interruptible(&shutdown, Duration::from_secs(1), slice) {
+            break;
+        }
+    }
+    log::info!("resume-watch thread stopped");
+}
+
+/// Keeps Custom-mode power limits applied (see `legion_core::power_limits`).
+pub fn power_limits_worker(shutdown: Arc<AtomicBool>) {
+    power_limits::run(&shutdown);
 }
 
 #[cfg(test)]

@@ -333,9 +333,21 @@ impl CurveUi {
                         format!("Following the curve: {t}, fans at {p}")
                     }
                 } else if enabled && now {
-                    match &st.fault {
-                        Some(f) => format!("Firmware curve in control: {f}"),
-                        None => "Curve enabled, starting…".to_string(),
+                    use legion_core::fan_curve::CurveCondition;
+                    match st.condition() {
+                        CurveCondition::OnBattery => {
+                            kind = "warn";
+                            "Needs charger. The firmware controls the fans on battery.".to_string()
+                        }
+                        CurveCondition::NotAccepted => {
+                            kind = "bad";
+                            "The firmware did not accept the curve. Fans are back on automatic."
+                                .to_string()
+                        }
+                        CurveCondition::Fault(f) => format!("Firmware curve in control: {f}"),
+                        CurveCondition::Running | CurveCondition::Idle => {
+                            "Curve enabled, starting…".to_string()
+                        }
                     }
                 } else if enabled {
                     kind = "ok";
@@ -456,6 +468,37 @@ fn send_curve(
             ui2.sync();
         },
     );
+}
+
+/// Screenshot aid: `LEGION_FAN_DEMO=battery|rejected` shows the "Needs
+/// charger" or "not accepted" status for the active mode, as if its curve
+/// were enabled. Display only; nothing is sent to the service.
+fn demo_status(
+    mut st: legion_core::fan_curve::FanCurveStatus,
+) -> legion_core::fan_curve::FanCurveStatus {
+    use legion_core::fan_curve::{self as fc, FanCurve};
+    let fault = match std::env::var("LEGION_FAN_DEMO").as_deref() {
+        Ok("battery") => fc::FAULT_ON_BATTERY,
+        Ok("rejected") => fc::FAULT_NOT_ACCEPTED,
+        _ => return st,
+    };
+    let cur = st.current_profile.clone();
+    match st.curves.iter_mut().find(|(n, _)| *n == cur) {
+        Some((_, c)) => c.enabled = true,
+        None => st.curves.push((
+            cur.clone(),
+            FanCurve {
+                points: fc::default_points(&cur),
+                enabled: true,
+            },
+        )),
+    }
+    st.active = false;
+    st.temp_c = None;
+    st.pct = None;
+    st.safety = false;
+    st.fault = Some(fault.into());
+    st
 }
 
 fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi) {
@@ -729,7 +772,7 @@ fn build_fan_curve_section(
                 ui.inflight.set(false);
                 match res {
                     Ok((st, rpms)) => {
-                        *ui.status.borrow_mut() = Some(st);
+                        *ui.status.borrow_mut() = Some(demo_status(st));
                         for (id, rpm) in rpms {
                             if let Some(c) = ui.cards.iter().find(|c| c.id == id) {
                                 match rpm {
