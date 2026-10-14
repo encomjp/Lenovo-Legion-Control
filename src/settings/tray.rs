@@ -151,7 +151,11 @@ pub fn format_tooltip(s: &TrayState) -> (String, String) {
     }
     if let Some(rpm) = s.fan_rpm {
         let mode = if s.fans_auto { "auto" } else { "manual" };
-        lines.push(format!("Fans  {rpm} rpm · {mode}"));
+        lines.push(if rpm == 0 && s.fans_auto {
+            "Fans  idle (fan stop)".to_string()
+        } else {
+            format!("Fans  {rpm} rpm · {mode}")
+        });
     }
     if let Some(p) = s.battery_pct {
         lines.push(match s.charge_limit {

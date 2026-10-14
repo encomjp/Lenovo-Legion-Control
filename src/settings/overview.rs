@@ -1215,12 +1215,22 @@ pub(crate) fn build_overview(
                 if !fans.is_empty() {
                     let top = fans.iter().map(|f| f.1).max().unwrap_or(0);
                     let manual = fans.iter().any(|f| f.2 > 0);
+                    // Firmware "fan stop": the EC idles every fan at 0 rpm until it
+                    // is warm (≈73 °C in Balanced on 83RU). Say so — a bare
+                    // "0 rpm" next to a hot CPU reads like broken fans.
+                    let stopped = !manual && top == 0;
                     fan_t.set_text(if manual {
                         "Fans · manual"
+                    } else if stopped {
+                        "Fans · idle"
                     } else {
                         "Fans · automatic"
                     });
-                    fan_v.set_text(&format!("{top} rpm"));
+                    fan_v.set_text(&if stopped {
+                        "Idle".to_string()
+                    } else {
+                        format!("{top} rpm")
+                    });
                     fan_bar.set_fraction((top as f64 / fan_max_rpm).clamp(0.0, 1.0));
                     let mut d = fans
                         .iter()
@@ -1229,6 +1239,9 @@ pub(crate) fn build_overview(
                         .join(" · ");
                     if legion_core::fans::rpm_estimated() && top > 0 {
                         d.push_str(" · est.");
+                    }
+                    if stopped {
+                        d = "Quiet fan stop · spins up automatically when warm".into();
                     }
                     fan_d.set_text(&d);
                 }

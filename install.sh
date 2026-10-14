@@ -442,11 +442,16 @@ sudo_run install -Dm644 "$ROOT/data/polkit/com.encomjp.legion-control.policy" \
   /usr/share/polkit-1/actions/com.encomjp.legion-control.policy
 ok "PolicyKit helper installed"
 
-# Keep ~/.local/bin copy for convenience when using --user or as fallback
+# A system-wide install must not leave copies in ~/.local/bin: that directory
+# comes first in PATH and nothing ever updates it, so older installers'
+# "convenience" copies shadowed every later upgrade. Remove them.
 if [[ "$PREFIX" != "$USER_PREFIX" ]]; then
-  mkdir -p "${USER_PREFIX}/bin"
-  install -Dm755 "$BIN_CLI"    "${USER_PREFIX}/bin/legion-cli"
-  install -Dm755 "$BIN_GUI"    "${USER_PREFIX}/bin/legion-settings"
+  for b in legion-cli legion-settings; do
+    if [[ -f "${USER_PREFIX}/bin/$b" ]]; then
+      rm -f "${USER_PREFIX}/bin/$b"
+      warn "Removed stale ${USER_PREFIX}/bin/$b (it shadowed the system install)"
+    fi
+  done
 fi
 
 # ─── legion group ───────────────────────────────────────────────────────────

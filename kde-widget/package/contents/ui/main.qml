@@ -430,7 +430,7 @@ PlasmoidItem {
                             }
                             Item { Layout.fillWidth: true }
                             Text {
-                                text: root.isNum(rpm) ? rpm + " RPM" : "—"
+                                text: !root.isNum(rpm) ? "—" : (Number(rpm) === 0 && target === 0 ? "Idle" : rpm + " RPM")
                                 font.family: "monospace"
                                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 1
                                 color: Kirigami.Theme.textColor

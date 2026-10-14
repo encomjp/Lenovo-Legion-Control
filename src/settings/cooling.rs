@@ -311,7 +311,7 @@ impl CurveUi {
         for c in &self.cards {
             c.source.set_text(&match following {
                 Some(p) => format!("Following curve · {p} %"),
-                None => "Firmware curve".to_string(),
+                None => "Firmware curve · may stop fans when cool".to_string(),
             });
         }
     }
@@ -620,7 +620,13 @@ fn build_fan_curve_section(
                             if let Some(c) = ui.cards.iter().find(|c| c.id == id) {
                                 match rpm {
                                     Some(r) => {
-                                        c.rpm.set_text(&format!("{r} rpm"));
+                                        // 0 rpm under firmware control is the EC's fan
+                                        // stop, not a dead fan.
+                                        c.rpm.set_text(&if r == 0 {
+                                            "Idle".to_string()
+                                        } else {
+                                            format!("{r} rpm")
+                                        });
                                         let span = c.max.saturating_sub(c.min).max(1) as f64;
                                         c.bar.set_fraction(
                                             (r.saturating_sub(c.min) as f64 / span).clamp(0.0, 1.0),
