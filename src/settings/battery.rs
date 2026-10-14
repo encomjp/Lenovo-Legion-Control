@@ -198,6 +198,8 @@ pub(crate) fn build_battery_pages(
     gate.track(&lim);
     status_page.append(&lim);
 
+    status_page.append(&build_ideapad_switches(toast_overlay, gate));
+
     let volt_l = detail_rows[0].clone();
     let pow_l = detail_rows[1].clone();
     let en_l = detail_rows[2].clone();
@@ -391,3 +393,115 @@ pub(crate) fn build_battery_pages(
 }
 
 // ─── Troubleshoot ───────────────────────────────────────────────────────────
+
+// ─── ideapad_acpi switches (Fn Lock, always-on USB charging) ────────────────
+
+/// Group with the Fn Lock and USB-charging switches. Everything starts hidden;
+/// support and state are probed on a worker thread and rows only appear for
+/// attributes the kernel driver actually exposes on this laptop.
+fn build_ideapad_switches(
+    toast_overlay: &adw::ToastOverlay,
+    gate: &DaemonGate,
+) -> adw::PreferencesGroup {
+    use legion_core::ideapad::Toggle;
+
+    let group = pref_group("Keyboard & USB", None);
+    group.set_visible(false);
+    gate.track(&group);
+
+    type Spec = (
+        Toggle,
+        &'static str,
+        &'static str,
+        &'static str,
+        fn(bool) -> DaemonCommand,
+    );
+    let specs: [Spec; 2] = [
+        (
+            Toggle::FnLock,
+            "Fn Lock",
+            "On = F1–F12 act as function keys; off = media/hardware keys without Fn",
+            "Same as Fn+Esc. Needs the legion-control service to change.",
+            DaemonCommand::SetFnLock,
+        ),
+        (
+            Toggle::UsbCharging,
+            "Always-on USB charging",
+            "Keep the USB port powered while the laptop is off or asleep",
+            "Firmware may ignore this on some models; you will get an error if it does.",
+            DaemonCommand::SetUsbCharging,
+        ),
+    ];
+
+    let mut rows: Vec<(Toggle, adw::SwitchRow, Rc<Cell<bool>>)> = Vec::new();
+    for (toggle, title, subtitle, tip_text, make_cmd) in specs {
+        let row = adw::SwitchRow::builder()
+            .title(title)
+            .subtitle(subtitle)
+            .visible(false)
+            .build();
+        tip(&row, tip_text);
+        let guard = Rc::new(Cell::new(false));
+        let guard_n = guard.clone();
+        let overlay = toast_overlay.clone();
+        row.connect_active_notify(move |row| {
+            let guard = guard_n.clone();
+            if guard.get() {
+                return;
+            }
+            let on = row.is_active();
+            let row = row.clone();
+            let overlay = overlay.clone();
+            run_daemon_command_async(make_cmd(on), move |result| {
+                let revert = |msg: &str| {
+                    guard.set(true);
+                    row.set_active(!on);
+                    guard.set(false);
+                    toast_error(&overlay, msg);
+                };
+                match result {
+                    Ok(DaemonResponse::Ok) => toast_ok(
+                        &overlay,
+                        &format!("{title} {}", if on { "on" } else { "off" }),
+                    ),
+                    Ok(DaemonResponse::Error(e)) => revert(&e),
+                    Err(e) if is_version_skew_error(&e) => {
+                        revert("Service outdated — reinstall to update")
+                    }
+                    Err(e) => revert(&e),
+                    Ok(_) => revert("Unexpected response from service"),
+                }
+            });
+        });
+        group.add(&row);
+        rows.push((toggle, row, guard));
+    }
+
+    // Probe sysfs off the GTK thread; reveal only supported rows.
+    let kinds: Vec<Toggle> = rows.iter().map(|(t, _, _)| *t).collect();
+    let group_c = group.clone();
+    dispatch_async(
+        move || {
+            Ok(kinds
+                .into_iter()
+                .map(|t| (t, legion_core::ideapad::get(t)))
+                .collect::<Vec<_>>())
+        },
+        "Keyboard & USB probe stopped without a result",
+        move |res: Result<Vec<(Toggle, Option<bool>)>, String>| {
+            let Ok(states) = res else { return };
+            for (toggle, state) in states {
+                let Some(on) = state else { continue };
+                if let Some((_, row, guard)) = rows.iter().find(|(t, _, _)| *t == toggle) {
+                    // Programmatic sync must not trigger a write.
+                    guard.set(true);
+                    row.set_active(on);
+                    guard.set(false);
+                    row.set_visible(true);
+                    group_c.set_visible(true);
+                }
+            }
+        },
+    );
+    group
+}

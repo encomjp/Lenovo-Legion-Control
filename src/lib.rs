@@ -15,6 +15,7 @@ pub mod dgpu;
 pub mod diagnostics;
 pub mod fans;
 pub mod gpu_ids;
+pub mod ideapad;
 pub mod intel;
 pub mod intel_msr;
 pub mod keyboard;
