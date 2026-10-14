@@ -1077,6 +1077,12 @@ mod tests {
 
     #[test]
     fn detect_this_machine() {
+        // Live-hardware assertion: skip on CI runners / non-Lenovo hosts.
+        let vendor = std::fs::read_to_string("/sys/class/dmi/id/sys_vendor").unwrap_or_default();
+        if vendor.trim() != "LENOVO" {
+            eprintln!("skipping: not a Lenovo machine ({:?})", vendor.trim());
+            return;
+        }
         let info = detect();
         assert!(
             info.machine_type == "83RU" || info.model.to_ascii_lowercase().contains("legion"),
