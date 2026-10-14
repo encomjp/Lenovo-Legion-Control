@@ -1770,7 +1770,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // Same visual grammar as the sections below (Curve Optimizer etc.):
     // chips row directly on the page, then a plain boxed-list group — no
     // extra .card wrapper that made this section wider than its neighbours.
-    let page = gtk::Box::new(Orientation::Vertical, 18);
+    let page = gtk::Box::new(Orientation::Vertical, 10);
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
@@ -1837,6 +1837,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     temp_top.append(&temp_title);
     temp_top.append(&value);
     let temp_box = gtk::Box::new(Orientation::Vertical, 6);
+    temp_box.add_css_class("panel");
     temp_box.set_hexpand(true);
     temp_box.append(&temp_top);
     temp_box.append(&scale);
@@ -1864,10 +1865,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
-        .min_children_per_line(2)
+        .min_children_per_line(3)
         .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
+        .column_spacing(10)
+        .row_spacing(10)
         .build();
     chips.add_css_class("metric-grid");
     let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) = metric_chip_tip(
@@ -1880,6 +1881,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         "Max freq",
         Some("Current scaling_max_freq across online CPUs"),
     );
+    // Secondary detail lines stay out of sight: the numbers are enough.
+    for d in [&cpu_temp_d, &cpu_temp_2_d, &freq_d] {
+        d.set_visible(false);
+    }
     chips.append(&cpu_temp_chip);
     chips.append(&cpu_temp_2_chip);
     chips.append(&freq_chip);

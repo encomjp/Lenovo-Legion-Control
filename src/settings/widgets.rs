@@ -12,7 +12,7 @@ pub fn friendly_profile(name: &str) -> String {
         "low-power" | "quiet" => "Quiet".into(),
         "balanced" => "Balanced".into(),
         "performance" => "Performance".into(),
-        "max-power" => "Max Power".into(),
+        "max-power" => "Max power".into(),
         "custom" => "Custom".into(),
         other => other.to_string(),
     }
