@@ -1,12 +1,207 @@
-//! Home dashboard — metric chips, power mode, custom PPT sliders, trend.
+//! Control center — the home page: health pill, power mode, live cards,
+//! temperature history, quick toggles, GPU mode and charge limit.
+//!
+//! Every IPC / sysfs / HID read or write happens off the GTK main thread
+//! (`dispatch_async`, `run_daemon_command_async` or the poll worker).
 
 use super::*;
+
+/// Navigation callback: (stack page id, header title).
+pub(crate) type NavFn = Rc<dyn Fn(&'static str, &'static str)>;
+
+/// Build a linked segmented control with radio semantics. Returns the box and
+/// its buttons (index == option index); `active` starts checked.
+fn segmented(labels: &[String], active: u32) -> (gtk::Box, Vec<gtk::ToggleButton>) {
+    let bx = gtk::Box::builder()
+        .orientation(Orientation::Horizontal)
+        .accessible_role(gtk::AccessibleRole::RadioGroup)
+        .build();
+    bx.add_css_class("linked");
+    bx.add_css_class("segmented");
+    bx.set_halign(Align::Start);
+    let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
+    for (i, label) in labels.iter().enumerate() {
+        let b = gtk::ToggleButton::builder()
+            .label(label)
+            .accessible_role(gtk::AccessibleRole::Radio)
+            .build();
+        b.add_css_class("seg-btn");
+        if let Some(first) = buttons.first() {
+            b.set_group(Some(first));
+        }
+        b.set_active(i as u32 == active);
+        bx.append(&b);
+        buttons.push(b);
+    }
+    (bx, buttons)
+}
+
+/// One quick-toggle tile: name + hint on the left, switch on the right.
+/// Starts hidden; the capability probe reveals it.
+fn quick_tile(name: &str, hint: &str) -> (gtk::Box, gtk::Switch) {
+    let tile = gtk::Box::new(Orientation::Horizontal, 12);
+    tile.add_css_class("quick-tile");
+    tile.set_visible(false);
+    let text = gtk::Box::new(Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    text.set_valign(Align::Center);
+    let n = gtk::Label::new(Some(name));
+    n.add_css_class("quick-name");
+    n.set_halign(Align::Start);
+    n.set_xalign(0.0);
+    let h = gtk::Label::new(Some(hint));
+    h.add_css_class("quick-hint");
+    h.set_halign(Align::Start);
+    h.set_xalign(0.0);
+    h.set_wrap(true);
+    text.append(&n);
+    text.append(&h);
+    let sw = gtk::Switch::new();
+    sw.set_valign(Align::Center);
+    sw.update_property(&[gtk::accessible::Property::Label(name)]);
+    tile.append(&text);
+    tile.append(&sw);
+    (tile, sw)
+}
+
+/// A live card = metric chip + a thin usage bar underneath.
+fn live_card(
+    title: &str,
+    tooltip: &str,
+) -> (gtk::Box, gtk::Label, gtk::Label, gtk::Label, gtk::ProgressBar) {
+    let (chip, value, detail) = metric_chip_tip(title, Some(tooltip));
+    chip.add_css_class("live-card");
+    detail.set_max_width_chars(22);
+    detail.set_ellipsize(gtk::pango::EllipsizeMode::None);
+    detail.set_wrap(true);
+    detail.set_xalign(0.0);
+    let title_label = chip
+        .first_child()
+        .and_then(|w| w.downcast::<gtk::Label>().ok())
+        .unwrap_or_else(|| gtk::Label::new(None));
+    let bar = gtk::ProgressBar::new();
+    bar.add_css_class("card-bar");
+    bar.set_margin_top(8);
+    chip.append(&bar);
+    (chip, title_label, value, detail, bar)
+}
+
+fn section_label(text: &str) -> gtk::Label {
+    let l = gtk::Label::new(Some(text));
+    l.add_css_class("cc-section");
+    l.set_halign(Align::Start);
+    l.set_xalign(0.0);
+    l
+}
+
+/// Issue count from the read-only self-checks plus non-info faults.
+fn health_issue_count() -> usize {
+    let checks = legion_core::selftest::run_self_checks();
+    let faults = legion_core::selftest::scan_faults();
+    checks.iter().filter(|c| !c.ok).count()
+        + faults
+            .iter()
+            .filter(|f| f.severity != legion_core::selftest::Severity::Info)
+            .count()
+}
+
+fn apply_health_pill(pill: &gtk::Label, issues: Option<usize>) {
+    for c in ["status-ok", "status-warn", "status-bad", "status-muted"] {
+        pill.remove_css_class(c);
+    }
+    match issues {
+        None => {
+            pill.set_text("Checking…");
+            pill.add_css_class("status-muted");
+        }
+        Some(0) => {
+            pill.set_text("All systems healthy");
+            pill.add_css_class("status-ok");
+        }
+        Some(n) => {
+            pill.set_text(&format!("{n} issue{} found", if n == 1 { "" } else { "s" }));
+            pill.add_css_class("status-warn");
+        }
+    }
+}
+
+/// Everything the capability probe for the quick toggles learns.
+#[derive(Default)]
+struct QuickProbe {
+    kbd: Option<(bool, u8)>,
+    fans_full: Option<bool>,
+    fn_lock: Option<bool>,
+    usb: Option<bool>,
+}
+
+/// Run a daemon switch command; on failure put the switch back.
+fn daemon_switch(
+    overlay: &adw::ToastOverlay,
+    sw: &gtk::Switch,
+    guard: &Rc<Cell<bool>>,
+    label: &'static str,
+    make: fn(bool) -> DaemonCommand,
+) {
+    let on = sw.is_active();
+    let sw = sw.clone();
+    let guard = guard.clone();
+    let overlay = overlay.clone();
+    run_daemon_command_async(make(on), move |result| {
+        let revert = |msg: &str| {
+            guard.set(true);
+            sw.set_active(!on);
+            guard.set(false);
+            toast_error(&overlay, msg);
+        };
+        match result {
+            Ok(DaemonResponse::Ok) => toast_ok(
+                &overlay,
+                &format!("{label} {}", if on { "on" } else { "off" }),
+            ),
+            Ok(DaemonResponse::Error(e)) => revert(&e),
+            Err(e) if is_version_skew_error(&e) => revert("Service outdated — reinstall to update"),
+            Err(e) => revert(&e),
+            Ok(_) => revert("Unexpected response from service"),
+        }
+    });
+}
+
+/// (id, rpm, target) for each fan channel, from daemon or local sensors.
+fn fan_readings(ids: &[u8], s: &legion_core::sensors::SensorReadings) -> Vec<(u8, u32, u32)> {
+    let aux = legion_core::fans::aux_id_from(ids);
+    ids.iter()
+        .map(|id| {
+            let (rpm, target) = match id {
+                1 => (s.fan1_rpm, s.fan1_target),
+                2 => (s.fan2_rpm, s.fan2_target),
+                id if Some(*id) == aux => (s.fan4_rpm, s.fan4_target),
+                _ => (
+                    legion_core::fans::read_rpm(*id).unwrap_or(0),
+                    legion_core::fans::read_target(*id).unwrap_or(0),
+                ),
+            };
+            let target =
+                legion_core::fans::effective_target(target, legion_core::fans::read_max(*id));
+            (*id, rpm, target)
+        })
+        .collect()
+}
+
+fn fan_short_name(id: u8, aux: Option<u8>) -> String {
+    match id {
+        1 => "CPU".into(),
+        2 => "GPU".into(),
+        id if Some(id) == aux => "Aux".into(),
+        id => format!("Fan {id}"),
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_overview(
     toast_overlay: &adw::ToastOverlay,
     apply_queue: &ApplyQueue,
     gate: &DaemonGate,
+    nav: &NavFn,
     mode_drop_slot: &Rc<RefCell<Option<adw::ComboRow>>>,
     profile_choices_slot: &Rc<RefCell<Vec<String>>>,
     ppt_group_slot: &Rc<RefCell<Option<adw::PreferencesGroup>>>,
@@ -15,71 +210,108 @@ pub(crate) fn build_overview(
     trend_feed_slot: &Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>>,
 ) -> gtk::Box {
     let page = page_lede("");
+    let info = legion_core::device::detect();
     if !legion_core::device::vendor_supported() {
-        let info = legion_core::device::detect();
         let banner = adw::Banner::new(&info.profile_notes);
         banner.set_revealed(true);
         page.append(&banner);
     }
 
-    let metrics = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .max_children_per_line(3)
-        .min_children_per_line(1)
-        .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
-        .build();
-    metrics.add_css_class("metric-grid");
+    // ── Header: model + machine line, single health pill ────────────────
+    let header = gtk::Box::new(Orientation::Horizontal, 12);
+    header.add_css_class("cc-header");
+    let titles = gtk::Box::new(Orientation::Vertical, 2);
+    titles.set_hexpand(true);
+    titles.set_valign(Align::Center);
+    let model_name = if info.model.is_empty() {
+        "Legion laptop".to_string()
+    } else {
+        info.model.clone()
+    };
+    let model_l = gtk::Label::new(Some(&model_name));
+    model_l.add_css_class("cc-model");
+    model_l.set_halign(Align::Start);
+    model_l.set_xalign(0.0);
+    model_l.set_wrap(true);
+    let machine_l = gtk::Label::new(None);
+    machine_l.add_css_class("cc-machine");
+    machine_l.set_halign(Align::Start);
+    machine_l.set_xalign(0.0);
+    machine_l.set_wrap(true);
+    let machine_prefix = {
+        let mut parts: Vec<String> = Vec::new();
+        if !info.machine_type.is_empty() {
+            parts.push(info.machine_type.clone());
+        }
+        if !info.bios_version.is_empty() {
+            parts.push(format!("BIOS {}", info.bios_version));
+        }
+        parts.join(" · ")
+    };
+    let set_machine_line = {
+        let machine_l = machine_l.clone();
+        let prefix = machine_prefix.clone();
+        move |on_ac: Option<bool>| {
+            let power = match on_ac {
+                Some(true) => Some("on AC power"),
+                Some(false) => Some("on battery"),
+                None => None,
+            };
+            let mut parts: Vec<&str> = Vec::new();
+            if !prefix.is_empty() {
+                parts.push(&prefix);
+            }
+            if let Some(p) = power {
+                parts.push(p);
+            }
+            machine_l.set_text(&parts.join(" · "));
+        }
+    };
+    set_machine_line(None);
+    titles.append(&model_l);
+    titles.append(&machine_l);
+    header.append(&titles);
 
-    let (cpu_chip, cpu_v, cpu_d) =
-        metric_chip_tip("CPU", Some("Package temperature (°C) and busy percentage"));
-    let (gpu_chip, gpu_v, gpu_d) =
-        metric_chip_tip("GPU", Some("Discrete GPU temperature (°C) and utilization"));
-    let (bat_chip, bat_v, bat_d) = metric_chip_tip(
-        "Battery",
-        Some("Charge level · subtitle shows the current power mode"),
+    let health_pill = status_pill_tip(
+        "Checking…",
+        "muted",
+        Some("Read-only self-checks and fault scan — click to open Health"),
     );
-
-    metrics.append(&cpu_chip);
-    metrics.append(&gpu_chip);
-    metrics.append(&bat_chip);
-
-    let fan_channels = legion_core::fans::channels();
-    let aux_fan =
-        legion_core::fans::aux_id_from(&fan_channels.iter().map(|c| c.id).collect::<Vec<_>>());
-    let mut fan_metric_labels: Vec<(u8, gtk::Label, gtk::Label)> = Vec::new();
-    for ch in &fan_channels {
-        let tip_txt = match ch.id {
-            1 => "CPU fan speed in RPM (Auto = firmware curve)",
-            2 => "GPU fan speed in RPM (Auto = firmware curve)",
-            id if Some(id) == aux_fan => "Auxiliary chassis fan speed in RPM",
-            _ => "Fan speed in RPM (Auto = firmware curve)",
-        };
-        let short = match ch.id {
-            1 => "Fan · CPU".to_string(),
-            2 => "Fan · GPU".to_string(),
-            id if Some(id) == aux_fan => "Fan · Aux".to_string(),
-            _ => format!("Fan · {}", ch.id),
-        };
-        let (chip, v, d) = metric_chip_tip(&short, Some(tip_txt));
-        metrics.append(&chip);
-        fan_metric_labels.push((ch.id, v, d));
+    let health_btn = gtk::Button::new();
+    health_btn.add_css_class("flat");
+    health_btn.add_css_class("cc-health-btn");
+    health_btn.set_valign(Align::Center);
+    health_btn.set_child(Some(&health_pill));
+    {
+        let nav = nav.clone();
+        health_btn.connect_clicked(move |_| nav("health", "Health"));
     }
-    page.append(&metrics);
+    header.append(&health_btn);
+    page.append(&header);
+    {
+        let pill = health_pill.clone();
+        let refresh = Rc::new(move || {
+            let pill = pill.clone();
+            dispatch_async(
+                || Ok::<usize, String>(health_issue_count()),
+                "Health check stopped without a result",
+                move |res| apply_health_pill(&pill, res.ok()),
+            );
+        });
+        refresh();
+        glib::timeout_add_seconds_local(60, move || {
+            refresh();
+            glib::ControlFlow::Continue
+        });
+    }
 
+    // ── Power mode (segmented, radio semantics) ─────────────────────────
     let blocked = legion_core::profile::blocked_choices();
     let blocked_note = blocked
         .iter()
         .map(|(c, why)| format!("{} is hidden: {why}", friendly_profile(c)))
         .collect::<Vec<_>>()
         .join("\n");
-    let power = pref_group("Power mode", Some(blocked_note.as_str()));
-    tip(
-        &power,
-        "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
-    );
-
     let choices = legion_core::profile::safe_choices();
     *profile_choices_slot.borrow_mut() = choices.clone();
     let labels: Vec<String> = choices.iter().map(|c| friendly_profile(c)).collect();
@@ -87,10 +319,76 @@ pub(crate) fn build_overview(
     let current = legion_core::profile::current();
     let active = choices.iter().position(|c| *c == current).unwrap_or(0) as u32;
 
+    // The ComboRow is the logic holder shared with Profiles / Performance
+    // (mode_drop_slot) — it is never shown; the segmented control mirrors it.
     let drop = string_combo_row("Mode", "", &label_refs, active);
-    tip(&drop, profile_tooltip(&current));
-    power.add(&drop);
     *mode_drop_slot.borrow_mut() = Some(drop.clone());
+
+    let power_box = gtk::Box::new(Orientation::Vertical, 8);
+    power_box.add_css_class("cc-block");
+    let power_head = gtk::Box::new(Orientation::Horizontal, 12);
+    let power_title = section_label("Power mode");
+    power_title.set_hexpand(true);
+    let mode_hint = gtk::Label::new(Some(profile_blurb(&current)));
+    mode_hint.add_css_class("cc-hint");
+    mode_hint.set_halign(Align::End);
+    mode_hint.set_xalign(1.0);
+    mode_hint.set_wrap(true);
+    power_head.append(&power_title);
+    power_head.append(&mode_hint);
+    power_box.append(&power_head);
+    let (seg_box, seg_buttons) = segmented(&labels, active);
+    tip(
+        &seg_box,
+        "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
+    );
+    for (b, c) in seg_buttons.iter().zip(choices.iter()) {
+        tip(b, profile_tooltip(c));
+    }
+    power_box.append(&seg_box);
+    if !blocked_note.is_empty() {
+        let note = gtk::Label::new(Some(&blocked_note));
+        note.add_css_class("cc-hint");
+        note.set_halign(Align::Start);
+        note.set_xalign(0.0);
+        note.set_wrap(true);
+        power_box.append(&note);
+    }
+    page.append(&power_box);
+    gate.track(&seg_box);
+
+    let seg_guard = Rc::new(Cell::new(false));
+    for (i, b) in seg_buttons.iter().enumerate() {
+        let drop = drop.clone();
+        let seg_guard = seg_guard.clone();
+        b.connect_toggled(move |btn| {
+            if !btn.is_active() || seg_guard.get() {
+                return;
+            }
+            if drop.selected() != i as u32 {
+                drop.set_selected(i as u32);
+            }
+        });
+    }
+    {
+        // Any change of the hidden ComboRow (user click, declined
+        // confirmation, Fn+Q poll, profile Load) re-syncs the segments.
+        let seg_buttons = seg_buttons.clone();
+        let seg_guard = seg_guard.clone();
+        let choices = choices.clone();
+        let hint = mode_hint.clone();
+        drop.connect_selected_notify(move |d| {
+            let idx = d.selected() as usize;
+            seg_guard.set(true);
+            if let Some(b) = seg_buttons.get(idx) {
+                b.set_active(true);
+            }
+            seg_guard.set(false);
+            if let Some(name) = choices.get(idx) {
+                hint.set_text(profile_blurb(name));
+            }
+        });
+    }
 
     let overlay = toast_overlay.clone();
     let choices_c = choices.clone();
@@ -110,7 +408,6 @@ pub(crate) fn build_overview(
             return;
         }
         let name = choices_c[idx].clone();
-        tip(d, profile_tooltip(&name));
 
         let apply = {
             let name = name.clone();
@@ -148,71 +445,48 @@ pub(crate) fn build_overview(
             }
         };
 
-        if name == "max-power" && last_ok_n.get() != idx as u32 {
+        // Max Power and Custom ask for confirmation; declining restores the
+        // previous selection (which re-syncs the segmented control).
+        let confirm_kind = match name.as_str() {
+            "max-power" => Some(true),
+            "custom" => Some(false),
+            _ => None,
+        };
+        if let (Some(is_max), true) = (confirm_kind, last_ok_n.get() != idx as u32) {
             let drop_r = d.clone();
             let choices_c = choices_c.clone();
             let profile_guard = profile_guard_n.clone();
             let last_ok = last_ok_n.clone();
             let prev = last_ok.get();
-            confirm_max_power(d, move |accepted| {
+            let done = move |accepted: bool| {
                 if !accepted {
                     profile_guard.set(true);
                     drop_r.set_selected(prev);
-                    let prev_name = choices_c
-                        .get(prev as usize)
-                        .cloned()
-                        .unwrap_or_else(|| "balanced".into());
-                    tip(&drop_r, profile_tooltip(&prev_name));
                     profile_guard.set(false);
                     return;
                 }
                 apply();
+                let key = if is_max { "max-power" } else { "custom" };
                 last_ok.set(
                     choices_c
                         .iter()
-                        .position(|c| c == "max-power")
+                        .position(|c| c == key)
                         .unwrap_or(prev as usize) as u32,
                 );
-            });
-            return;
-        }
-
-        if name == "custom" && last_ok_n.get() != idx as u32 {
-            let drop_r = d.clone();
-            let choices_c = choices_c.clone();
-            let profile_guard = profile_guard_n.clone();
-            let last_ok = last_ok_n.clone();
-            let prev = last_ok.get();
-            confirm_custom_power(d, move |accepted| {
-                if !accepted {
-                    profile_guard.set(true);
-                    drop_r.set_selected(prev);
-                    let prev_name = choices_c
-                        .get(prev as usize)
-                        .cloned()
-                        .unwrap_or_else(|| "balanced".into());
-                    tip(&drop_r, profile_tooltip(&prev_name));
-                    profile_guard.set(false);
-                    return;
-                }
-                apply();
-                last_ok.set(
-                    choices_c
-                        .iter()
-                        .position(|c| c == "custom")
-                        .unwrap_or(prev as usize) as u32,
-                );
-            });
+            };
+            if is_max {
+                confirm_max_power(d, done);
+            } else {
+                confirm_custom_power(d, done);
+            }
             return;
         }
 
         apply();
         last_ok_n.set(idx as u32);
     });
-    page.append(&power);
-    gate.track(&power);
 
-    // Custom PPT / GPU sliders — shown on Home when Mode is Custom.
+    // Custom PPT / GPU sliders — appear here while the mode is Custom.
     attach_custom_ppt_group(
         &page,
         toast_overlay,
@@ -226,112 +500,544 @@ pub(crate) fn build_overview(
         ppt_suppress_slot,
     );
 
-    // Temperature trend — a 5-minute CPU/GPU sparkline, giving Home the
-    // same at-a-glance history the KDE widget already has.
-    {
-        const HISTORY_CAP: usize = 150; // 2 s poll → ~5 min
-        const MIN_T: f64 = 30.0;
-        const MAX_T: f64 = 100.0;
-        let history: Rc<RefCell<std::collections::VecDeque<(f64, f64)>>> =
-            Rc::new(RefCell::new(std::collections::VecDeque::new()));
+    // ── Live cards: CPU · GPU · Fans · Battery ──────────────────────────
+    let cards = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .max_children_per_line(4)
+        .min_children_per_line(1)
+        .homogeneous(true)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    cards.add_css_class("metric-grid");
 
-        let (sec_trend, trend_card) = section_tip("Temperature · last 5 min", None);
-        tip(
-            &trend_card,
-            "CPU (red) and GPU (amber) package temperature, sampled every 2 s",
-        );
-        let area = gtk::DrawingArea::new();
-        area.set_height_request(88);
-        area.set_hexpand(true);
-        let area_hist = history.clone();
-        area.set_draw_func(move |_, cr, w, h| {
-            let w = w as f64;
-            let h = h as f64;
-            if w < 10.0 || h < 10.0 {
-                return;
-            }
-            // Horizontal guides at 40/55/70/85 °C.
-            cr.set_line_width(1.0);
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.05);
-            for t in [40.0, 55.0, 70.0, 85.0] {
-                let y = h - (t - MIN_T) / (MAX_T - MIN_T) * h;
-                cr.move_to(0.0, y);
-                cr.line_to(w, y);
-            }
-            let _ = cr.stroke();
-
-            // Legend — which trace is which (CPU red, GPU amber).
-            cr.select_font_face(
-                "Sans",
-                gtk::cairo::FontSlant::Normal,
-                gtk::cairo::FontWeight::Normal,
-            );
-            cr.set_font_size(10.0);
-            cr.set_source_rgba(0.784, 0.063, 0.180, 0.95);
-            cr.move_to(w - 56.0, 12.0);
-            let _ = cr.show_text("CPU");
-            cr.set_source_rgba(0.851, 0.596, 0.102, 0.95);
-            cr.move_to(w - 22.0, 12.0);
-            let _ = cr.show_text("GPU");
-
-            let hist = area_hist.borrow();
-            if hist.len() >= 2 {
-                // Right-aligned: the line grows leftward into the fixed window.
-                let dx = w / (HISTORY_CAP as f64 - 1.0);
-                let x0 = w - (hist.len() as f64 - 1.0) * dx;
-                let y_of = |t: f64| h - ((t.clamp(MIN_T, MAX_T) - MIN_T) / (MAX_T - MIN_T)) * h;
-                for (idx, r, g, b) in [(0usize, 0.784, 0.063, 0.180), (1, 0.851, 0.596, 0.102)] {
-                    cr.set_source_rgba(r, g, b, 0.95);
-                    cr.set_line_width(1.6);
-                    let mut first = true;
-                    for (i, point) in hist.iter().enumerate() {
-                        let t = if idx == 0 { point.0 } else { point.1 };
-                        let x = x0 + i as f64 * dx;
-                        let y = y_of(t);
-                        if first {
-                            cr.move_to(x, y);
-                            first = false;
-                        } else {
-                            cr.line_to(x, y);
-                        }
-                    }
-                    let _ = cr.stroke();
-                }
+    let (cpu_card, _cpu_t, cpu_v, cpu_d, cpu_bar) = live_card(
+        "CPU",
+        &format!(
+            "{} — package temperature, power and load",
+            if info.cpu_model.is_empty() {
+                "Processor"
             } else {
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.30);
-                cr.select_font_face(
-                    "Sans",
-                    gtk::cairo::FontSlant::Normal,
-                    gtk::cairo::FontWeight::Normal,
-                );
-                cr.set_font_size(11.0);
-                cr.move_to(10.0, h / 2.0 + 4.0);
-                let _ = cr.show_text("collecting samples…");
+                &info.cpu_model
             }
-        });
-        trend_card.append(&area);
-        page.append(&sec_trend);
+        ),
+    );
+    let (gpu_card, _gpu_t, gpu_v, gpu_d, gpu_bar) = live_card(
+        "GPU",
+        &format!(
+            "{} — discrete GPU temperature, power and utilization",
+            if info.gpu_model.is_empty() {
+                "Discrete GPU"
+            } else {
+                &info.gpu_model
+            }
+        ),
+    );
+    let fan_channels = legion_core::fans::channels();
+    let fan_ids: Vec<u8> = fan_channels.iter().map(|c| c.id).collect();
+    let aux_fan = legion_core::fans::aux_id_from(&fan_ids);
+    let fan_max_rpm = fan_channels
+        .iter()
+        .map(|c| c.max_rpm)
+        .max()
+        .filter(|m| *m > 0)
+        .unwrap_or(6000) as f64;
+    let (fan_card, fan_t, fan_v, fan_d, fan_bar) = live_card(
+        "Fans · automatic",
+        "Fastest fan in RPM · automatic = the firmware curve is in charge",
+    );
+    let (bat_card, bat_t, bat_v, bat_d, bat_bar) =
+        live_card("Battery", "Charge level, state and cycle count");
+    cards.append(&cpu_card);
+    cards.append(&gpu_card);
+    if !fan_channels.is_empty() {
+        cards.append(&fan_card);
+    }
+    cards.append(&bat_card);
+    page.append(&cards);
 
-        // Feed the history from the dashboard poll (values mirror the chips).
+    // ── Temperature chart ───────────────────────────────────────────────
+    const HISTORY_CAP: usize = 150; // 2 s poll → ~5 min
+    const MIN_T: f64 = 30.0;
+    const MAX_T: f64 = 100.0;
+    let history: Rc<RefCell<std::collections::VecDeque<(f64, f64)>>> =
+        Rc::new(RefCell::new(std::collections::VecDeque::new()));
+    let chart_head = gtk::Box::new(Orientation::Horizontal, 12);
+    let chart_title = section_label("Temperature · last 5 min");
+    chart_title.set_hexpand(true);
+    chart_head.append(&chart_title);
+    if !fan_channels.is_empty() {
+        let link = gtk::Button::with_label("Edit fan curve");
+        link.add_css_class("flat");
+        link.add_css_class("cc-link");
+        tip(&link, "Open Cooling to tune the fans");
+        let nav = nav.clone();
+        link.connect_clicked(move |_| nav("cooling-fans", "Cooling"));
+        chart_head.append(&link);
+    }
+    let chart_card = gtk::Box::new(Orientation::Vertical, 0);
+    chart_card.add_css_class("cc-chart");
+    tip(
+        &chart_card,
+        "CPU (red) and GPU (amber) temperature, sampled every 2 s",
+    );
+    let area = gtk::DrawingArea::new();
+    area.set_height_request(120);
+    area.set_hexpand(true);
+    let area_hist = history.clone();
+    area.set_draw_func(move |area, cr, w, h| {
+        let w = w as f64;
+        let h = h as f64;
+        if w < 10.0 || h < 10.0 {
+            return;
+        }
+        let fg = area.color();
+        let (fr, fg_g, fb) = (fg.red() as f64, fg.green() as f64, fg.blue() as f64);
+        let left = 34.0;
+        let plot_w = (w - left).max(1.0);
+        let y_of = |t: f64| h - ((t.clamp(MIN_T, MAX_T) - MIN_T) / (MAX_T - MIN_T)) * h;
+        cr.select_font_face(
+            "Sans",
+            gtk::cairo::FontSlant::Normal,
+            gtk::cairo::FontWeight::Normal,
+        );
+        cr.set_font_size(10.0);
+        for t in [90.0, 70.0, 50.0] {
+            let y = y_of(t);
+            cr.set_source_rgba(fr, fg_g, fb, 0.10);
+            cr.set_line_width(1.0);
+            cr.move_to(left, y);
+            cr.line_to(w, y);
+            let _ = cr.stroke();
+            cr.set_source_rgba(fr, fg_g, fb, 0.55);
+            cr.move_to(2.0, y + 3.5);
+            let _ = cr.show_text(&format!("{t:.0}°"));
+        }
+
+        let hist = area_hist.borrow();
+        if hist.len() >= 2 {
+            let dx = plot_w / (HISTORY_CAP as f64 - 1.0);
+            let x0 = w - (hist.len() as f64 - 1.0) * dx;
+            for (idx, r, g, b) in [(0usize, 0.784, 0.063, 0.180), (1, 0.851, 0.596, 0.102)] {
+                cr.set_source_rgba(r, g, b, 0.95);
+                cr.set_line_width(1.8);
+                let mut first = true;
+                for (i, point) in hist.iter().enumerate() {
+                    let t = if idx == 0 { point.0 } else { point.1 };
+                    // A 0 reading means "no sensor / GPU asleep" — leave a gap.
+                    if t <= 0.0 {
+                        first = true;
+                        continue;
+                    }
+                    let x = x0 + i as f64 * dx;
+                    let y = y_of(t);
+                    if first {
+                        cr.move_to(x, y);
+                        first = false;
+                    } else {
+                        cr.line_to(x, y);
+                    }
+                }
+                let _ = cr.stroke();
+            }
+        } else {
+            cr.set_source_rgba(fr, fg_g, fb, 0.55);
+            cr.set_font_size(12.0);
+            cr.move_to(left + 10.0, h / 2.0 + 4.0);
+            let _ = cr.show_text("Collecting temperature…");
+        }
+    });
+    chart_card.append(&area);
+    let legend = gtk::Box::new(Orientation::Horizontal, 16);
+    legend.add_css_class("cc-legend");
+    for (name, css) in [("CPU", "legend-cpu"), ("GPU", "legend-gpu")] {
+        let l = gtk::Label::new(Some(name));
+        l.add_css_class(css);
+        legend.append(&l);
+    }
+    let span = gtk::Label::new(Some("−5 min → now"));
+    span.add_css_class("cc-hint");
+    span.set_hexpand(true);
+    span.set_halign(Align::End);
+    legend.append(&span);
+    chart_card.append(&legend);
+    page.append(&chart_head);
+    page.append(&chart_card);
+    {
         let history_feed = history.clone();
+        let area_feed = area.clone();
         trend_feed_slot.replace(Some(Rc::new(move |cpu: f64, gpu: f64| {
             let mut hist = history_feed.borrow_mut();
             hist.push_back((cpu, gpu));
             while hist.len() > HISTORY_CAP {
                 hist.pop_front();
             }
-            area.queue_draw();
+            area_feed.queue_draw();
         })));
     }
 
-    if let Some(pct) = legion_core::battery::capacity() {
-        bat_v.set_text(&format!("{pct}%"));
-        bat_d.set_text(&legion_core::battery::status().unwrap_or_default());
+    // ── Quick toggles (only what this hardware supports) ────────────────
+    let (kbd_tile, kbd_sw) = quick_tile("Keyboard light", "On / off");
+    let (fan_tile, fan_sw) = quick_tile("Fans full speed", "Maximum airflow");
+    let (fnl_tile, fnl_sw) = quick_tile("Fn Lock", "F1–F12 act as function keys");
+    let (usb_tile, usb_sw) = quick_tile("Always-on USB", "Powered while off or asleep");
+    let quick_grid = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .max_children_per_line(2)
+        .min_children_per_line(1)
+        .homogeneous(true)
+        .column_spacing(12)
+        .row_spacing(12)
+        .build();
+    quick_grid.add_css_class("metric-grid");
+    for t in [&kbd_tile, &fan_tile, &fnl_tile, &usb_tile] {
+        quick_grid.append(t);
+        // Hide the FlowBox slot too, or hidden tiles leave blank gaps.
+        if let Some(slot) = t.parent() {
+            slot.set_visible(false);
+        }
+    }
+    let quick_wrap = gtk::Box::new(Orientation::Vertical, 8);
+    quick_wrap.append(&section_label("Quick toggles"));
+    quick_wrap.append(&quick_grid);
+    quick_wrap.set_visible(false);
+    page.append(&quick_wrap);
+    gate.track(&quick_grid);
+
+    let lighting_kind = info.capabilities.lighting_kind;
+    let kbd_level = Rc::new(Cell::new(5u8));
+    let kbd_guard = Rc::new(Cell::new(true));
+    let fan_guard = Rc::new(Cell::new(true));
+    let fnl_guard = Rc::new(Cell::new(true));
+    let usb_guard = Rc::new(Cell::new(true));
+    {
+        let overlay = toast_overlay.clone();
+        let guard = kbd_guard.clone();
+        let level = kbd_level.clone();
+        kbd_sw.connect_active_notify(move |sw| {
+            if guard.get() {
+                return;
+            }
+            let on = sw.is_active();
+            let msg = if on {
+                "Keyboard light on"
+            } else {
+                "Keyboard light off"
+            };
+            match lighting_kind {
+                legion_core::device::LightingKind::Spectrum => {
+                    legion_core::keyboard::set_rgb_brightness_async(if on {
+                        level.get().clamp(1, 9)
+                    } else {
+                        0
+                    });
+                    toast_ok(&overlay, msg);
+                }
+                _ => {
+                    let sw = sw.clone();
+                    let guard = guard.clone();
+                    let overlay = overlay.clone();
+                    dispatch_async(
+                        move || {
+                            let mut st = legion_core::config::get().four_zone.to_state();
+                            st.brightness = if on { st.brightness.max(2) } else { 0 };
+                            legion_core::fourzone::apply_and_save(&st)
+                        },
+                        "Keyboard light stopped without a result",
+                        move |res| match res {
+                            Ok(()) => toast_ok(&overlay, msg),
+                            Err(e) => {
+                                guard.set(true);
+                                sw.set_active(!on);
+                                guard.set(false);
+                                toast_error(&overlay, &e);
+                            }
+                        },
+                    );
+                }
+            }
+        });
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let guard = fan_guard.clone();
+        let channels: Vec<(u8, u32)> = fan_channels.iter().map(|c| (c.id, c.max_rpm)).collect();
+        fan_sw.connect_active_notify(move |sw| {
+            if guard.get() {
+                return;
+            }
+            let on = sw.is_active();
+            let sw = sw.clone();
+            let guard = guard.clone();
+            let overlay = overlay.clone();
+            let channels = channels.clone();
+            dispatch_async(
+                move || {
+                    let mut last_err = None;
+                    for (id, max) in &channels {
+                        let target = if on { *max } else { 0 };
+                        match send_command(DaemonCommand::SetFanTarget(*id, target)) {
+                            Ok(DaemonResponse::Ok) => {
+                                legion_core::config::remember_fan(*id, target)
+                            }
+                            Ok(DaemonResponse::Error(e)) => last_err = Some(e),
+                            Err(e) if is_version_skew_error(&e) => {
+                                last_err = Some("Service outdated — reinstall to update".into())
+                            }
+                            Err(e) => last_err = Some(e),
+                            Ok(_) => last_err = Some("Unexpected response from service".into()),
+                        }
+                    }
+                    match last_err {
+                        Some(e) => Err(e),
+                        None => Ok(()),
+                    }
+                },
+                "Fan request stopped without a result",
+                move |res| match res {
+                    Ok(()) => toast_ok(
+                        &overlay,
+                        if on {
+                            "Fans at full speed"
+                        } else {
+                            "Fans back to automatic"
+                        },
+                    ),
+                    Err(e) => {
+                        guard.set(true);
+                        sw.set_active(!on);
+                        guard.set(false);
+                        toast_error(&overlay, &e);
+                    }
+                },
+            );
+        });
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let guard = fnl_guard.clone();
+        fnl_sw.connect_active_notify(move |sw| {
+            if !guard.get() {
+                daemon_switch(&overlay, sw, &guard, "Fn Lock", DaemonCommand::SetFnLock);
+            }
+        });
+        let overlay = toast_overlay.clone();
+        let guard = usb_guard.clone();
+        usb_sw.connect_active_notify(move |sw| {
+            if !guard.get() {
+                daemon_switch(
+                    &overlay,
+                    sw,
+                    &guard,
+                    "Always-on USB",
+                    DaemonCommand::SetUsbCharging,
+                );
+            }
+        });
+    }
+    {
+        let kbd_possible = matches!(
+            lighting_kind,
+            legion_core::device::LightingKind::Spectrum
+                | legion_core::device::LightingKind::FourZone
+        );
+        let fans_possible = !fan_channels.is_empty();
+        let fan_channels_p: Vec<(u8, u32)> =
+            fan_channels.iter().map(|c| (c.id, c.max_rpm)).collect();
+        let quick_wrap = quick_wrap.clone();
+        dispatch_async(
+            move || {
+                use legion_core::ideapad::{get, Toggle};
+                let mut p = QuickProbe::default();
+                if kbd_possible {
+                    p.kbd = match lighting_kind {
+                        legion_core::device::LightingKind::Spectrum => {
+                            legion_core::keyboard::rgb_brightness().map(|b| (b > 0, b))
+                        }
+                        _ => legion_core::fourzone::present().then(|| {
+                            let b = legion_core::config::get().four_zone.brightness;
+                            (b > 0, b)
+                        }),
+                    };
+                }
+                if fans_possible && legion_core::fans::control_backend_name().is_some() {
+                    p.fans_full = Some(fan_channels_p.iter().all(|(id, max)| {
+                        *max > 0
+                            && legion_core::fans::read_target(*id)
+                                .is_some_and(|t| t as f64 >= *max as f64 * 0.95)
+                    }));
+                }
+                p.fn_lock = get(Toggle::FnLock);
+                p.usb = get(Toggle::UsbCharging);
+                Ok::<_, String>(p)
+            },
+            "Quick-toggle probe stopped without a result",
+            move |res| {
+                let Ok(p) = res else { return };
+                let mut any = false;
+                let mut reveal = |tile: &gtk::Box,
+                                  sw: &gtk::Switch,
+                                  guard: &Rc<Cell<bool>>,
+                                  state: Option<bool>| {
+                    if let Some(on) = state {
+                        guard.set(true);
+                        sw.set_active(on);
+                        guard.set(false);
+                        tile.set_visible(true);
+                        if let Some(slot) = tile.parent() {
+                            slot.set_visible(true);
+                        }
+                        any = true;
+                    } else {
+                        guard.set(false);
+                    }
+                };
+                if let Some((_, level)) = p.kbd {
+                    if level > 0 {
+                        kbd_level.set(level);
+                    }
+                }
+                reveal(&kbd_tile, &kbd_sw, &kbd_guard, p.kbd.map(|(on, _)| on));
+                reveal(&fan_tile, &fan_sw, &fan_guard, p.fans_full);
+                reveal(&fnl_tile, &fnl_sw, &fnl_guard, p.fn_lock);
+                reveal(&usb_tile, &usb_sw, &usb_guard, p.usb);
+                quick_wrap.set_visible(any);
+            },
+        );
     }
 
-    let cpu_chip_c = cpu_chip.clone();
-    let gpu_chip_c = gpu_chip.clone();
-    let trend_feed_poll = trend_feed_slot.clone();
+    // ── GPU mode (read-only) + charge limit ─────────────────────────────
+    let gpu_group = pref_group("", None);
+    gpu_group.set_visible(false);
+    let gpu_row = adw::ActionRow::builder()
+        .title("GPU mode")
+        .subtitle("Reading…")
+        .activatable(false)
+        .build();
+    let gpu_mode_l = gtk::Label::new(Some("—"));
+    gpu_mode_l.add_css_class("cc-mode-value");
+    gpu_row.add_suffix(&gpu_mode_l);
+    let gpu_link = gtk::Button::with_label("Change in Performance");
+    gpu_link.add_css_class("flat");
+    gpu_link.add_css_class("cc-link");
+    gpu_link.set_valign(Align::Center);
+    tip(
+        &gpu_link,
+        "Switching needs a reboot — open Performance → Features",
+    );
+    {
+        let nav = nav.clone();
+        gpu_link.connect_clicked(move |_| nav("cpu", "Performance"));
+    }
+    gpu_row.add_suffix(&gpu_link);
+    gpu_group.add(&gpu_row);
+    page.append(&gpu_group);
+    {
+        let gpu_group = gpu_group.clone();
+        let gpu_row = gpu_row.clone();
+        let gpu_mode_l = gpu_mode_l.clone();
+        run_daemon_command_async(DaemonCommand::GetGpuMode, move |result| {
+            if let Ok(DaemonResponse::GpuMode(st)) = result {
+                if st.supported {
+                    let shown = st.configured.or(st.active);
+                    gpu_mode_l.set_text(shown.map(|m| m.label()).unwrap_or("Unknown"));
+                    gpu_row.set_subtitle(if st.reboot_pending {
+                        "Applies after reboot"
+                    } else {
+                        "Active this boot"
+                    });
+                    gpu_group.set_visible(true);
+                }
+            }
+        });
+    }
+
+    let limit_box = gtk::Box::new(Orientation::Vertical, 8);
+    limit_box.add_css_class("cc-block");
+    let limit_head = gtk::Box::new(Orientation::Horizontal, 12);
+    let limit_title = section_label("Charge limit");
+    limit_title.set_hexpand(true);
+    let limit_hint = gtk::Label::new(Some(
+        "Stops charging at this level while plugged in — gentler on the pack",
+    ));
+    limit_hint.add_css_class("cc-hint");
+    limit_hint.set_wrap(true);
+    limit_hint.set_halign(Align::End);
+    limit_hint.set_xalign(1.0);
+    limit_head.append(&limit_title);
+    limit_head.append(&limit_hint);
+    limit_box.append(&limit_head);
+    let limit_values = [60u32, 80, 100];
+    let limit_labels: Vec<String> = limit_values.iter().map(|p| format!("{p}%")).collect();
+    let (limit_seg, limit_buttons) = segmented(&limit_labels, u32::MAX);
+    for (b, pct) in limit_buttons.iter().zip(limit_values) {
+        tip(
+            b,
+            match pct {
+                60 => "Conservation: stops early so the pack stays cooler — best when mostly plugged in",
+                80 => "Long life: more runtime than 60%, gentler than always charging to 100%",
+                _ => "Full charge: maximum capacity — use before travel or long unplugged sessions",
+            },
+        );
+    }
+    limit_box.append(&limit_seg);
+    page.append(&limit_box);
+    gate.track(&limit_seg);
+    {
+        let guard = Rc::new(Cell::new(true));
+        let last = Rc::new(Cell::new(0u32));
+        for (b, pct) in limit_buttons.iter().zip(limit_values) {
+            let guard = guard.clone();
+            let last = last.clone();
+            let overlay = toast_overlay.clone();
+            let buttons = limit_buttons.clone();
+            b.connect_toggled(move |btn| {
+                if !btn.is_active() || guard.get() {
+                    return;
+                }
+                let prev = last.get();
+                last.set(pct);
+                let guard = guard.clone();
+                let last = last.clone();
+                let overlay = overlay.clone();
+                let buttons = buttons.clone();
+                apply_charge_limit(pct, move |result| match result {
+                    Ok(()) => {
+                        legion_core::config::set_charge_limit(pct);
+                        toast_ok(&overlay, &format!("Charge limit set to {pct}%"));
+                    }
+                    Err(e) => {
+                        last.set(prev);
+                        guard.set(true);
+                        if let Some(i) = limit_values.iter().position(|v| *v == prev) {
+                            buttons[i].set_active(true);
+                        } else {
+                            for b in &buttons {
+                                b.set_active(false);
+                            }
+                        }
+                        guard.set(false);
+                        toast_error(&overlay, &e);
+                    }
+                });
+            });
+        }
+        let buttons = limit_buttons.clone();
+        dispatch_async(
+            || Ok::<u32, String>(legion_core::battery::charge_limit_pct()),
+            "Charge-limit read stopped without a result",
+            move |res| {
+                let cur = res.unwrap_or(100);
+                last.set(cur);
+                if let Some(i) = limit_values.iter().position(|v| *v == cur) {
+                    buttons[i].set_active(true);
+                }
+                guard.set(false);
+            },
+        );
+    }
+
+    // ── Live poll ───────────────────────────────────────────────────────
     let mode_drop_poll = drop.clone();
     let choices_poll = choices.clone();
     let profile_guard_poll = profile_guard.clone();
@@ -343,6 +1049,12 @@ pub(crate) fn build_overview(
     let ppt_scales_poll = ppt_scales_slot.clone();
     let _ = legion_core::sensors::sample_cpu_usage_pct();
 
+    struct BatteryPoll {
+        pct: u32,
+        status: String,
+        health: Option<f64>,
+        cycles: Option<u32>,
+    }
     // Data collected off the main thread each tick. IPC and nvidia-smi can
     // block for seconds — they must never run inside the GTK main loop.
     struct DashboardPoll {
@@ -352,7 +1064,7 @@ pub(crate) fn build_overview(
         sensors: Option<legion_core::sensors::SensorReadings>,
         cpu_w: Option<f64>,
         local: Option<legion_core::sensors::SensorReadings>,
-        local_battery: Option<(u32, String)>,
+        battery: Option<BatteryPoll>,
     }
     let (dash_tx, dash_rx) = mpsc::channel::<DashboardPoll>();
     std::thread::Builder::new()
@@ -373,15 +1085,13 @@ pub(crate) fn build_overview(
                 Ok(DaemonResponse::CpuPower(w)) if w > 0.5 => Some(w),
                 _ => None,
             };
-            let (local, local_battery) = if sensors.is_none() {
-                (
-                    Some(legion_core::sensors::read_all()),
-                    legion_core::battery::capacity()
-                        .map(|pct| (pct, legion_core::battery::status().unwrap_or_default())),
-                )
-            } else {
-                (None, None)
-            };
+            let local = sensors.is_none().then(legion_core::sensors::read_all);
+            let battery = legion_core::battery::capacity().map(|pct| BatteryPoll {
+                pct,
+                status: legion_core::battery::status().unwrap_or_default(),
+                health: legion_core::battery::health_pct(),
+                cycles: legion_core::battery::cycles(),
+            });
             if dash_tx
                 .send(DashboardPoll {
                     cpu_pct,
@@ -390,7 +1100,7 @@ pub(crate) fn build_overview(
                     sensors,
                     cpu_w,
                     local,
-                    local_battery,
+                    battery,
                 })
                 .is_err()
             {
@@ -399,7 +1109,10 @@ pub(crate) fn build_overview(
         })
         .ok();
 
-    // Drain poll results on the main thread and update the widgets.
+    let cpu_card_c = cpu_card.clone();
+    let gpu_card_c = gpu_card.clone();
+    let bat_card_c = bat_card.clone();
+    let trend_feed_poll = trend_feed_slot.clone();
     glib::timeout_add_local(Duration::from_millis(200), move || {
         while let Ok(poll) = dash_rx.try_recv() {
             if let Some(firmware_mode) = poll.firmware_mode {
@@ -410,14 +1123,10 @@ pub(crate) fn build_overview(
                         let index = index as u32;
                         profile_guard_poll.set(true);
                         mode_drop_poll.set_selected(index);
-                        mode_drop_poll.set_subtitle(profile_blurb(&firmware_mode));
-                        tip(&mode_drop_poll, profile_tooltip(&firmware_mode));
                         last_ok_poll.set(index);
                         profile_guard_poll.set(false);
                         legion_core::config::remember_platform_profile(&firmware_mode);
                     }
-                    // Fn+Q straight to Custom must reveal the sliders without
-                    // waiting for a GUI dropdown touch.
                     if let Some(ppt_box) = ppt_box_poll.borrow().as_ref() {
                         ppt_box.set_visible(
                             firmware_mode == "custom" && !ppt_scales_poll.borrow().is_empty(),
@@ -425,13 +1134,46 @@ pub(crate) fn build_overview(
                     }
                 }
             }
-            if let Some(s) = poll.sensors {
+
+            // Battery card + header power line.
+            if let Some(b) = &poll.battery {
+                bat_v.set_text(&format!("{}%", b.pct));
+                bat_bar.set_fraction(b.pct as f64 / 100.0);
+                let mut d = b.status.clone();
+                if let Some(c) = b.cycles {
+                    d.push_str(&format!(" · {c} cycles"));
+                }
+                bat_d.set_text(&d);
+                bat_t.set_text(&match b.health {
+                    Some(h) => {
+                        let (text, _) = legion_core::battery::health_display(h);
+                        format!("Battery · health {text}")
+                    }
+                    None => "Battery".into(),
+                });
+                bat_card_c.remove_css_class("hot");
+                bat_card_c.remove_css_class("warm");
+                if b.status == "Discharging" {
+                    if b.pct <= 20 {
+                        bat_card_c.add_css_class("hot");
+                    } else if b.pct <= 40 {
+                        bat_card_c.add_css_class("warm");
+                    }
+                }
+                set_machine_line(Some(b.status != "Discharging"));
+            }
+
+            let from_daemon = poll.sensors.is_some();
+            if let Some(s) = poll.sensors.as_ref().or(poll.local.as_ref()) {
                 let c = if s.ec_cpu > 0.0 { s.ec_cpu } else { s.cpu_temp };
-                cpu_v.set_text(&format!("{c:.0} °C"));
-                tint_temp(&cpu_chip_c, c);
+                if c > 0.0 {
+                    cpu_v.set_text(&format!("{c:.0} °C"));
+                    tint_temp(&cpu_card_c, c);
+                }
+                cpu_bar.set_fraction((poll.cpu_pct / 100.0).clamp(0.0, 1.0));
                 cpu_d.set_text(&match poll.cpu_w {
-                    Some(w) => format!("{:.0}% · {w:.0} W", poll.cpu_pct),
-                    None => format!("{:.0}%", poll.cpu_pct),
+                    Some(w) => format!("{w:.0} W · load {:.0} %", poll.cpu_pct),
+                    None => format!("load {:.0} %", poll.cpu_pct),
                 });
 
                 let mut g = if s.dgpu_temp < 0.0 {
@@ -442,7 +1184,7 @@ pub(crate) fn build_overview(
                 let mut gpu_power = s.dgpu_power;
                 // Daemon cgroup can block NVML (nvidia-caps) even when the
                 // GPU is awake — read nvidia-smi from this user process.
-                if g <= 0.0 {
+                if from_daemon && g <= 0.0 {
                     let local = legion_core::dgpu::read_metrics_batch();
                     if let Some(t) = local.temp.filter(|t| *t > 0.0) {
                         g = t;
@@ -453,54 +1195,47 @@ pub(crate) fn build_overview(
                 }
                 if g > 0.0 {
                     gpu_v.set_text(&format!("{g:.0} °C"));
-                    tint_temp(&gpu_chip_c, g);
+                    tint_temp(&gpu_card_c, g);
                 } else {
                     gpu_v.set_text(if legion_core::dgpu::discrete_present() {
                         "Off"
                     } else {
                         "—"
                     });
-                    tint_temp(&gpu_chip_c, 0.0);
+                    tint_temp(&gpu_card_c, 0.0);
                 }
-                if gpu_power >= 0.0 {
-                    gpu_d.set_text(&format!("{:.0}% · {:.0} W", poll.gpu_pct, gpu_power));
+                gpu_bar.set_fraction((poll.gpu_pct / 100.0).clamp(0.0, 1.0));
+                gpu_d.set_text(&if gpu_power >= 0.0 {
+                    format!("{gpu_power:.0} W · load {:.0} %", poll.gpu_pct)
                 } else {
-                    gpu_d.set_text(&format!("{:.0}%", poll.gpu_pct));
-                }
+                    format!("load {:.0} %", poll.gpu_pct)
+                });
 
-                set_fan_metrics_from_sensors(&fan_metric_labels, &s);
-                if let Some(feed) = trend_feed_poll.borrow().as_ref() {
-                    feed(c.max(0.0), g.max(0.0));
-                }
-                bat_v.set_text(&format!("{}%", s.battery_pct));
-                bat_d.set_text(&friendly_profile(&s.profile));
-            } else {
-                if let Some((pct, status)) = &poll.local_battery {
-                    bat_v.set_text(&format!("{pct}%"));
-                    bat_d.set_text(status);
-                }
-                if let Some(local) = &poll.local {
-                    let c = if local.ec_cpu > 0.0 {
-                        local.ec_cpu
+                let fans = fan_readings(&fan_ids, s);
+                if !fans.is_empty() {
+                    let top = fans.iter().map(|f| f.1).max().unwrap_or(0);
+                    let manual = fans.iter().any(|f| f.2 > 0);
+                    fan_t.set_text(if manual {
+                        "Fans · manual"
                     } else {
-                        local.cpu_temp
-                    };
-                    if c > 0.0 {
-                        cpu_v.set_text(&format!("{c:.0} °C"));
-                        tint_temp(&cpu_chip_c, c);
-                        cpu_d.set_text(&format!("{:.0}%", poll.cpu_pct));
+                        "Fans · automatic"
+                    });
+                    fan_v.set_text(&format!("{top} rpm"));
+                    fan_bar.set_fraction((top as f64 / fan_max_rpm).clamp(0.0, 1.0));
+                    let mut d = fans
+                        .iter()
+                        .map(|(id, rpm, _)| format!("{} {rpm}", fan_short_name(*id, aux_fan)))
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    if legion_core::fans::rpm_estimated() && top > 0 {
+                        d.push_str(" · est.");
                     }
-                    let g = if local.dgpu_temp < 0.0 {
-                        local.ec_gpu
-                    } else {
-                        local.dgpu_temp.max(local.ec_gpu)
-                    };
-                    if g > 0.0 {
-                        gpu_v.set_text(&format!("{g:.0} °C"));
-                        tint_temp(&gpu_chip_c, g);
-                        gpu_d.set_text(&format!("{:.0}%", poll.gpu_pct));
+                    fan_d.set_text(&d);
+                }
+                if from_daemon {
+                    if let Some(feed) = trend_feed_poll.borrow().as_ref() {
+                        feed(c.max(0.0), g.max(0.0));
                     }
-                    set_fan_metrics_from_sensors(&fan_metric_labels, local);
                 }
             }
         }
@@ -705,52 +1440,6 @@ pub(crate) fn attach_custom_ppt_group(
     *ppt_group_slot.borrow_mut() = Some(ppt_group);
 }
 
-pub(crate) fn set_fan_metric(value: &gtk::Label, detail: &gtk::Label, rpm: u32, target: u32) {
-    if target == 0 {
-        if rpm == 0 {
-            value.set_text("Auto");
-            detail.set_text("Firmware curve");
-        } else {
-            value.set_text(&format!("{rpm}"));
-            detail.set_text("Auto");
-        }
-    } else if rpm == 0 {
-        value.set_text(&format!("~{target}"));
-        detail.set_text("Manual target");
-    } else {
-        value.set_text(&format!("{rpm}"));
-        detail.set_text(&format!("→ {target} RPM"));
-    }
-}
-
-pub(crate) fn set_fan_metrics_from_sensors(
-    labels: &[(u8, gtk::Label, gtk::Label)],
-    s: &legion_core::sensors::SensorReadings,
-) {
-    let ids: Vec<u8> = labels.iter().map(|(id, _, _)| *id).collect();
-    let aux = legion_core::fans::aux_id_from(&ids);
-    let estimated = legion_core::fans::rpm_estimated();
-    for (id, value, detail) in labels {
-        let (rpm, target) = match id {
-            1 => (s.fan1_rpm, s.fan1_target),
-            2 => (s.fan2_rpm, s.fan2_target),
-            id if Some(*id) == aux => (s.fan4_rpm, s.fan4_target),
-            _ => (
-                legion_core::fans::read_rpm(*id).unwrap_or(0),
-                legion_core::fans::read_target(*id).unwrap_or(0),
-            ),
-        };
-        let target = legion_core::fans::effective_target(target, legion_core::fans::read_max(*id));
-        set_fan_metric(value, detail, rpm, target);
-        if estimated && rpm > 0 {
-            // Unverified EC-fallback layout — don't present it as a real tach.
-            detail.set_text(&format!("{} · est.", detail.text()));
-        }
-    }
-}
-
-/// One-line preview of what a preset will change — shown under the picker so
-/// Load isn't apply-and-pray.
 pub(crate) fn tint_temp(chip: &gtk::Box, temp: f64) {
     chip.remove_css_class("hot");
     chip.remove_css_class("warm");

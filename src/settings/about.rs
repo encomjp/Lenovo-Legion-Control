@@ -827,98 +827,7 @@ pub(crate) fn build_diagnostics_section(
         });
     }
 
-    let check_row = adw::ActionRow::builder()
-        .title("Self-check")
-        .activatable(false)
-        .build();
-    let run_btn = gtk::Button::with_label("Run");
-    run_btn.set_valign(Align::Center);
-    run_btn.add_css_class("pill-btn");
-    run_btn.set_size_request(110, -1);
-    run_btn.set_halign(Align::Center);
-    tip(
-        &run_btn,
-        "Runs read-only local checks — nothing is written or sent",
-    );
-    check_row.add_suffix(&run_btn);
-    group.add(&check_row);
-
-    // Results land here once the first run completes; hidden until then.
-    let results = gtk::Label::new(None);
-    results.add_css_class("detail-body");
-    results.set_halign(Align::Start);
-    results.set_wrap(true);
-    results.set_xalign(0.0);
-    results.set_selectable(true);
-    results.set_margin_start(12);
-    results.set_margin_end(12);
-    results.set_margin_top(4);
-    results.set_margin_bottom(8);
-    tip(
-        &results,
-        "One line per check — selectable so you can copy it into a bug report",
-    );
-    let expander = gtk::Expander::builder()
-        .label("Self-check results")
-        .child(&results)
-        .visible(false)
-        .build();
-    group.add(&expander);
-
-    {
-        let overlay = toast_overlay.clone();
-        let run_btn_connect = run_btn.clone();
-        let run_btn_closure = run_btn.clone();
-        let expander_closure = expander.clone();
-        let results_closure = results.clone();
-        run_btn_connect.connect_clicked(move |_| {
-            run_btn_closure.set_sensitive(false);
-            run_btn_closure.set_label("Running…");
-            let overlay = overlay.clone();
-            let run_btn = run_btn_closure.clone();
-            let expander = expander_closure.clone();
-            let results = results_closure.clone();
-            dispatch_async(
-                move || {
-                    Ok::<Vec<legion_core::selftest::SelfCheck>, String>(
-                        legion_core::selftest::run_self_checks(),
-                    )
-                },
-                "Self-check stopped without a result",
-                move |result| {
-                    run_btn.set_sensitive(true);
-                    run_btn.set_label("Run");
-                    match result {
-                        Ok(checks) => {
-                            let total = checks.len();
-                            let passed = checks.iter().filter(|c| c.ok).count();
-                            let lines: Vec<String> = checks
-                                .iter()
-                                .map(|c| {
-                                    format!(
-                                        "{} {} — {}",
-                                        if c.ok { "✓" } else { "✗" },
-                                        c.name,
-                                        c.detail
-                                    )
-                                })
-                                .collect();
-                            results.set_text(&lines.join("\n"));
-                            expander.set_label(Some(&format!(
-                                "Self-check results ({passed}/{total} passed)"
-                            )));
-                            expander.set_expanded(true);
-                            expander.set_visible(true);
-                        }
-                        Err(error) => toast_error(&overlay, &error),
-                    }
-                },
-            );
-        });
-    }
-
-    // Appended here so the visual order stays: disclosure → consent →
-    // self-check → results → send (the row itself is built above).
+    // Order: disclosure → consent → send (self-check lives on Health).
     group.add(&send_row);
 
     {
@@ -1150,6 +1059,22 @@ pub(crate) fn build_about_pages(
     let info = legion_core::device::detect();
 
     setup_page.append(&build_updates_section(toast_overlay));
+
+    let startup = pref_group("Startup", None);
+    let restore_sw = adw::SwitchRow::builder()
+        .title("Restore last session on launch")
+        .subtitle("Re-apply power mode, fans, charge limit and lighting when the app opens")
+        .active(legion_core::config::get().restore_on_launch)
+        .build();
+    tip(
+        &restore_sw,
+        "When on, Legion Control re-applies your last power mode, fans, charge limit, and lighting after launch",
+    );
+    restore_sw.connect_active_notify(|row| {
+        legion_core::config::update(|cfg| cfg.restore_on_launch = row.is_active());
+    });
+    startup.add(&restore_sw);
+    setup_page.append(&startup);
     setup_page.append(&build_components_section(toast_overlay));
     setup_page.append(&build_kde_widget_section(toast_overlay));
     let (diag_group, diag_consent, diag_share_switch) =

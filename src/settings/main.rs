@@ -168,12 +168,12 @@ fn flat_open_button(tooltip: &str) -> gtk::Button {
 /// the configured limit while the laptop was off (documented firmware
 /// behavior). Shared by the snapshot poll and the page-switch handler.
 const PAGE_TITLES: &[(&str, &str)] = &[
-    ("overview", "Home"),
-    ("cpu", "CPU"),
+    ("overview", "Control center"),
+    ("cpu", "Performance"),
     ("cooling-fans", "Cooling"),
     ("lighting", "Lighting"),
-    ("battery-status", "Battery"),
-    ("profiles", "Profiles"),
+    ("battery-status", "Power"),
+    ("health", "Health"),
     ("about", "Settings"),
 ];
 
@@ -187,14 +187,13 @@ fn page_title(name: &str) -> Option<&'static str> {
 /// Map any page id (current or legacy) to its top-level stack page.
 fn top_level_page(id: &str) -> &'static str {
     match id {
-        "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" => "cpu",
-        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" | "fix"
-        | "fix-audio" | "fix-lighting" | "fix-logs" => "about",
+        "cpu" | "cpu-features" | "cpu-tuning" | "cpu-power" | "profiles" => "cpu",
+        "about" | "about-setup" | "about-hardware" | "about-storage" | "about-help" => "about",
+        "health" | "fix" | "fix-audio" | "fix-lighting" | "fix-logs" => "health",
         "lighting" | "lighting-keyboard" | "lighting-front" | "lighting-rear" | "lighting-logo"
         | "lighting-more" => "lighting",
         "battery-status" | "battery-limit" => "battery-status",
         "cooling-fans" => "cooling-fans",
-        "profiles" => "profiles",
         _ => "overview",
     }
 }
@@ -206,12 +205,10 @@ fn hub_initial_tab(id: &str) -> Option<&'static str> {
         "cpu-features" => Some("features"),
         "cpu-tuning" => Some("tuning"),
         "cpu-power" => Some("power"),
+        "profiles" => Some("profiles"),
         "about-setup" => Some("setup"),
         "about-hardware" | "about-storage" => Some("hardware"),
         "about-help" => Some("help"),
-        "fix" | "fix-audio" => Some("fix"),
-        "fix-lighting" => Some("fix"),
-        "fix-logs" => Some("fix"),
         "lighting-keyboard" => Some("keyboard"),
         "lighting-front" => Some("front"),
         "lighting-rear" => Some("rear"),
@@ -245,6 +242,7 @@ fn hub_page(
             "features" => "applications-engineering-symbolic",
             "tuning" => "applications-system-symbolic",
             "power" => "battery-symbolic",
+            "profiles" => "document-save-symbolic",
             "keyboard" => "input-keyboard-symbolic",
             "front" => "video-display-symbolic",
             "rear" => "video-display-symbolic",
@@ -508,7 +506,7 @@ fn build_ui(app: &adw::Application) {
 
     let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
     let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
-    // Fix is now a tab inside Settings — keep the left rail short.
+    // Health is its own rail page (speakers, RGB repair, logs, self-checks).
     let fix_compact = build_fix_compact(&toast_overlay, &daemon_gate);
     // Shared suppress flag: programmatic telemetry switches (welcome window,
     // guided setup) must not re-trigger the Settings page's opt-out nudge.
@@ -547,31 +545,12 @@ fn build_ui(app: &adw::Application) {
     let (about_hub, about_tabs) = hub_page(
         vec![
             (about_setup_page, "setup", "Setup"),
-            (fix_compact, "fix", "Fix"),
             (about_hardware_page, "hardware", "Hardware"),
             (about_help_page, "help", "Help"),
         ],
         about_initial,
     );
 
-    stack.add_titled(
-        &page_shell_width(
-            &build_overview(
-                &toast_overlay,
-                &apply_queue,
-                &daemon_gate,
-                &mode_drop_slot,
-                &profile_choices_slot,
-                &ppt_group_slot,
-                &ppt_scales_slot,
-                &ppt_suppress_slot,
-                &trend_feed_slot,
-            ),
-            PageWidth::Wide,
-        ),
-        Some("overview"),
-        "Home",
-    );
     stack.add_titled(
         &page_shell_width(
             &build_cooling_overview_page(&toast_overlay, &apply_queue, &daemon_gate),
@@ -584,18 +563,9 @@ fn build_ui(app: &adw::Application) {
     stack.add_titled(
         &page_shell(&battery_page),
         Some("battery-status"),
-        "Battery",
+        "Power",
     );
-    stack.add_titled(
-        &page_shell(&build_profiles_page(
-            &toast_overlay,
-            &daemon_gate,
-            &mode_drop_slot,
-            &profile_choices_slot,
-        )),
-        Some("profiles"),
-        "Profiles",
-    );
+    stack.add_titled(&page_shell(&fix_compact), Some("health"), "Health");
     stack.add_titled(&about_hub, Some("about"), "Settings");
 
     let sidebar_box = gtk::Box::new(Orientation::Vertical, 0);
@@ -639,13 +609,13 @@ fn build_ui(app: &adw::Application) {
     for (icon, title, tooltip) in [
         (
             include_bytes!("../../data/icons/home.svg").as_slice(),
-            "Home",
-            "Temperatures, fans, battery, power mode",
+            "Control center",
+            "Power mode, live temperatures, fans, battery and quick toggles",
         ),
         (
             include_bytes!("../../data/icons/cpu.svg"),
-            "CPU",
-            "Features (boost, threading) · Tuning (thermal, undervolt) · Power limits",
+            "Performance",
+            "Features (boost, GPU mode) · Tuning · Power limits · Saved profiles",
         ),
         (
             include_bytes!("../../data/icons/cooling.svg"),
@@ -659,18 +629,18 @@ fn build_ui(app: &adw::Application) {
         ),
         (
             include_bytes!("../../data/icons/battery.svg"),
-            "Battery",
-            "Status and charge limit",
+            "Power",
+            "Battery status, charge limit, Fn Lock and USB charging",
         ),
         (
-            include_bytes!("../../data/icons/profiles.svg"),
-            "Profiles",
-            "Save and restore presets",
+            include_bytes!("../../data/icons/fix.svg"),
+            "Health",
+            "Self-checks, speakers, RGB repair and logs",
         ),
         (
             include_bytes!("../../data/icons/about.svg"),
             "Settings",
-            "Setup, fix, hardware, help",
+            "Setup, hardware, help",
         ),
     ] {
         let row = adw::ActionRow::builder()
@@ -731,7 +701,7 @@ fn build_ui(app: &adw::Application) {
     // second top bar — never above the titlebar in a plain Box.
     let content_toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    let window_title = adw::WindowTitle::new("Home", "");
+    let window_title = adw::WindowTitle::new("Control center", "");
     header.set_title_widget(Some(&window_title));
 
     let menu = gio::Menu::new();
@@ -964,7 +934,7 @@ fn build_ui(app: &adw::Application) {
     });
 
     let content_page = adw::NavigationPage::builder()
-        .title("Home")
+        .title("Control center")
         .child(&content_toolbar)
         .build();
 
@@ -989,6 +959,8 @@ fn build_ui(app: &adw::Application) {
         let split = split.clone();
         let title_widget = window_title.clone();
         Rc::new(move |name: &'static str, title: &'static str| {
+            // The rail title map is authoritative (callers may pass stale labels).
+            let title = page_title(name).unwrap_or(title);
             nav_to(&stack, &page, &split, &title_widget, name, title)
         })
     };
@@ -1018,10 +990,39 @@ fn build_ui(app: &adw::Application) {
                 "power",
                 "Power",
             ),
+            (
+                build_profiles_page(
+                    &toast_overlay,
+                    &daemon_gate,
+                    &mode_drop_slot,
+                    &profile_choices_slot,
+                ),
+                "profiles",
+                "Profiles",
+            ),
         ],
         cpu_initial,
     );
-    stack.add_titled(&cpu_hub, Some("cpu"), "CPU");
+    stack.add_titled(
+        &page_shell_width(
+            &build_overview(
+                &toast_overlay,
+                &apply_queue,
+                &daemon_gate,
+                &show_page,
+                &mode_drop_slot,
+                &profile_choices_slot,
+                &ppt_group_slot,
+                &ppt_scales_slot,
+                &ppt_suppress_slot,
+                &trend_feed_slot,
+            ),
+            PageWidth::Wide,
+        ),
+        Some("overview"),
+        "Control center",
+    );
+    stack.add_titled(&cpu_hub, Some("cpu"), "Performance");
 
     // One flat list: row order mirrors the rail above. Fix lives inside
     // Settings — keep the rail short.
@@ -1031,7 +1032,7 @@ fn build_ui(app: &adw::Application) {
         "cooling-fans",
         "lighting",
         "battery-status",
-        "profiles",
+        "health",
         "about",
     ];
     {
@@ -2309,6 +2310,7 @@ mod tests {
             "fix-audio",
             "fix-lighting",
             "fix-logs",
+            "health",
             "profiles",
             "about",
             "about-setup",
@@ -2326,15 +2328,13 @@ mod tests {
                 let hub = match top {
                     "cpu" => "cpu hub",
                     "about" => "about hub",
-                    "fix" => "fix hub",
                     "lighting" => "lighting hub",
                     other => panic!("hub tab {tab} mapped into non-hub page {other}"),
                 };
                 let _ = hub;
                 let valid = match top {
-                    "cpu" => ["features", "tuning", "power"].contains(&tab),
-                    "about" => ["setup", "fix", "hardware", "help"].contains(&tab),
-                    "fix" => ["fix-audio", "fix-lighting", "fix-logs"].contains(&tab),
+                    "cpu" => ["features", "tuning", "power", "profiles"].contains(&tab),
+                    "about" => ["setup", "hardware", "help"].contains(&tab),
                     "lighting" => ["keyboard", "front", "rear", "logo", "more"].contains(&tab),
                     _ => false,
                 };
