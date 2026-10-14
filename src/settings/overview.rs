@@ -693,6 +693,9 @@ pub(crate) fn build_overview(
         .name("dashboard-poll".into())
         .spawn(move || loop {
             std::thread::sleep(Duration::from_secs(2));
+            if !page_polling("overview") {
+                continue;
+            }
             let cpu_pct = legion_core::sensors::sample_cpu_usage_pct();
             let gpu_pct = legion_core::sensors::sample_gpu_usage_pct();
             let firmware_mode = match send_command(DaemonCommand::GetProfile) {
@@ -735,7 +738,7 @@ pub(crate) fn build_overview(
     let gpu_card_c = gpu_card.clone();
     let bat_card_c = bat_card.clone();
     let trend_feed_poll = trend_feed_slot.clone();
-    glib::timeout_add_local(Duration::from_millis(200), move || {
+    ticker_local(Duration::from_millis(200), move || {
         while let Ok(poll) = dash_rx.try_recv() {
             if let Some(firmware_mode) = poll.firmware_mode {
                 let changed = *last_firmware_mode.borrow() != firmware_mode;

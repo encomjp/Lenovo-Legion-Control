@@ -769,7 +769,7 @@ fn build_fan_curve_section(
     };
     tick();
     let tick = Rc::new(tick);
-    glib::timeout_add_local(Duration::from_secs(2), move || {
+    ticker_local(Duration::from_secs(2), move || {
         let Some(area) = weak.upgrade() else {
             return glib::ControlFlow::Break;
         };
@@ -831,7 +831,7 @@ pub(crate) fn fan_card(
         );
         group.add(&note_row);
         // Keep the RPM label live even in read-only mode.
-        glib::timeout_add_local(Duration::from_secs(2), move || {
+        ticker_local(Duration::from_secs(2), move || {
             let (tx, rx) = mpsc::channel();
             let fan = fan;
             std::thread::spawn(move || {

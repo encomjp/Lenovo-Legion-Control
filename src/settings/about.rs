@@ -1534,11 +1534,6 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
 
 // ───────────────────── Power mode: automatic switching ─────────────────────
 
-/// The chart widget lives in its own file; declared here (a module this
-/// change owns) and re-exported to the crate through `use about::*`.
-#[path = "history.rs"]
-pub(crate) mod history;
-
 use legion_core::config::{AppRule, AutoModeConfig};
 
 struct RuleRow {

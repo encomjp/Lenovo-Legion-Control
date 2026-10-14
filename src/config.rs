@@ -225,6 +225,14 @@ pub struct AppConfig {
     /// Show a small on-screen popup when the power mode changes (tray).
     #[serde(default = "default_true")]
     pub osd_mode_change: bool,
+    /// Last window size and maximized state of the settings app (0 = unset,
+    /// pick a size from the monitor).
+    #[serde(default)]
+    pub window_width: i32,
+    #[serde(default)]
+    pub window_height: i32,
+    #[serde(default)]
+    pub window_maximized: bool,
 }
 
 /// One per-app rule: while a process whose `comm` matches `process` runs,
@@ -445,6 +453,9 @@ impl Default for AppConfig {
             four_zone: FourZoneConfig::default(),
             auto_mode: AutoModeConfig::default(),
             osd_mode_change: true,
+            window_width: 0,
+            window_height: 0,
+            window_maximized: false,
         }
     }
 }

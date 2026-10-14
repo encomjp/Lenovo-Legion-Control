@@ -708,7 +708,7 @@ pub(crate) fn build_cpu_power_page(
         let sliders = sliders_box.downgrade();
         let adv = adv_box.downgrade();
         let btn = go_custom_btn.downgrade();
-        glib::timeout_add_seconds_local(2, move || {
+        ticker_local(Duration::from_secs(2), move || {
             let (Some(lock_row), Some(sliders), Some(adv), Some(btn)) =
                 (lock_row.upgrade(), sliders.upgrade(), adv.upgrade(), btn.upgrade())
             else {
