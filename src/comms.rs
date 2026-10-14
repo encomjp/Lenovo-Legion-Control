@@ -140,6 +140,16 @@ pub enum DaemonCommand {
     SetFnLock(bool),
     /// ideapad_acpi always-on USB charging on/off (read-back verified).
     SetUsbCharging(bool),
+    /// Read-only GPU working mode (MUX) status: support, backend, firmware
+    /// setting, mode active this boot and whether a reboot is pending.
+    GetGpuMode,
+    /// Change the GPU working mode (MUX). Takes effect on the next boot.
+    /// `acknowledge` must be true: the caller confirmed the reboot,
+    /// black-screen risk and the BIOS (F2) recovery path.
+    SetGpuMode {
+        mode: crate::gpu_mode::GpuMode,
+        acknowledge: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -193,6 +203,8 @@ pub enum DaemonResponse {
     Thermal(crate::thermal::ThermalConfig),
     ThermalStatus(crate::thermal::ThermalStatus),
     DaemonVersion(String),
+    // ── appended (GPU working mode / MUX) ──
+    GpuMode(crate::gpu_mode::GpuModeStatus),
 }
 
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
@@ -452,6 +464,10 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::GetDaemonVersion => "GetDaemonVersion".into(),
         DaemonCommand::SetFnLock(on) => format!("SetFnLock({on})"),
         DaemonCommand::SetUsbCharging(on) => format!("SetUsbCharging({on})"),
+        DaemonCommand::GetGpuMode => "GetGpuMode".into(),
+        DaemonCommand::SetGpuMode { mode, acknowledge } => {
+            format!("SetGpuMode({},ack={acknowledge})", mode.as_str())
+        }
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_label: {label}");
@@ -503,6 +519,8 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::GetDaemonVersion => "GetDaemonVersion",
         DaemonCommand::SetFnLock(_) => "SetFnLock",
         DaemonCommand::SetUsbCharging(_) => "SetUsbCharging",
+        DaemonCommand::GetGpuMode => "GetGpuMode",
+        DaemonCommand::SetGpuMode { .. } => "SetGpuMode",
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_kind: {kind}");
@@ -536,6 +554,7 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
         DaemonResponse::Thermal(_) => "Thermal",
         DaemonResponse::ThermalStatus(_) => "ThermalStatus",
         DaemonResponse::DaemonVersion(_) => "DaemonVersion",
+        DaemonResponse::GpuMode(_) => "GpuMode",
     }
 }
 
@@ -563,6 +582,7 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::FixRgbPanic
             | DaemonCommand::SetFnLock(_)
             | DaemonCommand::SetUsbCharging(_)
+            | DaemonCommand::SetGpuMode { .. }
     );
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_is_write: {is_write}");
@@ -767,6 +787,62 @@ mod tests {
             let bytes = bincode_opts().serialize(resp).expect("serialize");
             let back: DaemonResponse = bincode_opts().deserialize(&bytes).expect("deserialize");
             assert_eq!(bincode_opts().serialize(&back).unwrap(), bytes);
+        }
+    }
+
+    /// GPU-mode variants are appended last: their wire indices must follow
+    /// every older variant so pre-existing clients/daemons keep decoding.
+    #[test]
+    fn gpu_mode_ipc_is_appended_and_round_trips() {
+        use crate::gpu_mode::{GpuMode, GpuModeStatus};
+        // DaemonCommand: SetUsbCharging was index 40 → GetGpuMode 41, SetGpuMode 42.
+        let idx = |c: &DaemonCommand| bincode_opts().serialize(c).unwrap()[0];
+        assert_eq!(idx(&DaemonCommand::SetUsbCharging(true)), 40);
+        assert_eq!(idx(&DaemonCommand::GetGpuMode), 41);
+        let set = DaemonCommand::SetGpuMode {
+            mode: GpuMode::DgpuOnly,
+            acknowledge: true,
+        };
+        assert_eq!(idx(&set), 42);
+        let bytes = bincode_opts().serialize(&set).unwrap();
+        match bincode_opts().deserialize::<DaemonCommand>(&bytes).unwrap() {
+            DaemonCommand::SetGpuMode { mode, acknowledge } => {
+                assert_eq!(mode, GpuMode::DgpuOnly);
+                assert!(acknowledge);
+            }
+            other => panic!("unexpected decode: {}", cmd_label(&other)),
+        }
+        assert!(cmd_is_write(&set));
+        assert!(!cmd_is_write(&DaemonCommand::GetGpuMode));
+        assert_eq!(cmd_kind(&set), "SetGpuMode");
+        assert_eq!(cmd_label(&set), "SetGpuMode(dgpu,ack=true)");
+
+        let st = GpuModeStatus {
+            supported: true,
+            model_verified: true,
+            model_note: "SMCN20WW · verified (SMCN)".into(),
+            gamezone_present: true,
+            acpi_call_loaded: true,
+            backend: "acpi_call:\\_SB.GZFD.WMAA".into(),
+            active: Some(GpuMode::Hybrid),
+            firmware: Some(GpuMode::Hybrid),
+            pending: Some(GpuMode::DgpuOnly),
+            configured: Some(GpuMode::DgpuOnly),
+            reboot_pending: true,
+            igpu_driver: Some("amdgpu".into()),
+            kernel_attrs: vec!["gpu_mode=0".into()],
+            ..Default::default()
+        };
+        let resp = DaemonResponse::GpuMode(st.clone());
+        let bytes = bincode_opts().serialize(&resp).unwrap();
+        // DaemonVersion was the last response (index 24) → GpuMode is 25.
+        assert_eq!(bytes[0], 25);
+        match bincode_opts()
+            .deserialize::<DaemonResponse>(&bytes)
+            .unwrap()
+        {
+            DaemonResponse::GpuMode(back) => assert_eq!(back, st),
+            other => panic!("unexpected decode: {}", response_kind(&other)),
         }
     }
 

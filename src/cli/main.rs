@@ -62,6 +62,86 @@ fn ideapad_toggle(
     }
 }
 
+/// Fetch the GPU working-mode status from the daemon (exit 1 on failure).
+fn fetch_gpu_mode() -> legion_core::gpu_mode::GpuModeStatus {
+    match send_command(DaemonCommand::GetGpuMode) {
+        Ok(DaemonResponse::GpuMode(st)) => st,
+        Ok(DaemonResponse::Error(e)) => fail(e),
+        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+            fail("the running legion-control service is too old for gpu-mode; restart/update it")
+        }
+        Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
+fn print_gpu_mode(st: &legion_core::gpu_mode::GpuModeStatus) {
+    use legion_core::gpu_mode::GpuMode;
+    let name = |m: Option<GpuMode>| m.map_or("unknown", |m| m.label());
+    println!("GPU mode (MUX)");
+    println!(
+        "  supported      {}",
+        if st.supported { "yes" } else { "no" }
+    );
+    println!("  backend        {}", st.backend);
+    println!("  model          {}", st.model_note);
+    println!("  active (boot)  {}", name(st.active));
+    println!("  firmware       {}", name(st.configured));
+    if st.reboot_pending {
+        println!(
+            "  pending        reboot required to apply {}",
+            name(st.configured)
+        );
+    }
+    println!(
+        "  iGPU driver    {}",
+        st.igpu_driver.as_deref().unwrap_or("none bound")
+    );
+    if !st.detail.is_empty() {
+        println!("  note           {}", st.detail);
+    }
+}
+
+/// `legion-cli gpu-mode [hybrid|dgpu] [--yes-i-understand]`.
+fn gpu_mode_cmd(mode: Option<&str>, ack: bool) {
+    use legion_core::gpu_mode::GpuMode;
+    let Some(raw) = mode else {
+        print_gpu_mode(&fetch_gpu_mode());
+        return;
+    };
+    let Some(target) = GpuMode::parse(raw) else {
+        usage_fail(format!("unknown GPU mode '{raw}' (use hybrid|dgpu)"));
+    };
+    if !ack {
+        eprintln!("{}", legion_core::gpu_mode::RISK_TEXT);
+        eprintln!();
+        eprintln!(
+            "error: re-run with --yes-i-understand to switch to {} (nothing was changed)",
+            target.label()
+        );
+        std::process::exit(2);
+    }
+    match send_command(DaemonCommand::SetGpuMode {
+        mode: target,
+        acknowledge: true,
+    }) {
+        Ok(DaemonResponse::GpuMode(st)) => {
+            print_gpu_mode(&st);
+            println!();
+            println!(
+                "GPU mode set to {}. Reboot to apply. If the screen stays black, enter BIOS setup (F2) and change the GPU mode back.",
+                target.label()
+            );
+        }
+        Ok(DaemonResponse::Error(e)) => fail(e),
+        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+            fail("the running legion-control service is too old for gpu-mode; restart/update it")
+        }
+        Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "legion-cli",
@@ -217,6 +297,16 @@ enum Commands {
     Diagnose {
         #[command(subcommand)]
         action: DiagAction,
+    },
+    /// Show or set the GPU working mode (MUX): no argument shows, hybrid|dgpu sets.
+    /// A change takes effect after a reboot; BIOS setup (F2) is the way back.
+    GpuMode {
+        /// hybrid (iGPU drives the panel, dGPU on demand) or dgpu (dGPU only)
+        mode: Option<String>,
+        /// Confirm you understand: reboot required, a wrong mode can leave the
+        /// internal panel black, and the fix is BIOS setup (F2) → GPU mode
+        #[arg(long)]
+        yes_i_understand: bool,
     },
     /// Check GitHub for new releases of Legion Control
     CheckUpdate {
@@ -1059,6 +1149,10 @@ fn main() {
                 }
             }
         },
+        Commands::GpuMode {
+            mode,
+            yes_i_understand,
+        } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
@@ -1485,6 +1579,10 @@ fn cmd_label(cmd: &Commands) -> String {
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
+        Commands::GpuMode {
+            mode,
+            yes_i_understand,
+        } => format!("gpu-mode mode={mode:?} ack={yes_i_understand}"),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
