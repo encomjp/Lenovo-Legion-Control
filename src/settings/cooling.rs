@@ -369,15 +369,16 @@ impl CurveUi {
         // Say why a button is greyed out instead of leaving it a mystery.
         let mut why = Vec::new();
         if st.is_some() && !can_factory {
-            why.push("Already the factory shape");
+            why.push("Already the factory shape.");
         }
         if st.is_some() && !enabled {
-            why.push("No custom curve to reset");
+            why.push("No custom curve to reset.");
         }
-        self.reason.set_text(&why.join(", "));
+        self.reason.set_text(&why.join(" "));
         self.reason.set_visible(!why.is_empty());
-        self.headline
-            .set_text(&format!("Fan curve for {}", profile_tab_label(&profile)));
+        // The selector beside it names the mode; keep the heading one line.
+        let _ = profile_tab_label(&profile);
+        self.headline.set_text("Fan curve");
         self.editor.set_now(
             st.as_ref()
                 .filter(|s| s.current_profile == profile)

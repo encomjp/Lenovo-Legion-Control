@@ -1251,7 +1251,8 @@ pub(crate) fn build_about_pages(
     ] {
         let essential = matches!(k, "Model" | "Machine type" | "BIOS" | "Processor" | "Graphics");
         if essential {
-            laptop.add(&property_row(k, v, Some(tip_text)));
+            let _ = tip_text; // essentials need no developer tooltip
+            laptop.add(&property_row(k, v, None));
         } else {
             laptop_more.add(&property_row(k, v, Some(tip_text)));
         }

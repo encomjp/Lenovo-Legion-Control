@@ -1,94 +1,72 @@
-#!/usr/bin/env zsh
-# Capture every Legion Control page headless — does not obscure your real desktop.
-# Uses an isolated Xvfb :99 + openbox session, so your Wayland/KWin session stays untouched.
-# The running `legion-settings --hidden` tray instance is briefly replaced and auto-restarted.
+#!/usr/bin/env bash
+# Capture every Legion Control page off-screen for the README.
 #
-# Requirements: Xvfb, openbox, xdotool, xorg-xwd, ImageMagick (magick), cargo
-# Usage: ./scripts/capture-screenshots.sh
-set -e
-OUTDIR="$(dirname "$0")/../docs/assets/screenshots"
-mkdir -p "$OUTDIR"
-echo "Output dir $OUTDIR"
+# Runs on a private Xvfb display with GTK forced to X11, so nothing appears on
+# your desktop and your running tray instance is left alone. Uses a throwaway
+# copy of your settings (diagnostics off, no welcome dialog).
+#
+# Requirements: Xvfb, openbox, xdotool, ImageMagick (magick)
+# Usage: scripts/capture-screenshots.sh [light|dark]   (default: dark)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUTDIR="$ROOT/docs/assets/screenshots"
+THEME="${1:-dark}"
+SCHEME=default; [[ "$THEME" == dark ]] && SCHEME=prefer-dark
+D=:119
 
-if ! command -v Xvfb >/dev/null; then echo "Xvfb missing — install xorg-server-xvfb"; exit 1; fi
-if ! command -v openbox >/dev/null; then echo "openbox missing — pacman -S openbox"; exit 1; fi
-if ! command -v xdotool >/dev/null; then echo "xdotool missing"; exit 1; fi
-if ! command -v magick >/dev/null; then echo "magick missing — install imagemagick"; exit 1; fi
-
-echo "Building legion-settings..."
-cargo build --bin legion-settings --quiet
-
-echo "Killing hidden instance (will restart)..."
-pkill -f "legion-settings --hidden" || true
-sleep 1
-pkill -f "Xvfb :99" || true
-sleep 1
-
-Xvfb :99 -screen 0 1400x900x24 -ac &
-XVFB=$!
-sleep 2
-DISPLAY=:99 openbox --sm-disable &
-OB=$!
-sleep 1
-
-typeset -A PAGES
-PAGES=(
-  "overview" "01-home-overview"
-  "cpu-features" "02-cpu-features"
-  "cpu-tuning" "03-cpu-tuning"
-  "cpu-power" "04-cpu-power"
-  "cooling-fans" "05-cooling"
-  "lighting-keyboard" "06-lighting-keyboard"
-  "lighting-front" "07-lighting-front"
-  "lighting-rear" "08-lighting-rear"
-  "lighting-logo" "09-lighting-logo"
-  "lighting-more" "10-lighting-more"
-  "battery-status" "11-battery"
-  "profiles" "12-profiles"
-  "about-setup" "13-settings-setup"
-  "fix" "14-settings-fix"
-  "about-hardware" "15-settings-hardware"
-  "about-help" "16-settings-help"
-)
-
-BIN="$(dirname "$0")/../target/debug/legion-settings"
-for PAGE in ${(k)PAGES}; do
-  FILE="${PAGES[$PAGE]}"
-  echo "=== $PAGE -> $FILE ==="
-  DISPLAY=:99 WAYLAND_DISPLAY= GDK_BACKEND=x11 GSK_RENDERER=cairo LIBGL_ALWAYS_SOFTWARE=1 LEGION_PAGE=$PAGE timeout 10 "$BIN" > /tmp/legion_${FILE}.log 2>&1 &
-  APP=$!
-  sleep 5
-  WIN=""
-  for i in {1..10}; do
-    WIN=$(DISPLAY=:99 xdotool search --onlyvisible --name "Legion Control" 2>/dev/null | head -n1)
-    if [ -n "$WIN" ]; then break; fi
-    sleep 0.5
-  done
-  if [ -z "$WIN" ]; then
-    echo "WARN: no window for $PAGE"
-    kill $APP 2>/dev/null || true
-    pkill -f "legion-settings" || true
-    sleep 1
-    continue
-  fi
-  DISPLAY=:99 xwd -id $WIN -out /tmp/${FILE}.xwd
-  magick /tmp/${FILE}.xwd "$OUTDIR/${FILE}.png"
-  ls -lh "$OUTDIR/${FILE}.png"
-  kill $APP 2>/dev/null || true
-  pkill -f "legion-settings" || true
-  sleep 1
+for c in Xvfb openbox xdotool magick; do
+  command -v "$c" >/dev/null || { echo "missing: $c"; exit 1; }
 done
 
-kill $OB || true
-kill $XVFB || true
-wait $XVFB 2>/dev/null || true
-# Only restart the tray instance if one was running before the capture —
-# never launch the app on the user's desktop from a screenshot run.
-if pgrep -f "legion-settings --hidden" >/dev/null 2>&1; then
-  echo "Restarting hidden instance..."
-  nohup "$BIN" --hidden > /tmp/legion_restart.log 2>&1 &
-  sleep 1
-  ps aux | grep legion-settings | grep -v grep | head
+cargo build --release --bin legion-settings --quiet --manifest-path "$ROOT/Cargo.toml"
+BIN="$ROOT/target/release/legion-settings"
+mkdir -p "$OUTDIR"
+
+CFG=$(mktemp -d); mkdir -p "$CFG/legion-control"
+SRC="$HOME/.config/legion-control/settings.json"
+if [[ -f "$SRC" ]]; then
+  python3 - "$SRC" "$CFG/legion-control/settings.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d.update(restore_on_launch=False, welcome_seen=True)
+d.setdefault("diagnostics", {})["enabled"] = False
+json.dump(d, open(sys.argv[2], "w"))
+EOF
 fi
-echo "Done — images in $OUTDIR"
-ls -lh "$OUTDIR"
+
+Xvfb $D -screen 0 1400x900x24 -nolisten tcp >/dev/null 2>&1 & XV=$!
+sleep 2
+DISPLAY=$D openbox --sm-disable >/dev/null 2>&1 & OB=$!
+sleep 1
+trap 'kill $OB $XV 2>/dev/null || true; rm -rf "$CFG"' EXIT
+
+PAGES=(
+  "overview:01-home-overview"
+  "cpu-features:02-cpu-features"
+  "cpu-tuning:03-cpu-tuning"
+  "cpu-power:04-cpu-power"
+  "cooling-fans:05-cooling"
+  "lighting-keyboard:06-lighting-keyboard"
+  "lighting-more:10-lighting-more"
+  "battery-status:11-battery"
+  "profiles:12-profiles"
+  "about-setup:13-settings-setup"
+  "health:14-health"
+  "about-hardware:15-settings-hardware"
+  "about-help:16-settings-help"
+)
+
+for entry in "${PAGES[@]}"; do
+  page=${entry%%:*}; file=${entry#*:}
+  env -u WAYLAND_DISPLAY GDK_BACKEND=x11 DISPLAY=$D LEGION_PAGE=$page \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent ADW_DEBUG_COLOR_SCHEME=$SCHEME \
+    XDG_CONFIG_HOME="$CFG" "$BIN" >/dev/null 2>&1 & APP=$!
+  sleep 4
+  DISPLAY=$D xdotool mousemove 1390 890 2>/dev/null || true   # no hover tooltips
+  sleep 1
+  DISPLAY=$D import -window root "$CFG/shot.png"
+  magick "$CFG/shot.png" -trim +repage "$OUTDIR/$file.png"
+  kill $APP 2>/dev/null || true; wait $APP 2>/dev/null || true
+  echo "$page -> $file.png"
+done
+echo "Done: $OUTDIR"

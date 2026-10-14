@@ -185,9 +185,11 @@ impl CurveEditor {
             #[allow(deprecated)]
             let panel = area
                 .style_context()
-                .lookup_color("card_bg_color")
+                // window_bg is opaque; card_bg is translucent and would fill white.
+                .lookup_color("window_bg_color")
+                .filter(|c| c.alpha() > 0.99)
                 .map(|c| (c.red() as f64, c.green() as f64, c.blue() as f64))
-                .unwrap_or(if light_text { (0.19, 0.19, 0.2) } else { (1.0, 1.0, 1.0) });
+                .unwrap_or(if light_text { (0.14, 0.14, 0.15) } else { (0.98, 0.98, 0.98) });
             let plate = |cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64| {
                 let r = 5.0;
                 cr.new_sub_path();

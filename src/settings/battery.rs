@@ -10,14 +10,14 @@ pub(crate) fn power_text(status: &str, watts: f64) -> String {
     let w = watts.abs();
     if w < 0.05 {
         return match status {
-            "Not charging" | "Full" => "Plugged in, not charging".to_string(),
+            "Not charging" | "Full" => "Plugged in".to_string(),
             _ => "Idle".to_string(),
         };
     }
     match status {
         "Charging" => format!("Charging {w:.0} W"),
         "Discharging" => format!("Draining {w:.1} W"),
-        "Not charging" | "Full" => "Plugged in, not charging".to_string(),
+        "Not charging" | "Full" => "Plugged in".to_string(),
         _ => format!("{w:.1} W"),
     }
 }
@@ -549,8 +549,8 @@ mod tests {
         assert_eq!(power_text("Discharging", 0.0), "Idle");
         assert_eq!(power_text("Charging", 45.2), "Charging 45 W");
         assert_eq!(power_text("Discharging", 9.84), "Draining 9.8 W");
-        assert_eq!(power_text("Not charging", 0.0), "Plugged in, not charging");
-        assert_eq!(power_text("Full", 3.0), "Plugged in, not charging");
+        assert_eq!(power_text("Not charging", 0.0), "Plugged in");
+        assert_eq!(power_text("Full", 3.0), "Plugged in");
     }
 
     #[test]
