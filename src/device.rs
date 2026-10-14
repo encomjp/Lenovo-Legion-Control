@@ -583,11 +583,21 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
         log::trace!("fan probe: yogafan present but exposes no fan channels");
     }
 
+    // EC debugfs RPM (daemon/root only): report the backend the RPM path
+    // actually uses so `fan_backend` agrees with `fans::backend_name()`.
+    // Channel ids/ranges still come from the profile/placeholder below.
+    let ec_fallback = crate::fans::rpm_backend_name().filter(|name| name == "ec-fallback");
+
     // Profile fallbacks when no hwmon yet (daemon early boot, missing module).
     if let Some(p) = profile {
         log::debug!(
-            "fan probe: no hwmon fans — using profile fallback ranges ({})",
-            p.bios_prefix
+            "fan probe: no hwmon fans — using profile fallback ranges ({}){}",
+            p.bios_prefix,
+            if ec_fallback.is_some() {
+                ", RPM via EC fallback"
+            } else {
+                ""
+            }
         );
         let fans = p
             .fan_rpm_fallback
@@ -600,12 +610,14 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
                 current_rpm: 0,
             })
             .collect();
-        return (format!("profile-fallback ({})", p.bios_prefix), fans);
+        let backend =
+            ec_fallback.unwrap_or_else(|| format!("profile-fallback ({})", p.bios_prefix));
+        return (backend, fans);
     }
 
     log::warn!("fan probe: no hwmon and no profile — using static placeholder fan ranges");
     (
-        "none".into(),
+        ec_fallback.unwrap_or_else(|| "none".into()),
         vec![
             FanCapability {
                 id: 1,
@@ -1013,6 +1025,7 @@ fn detect_ec_chip(fan_backend: &str) -> String {
     match fan_backend {
         "lenovo_wmi_other" => "ITE (via lenovo_wmi_other)".into(),
         "legion_hwmon" => "ITE IT5508 (legion_hwmon)".into(),
+        "ec-fallback" => "Unknown (EC debugfs fallback)".into(),
         other if other.starts_with("profile-fallback") => format!("Unknown ({other})"),
         _ => "Unknown".into(),
     }
