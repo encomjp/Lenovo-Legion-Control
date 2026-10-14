@@ -50,7 +50,7 @@
 
 ## Screenshots
 
-Version 0.2.20 redesigns every page: one button style, plain wording, and no scrolling at the default 1000×680 window. Click a thumbnail for full size.
+Version 0.2.21 redesigns every page: one button style, plain wording, and no scrolling at the default size, and the window adapts to your screen. Click a thumbnail for full size.
 
 <table>
 <tr>
