@@ -301,6 +301,10 @@ pub(crate) fn build_battery_pages(
     }
     let (snap_tx, snap_rx) = mpsc::channel();
     std::thread::spawn(move || loop {
+        if !page_polling("battery-status") {
+            std::thread::sleep(Duration::from_secs(3));
+            continue;
+        }
         let snap = BatterySnapshot {
             pct: legion_core::battery::capacity(),
             status: legion_core::battery::status(),
@@ -330,7 +334,7 @@ pub(crate) fn build_battery_pages(
     off_charge_hint.set_xalign(0.0);
     off_charge_hint.set_visible(false);
     status_page.append(&off_charge_hint);
-    glib::timeout_add_local(Duration::from_millis(300), move || {
+    ticker_local(Duration::from_millis(300), move || {
         match snap_rx.try_recv() {
             Ok(s) => {
                 if !off_charge_hint.is_visible()
