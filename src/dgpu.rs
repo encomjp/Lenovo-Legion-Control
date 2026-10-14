@@ -50,7 +50,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
     // nvidia-smi resumes a runtime-suspended card; polling it every few
     // seconds would keep the dGPU awake and drain the battery on hybrid.
     if nvidia_runtime_suspended() {
-        log::trace!("nvidia-smi: dGPU runtime-suspended — not waking it");
+        log::trace!("nvidia-smi: dGPU runtime-suspended: not waking it");
         return None;
     }
     let started = Instant::now();
@@ -73,7 +73,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
     };
     let pid = child.id();
     log::trace!(
-        "nvidia-smi: pid {pid} running — arming {}s timeout",
+        "nvidia-smi: pid {pid} running: arming {}s timeout",
         SMI_TIMEOUT.as_secs()
     );
     let (tx, rx) = mpsc::channel();
@@ -83,7 +83,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
         if tx.send(child.wait_with_output()).is_err() {
             log::debug!(
                 "nvidia-smi: reaper for pid {pid} finished but receiver is gone \
-                 (timeout path already returned) — child reaped anyway"
+                 (timeout path already returned): child reaped anyway"
             );
         }
     });
@@ -97,7 +97,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
             );
             let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if s.is_empty() {
-                log::debug!("nvidia-smi: empty stdout — treated as no data");
+                log::debug!("nvidia-smi: empty stdout: treated as no data");
                 None
             } else {
                 Some(s)
@@ -121,7 +121,7 @@ fn smi_run(args: &[&str]) -> Option<String> {
         }
         Err(_) => {
             log::warn!(
-                "nvidia-smi timed out after {}s — killing pid {pid}",
+                "nvidia-smi timed out after {}s: killing pid {pid}",
                 SMI_TIMEOUT.as_secs()
             );
             // SAFETY: kill(pid, SIGKILL) is a plain syscall; the pid belongs

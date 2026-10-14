@@ -739,7 +739,7 @@ pub fn collect() -> DiagnosticsReport {
     sweep_stale_temp();
     let mut s = sensors::read_all();
     log::debug!(
-        "diag sensors: cpu {:.1}°C · dgpu {:.1}°C · igpu {:.1}°C · {} ssd(s) · {} ram module(s)",
+        "diag sensors: cpu {:.1}°C, dgpu {:.1}°C, igpu {:.1}°C, {} ssd(s), {} ram module(s)",
         s.cpu_temp,
         s.dgpu_temp,
         s.igpu_edge,
@@ -765,7 +765,7 @@ pub fn collect() -> DiagnosticsReport {
     s.battery_voltage = battery_summary.voltage_v.unwrap_or_default();
     s.battery_cycles = battery_summary.cycles.unwrap_or_default();
     log::debug!(
-        "diag battery: capacity {:?}% · status {:?} · limit {}%",
+        "diag battery: capacity {:?}%, status {:?}, limit {}%",
         battery_summary.capacity_pct,
         battery_summary.status,
         battery_summary.charge_limit_pct
@@ -794,7 +794,7 @@ pub fn collect() -> DiagnosticsReport {
         cur_max_freq: thermal::read_cur_max(),
     };
     log::debug!(
-        "diag thermal: enabled={} · max {}°C · cur_max {:?} kHz",
+        "diag thermal: enabled={}, max {}°C, cur_max {:?} kHz",
         thermal_digest.config.enabled,
         thermal_digest.config.max_temp,
         thermal_digest.cur_max_freq
@@ -844,7 +844,7 @@ pub fn collect() -> DiagnosticsReport {
     let power = read_power_info(&battery_summary);
     let audio_digest = read_audio_digest();
     log::debug!(
-        "diag power: ac_online {:?} ({:?}) · state {:?} · rate {:?} W",
+        "diag power: ac_online {:?} ({:?}), state {:?}, rate {:?} W",
         power.ac_online,
         power.ac_type,
         power.charge_state,
@@ -915,7 +915,7 @@ pub fn collect() -> DiagnosticsReport {
         report.os.kernel
     );
     log::debug!(
-        "diag profiles: current='{}' · {} choice(s)",
+        "diag profiles: current='{}', {} choice(s)",
         report.profiles.current,
         report.profiles.choices.len()
     );
@@ -936,7 +936,7 @@ pub fn collect() -> DiagnosticsReport {
         report.self_checks.len()
     );
     log::debug!(
-        "diag system info: uptime {} s · load {:.2} · mem available {:?} MB",
+        "diag system info: uptime {} s, load {:.2}, mem available {:?} MB",
         report.system_info.uptime_secs,
         report.system_info.load_avg_1m,
         report.system_info.mem_available_mb
@@ -1095,7 +1095,7 @@ fn collect_deep(reason: &str, cpu_temp: f64) -> DeepReport {
                     .push((format!("{dir_name}/{fname}"), val));
             }
         }
-        break; // only the first present battery — keeps the payload bounded
+        break; // only the first present battery: keeps the payload bounded
     }
 
     // ─── installed support software ───
@@ -1730,7 +1730,7 @@ fn read_system_info() -> SystemInfo {
         .next()
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
-    let disk_free_mb: Option<u64> = None; // statvfs requires nix/unsafe — skip for now
+    let disk_free_mb: Option<u64> = None; // statvfs requires nix/unsafe: skip for now
     let mem_available_mb = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| {
         s.lines()
             .find(|l| l.starts_with("MemAvailable:"))
@@ -2267,7 +2267,7 @@ pub fn send(report: &DiagnosticsReport, endpoint: &str) -> Result<String, String
             .output()
             .map_err(|e| {
                 format!(
-                    "curl unavailable or failed to run ({e}) — install curl, \
+                    "curl unavailable or failed to run ({e}): install curl, \
                      or inspect locally with `legion-cli diagnose dump`"
                 )
             })?;
@@ -2397,7 +2397,7 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     let last = LAST_SEND_MS.load(Ordering::Relaxed);
     if last > 0 && now_ms - last < 10_000 {
         return Err(
-            "diagnostics were sent less than 10 seconds ago — skipping duplicate send".into(),
+            "diagnostics were sent less than 10 seconds ago: skipping duplicate send".into(),
         );
     }
     LAST_SEND_MS.store(now_ms, Ordering::Relaxed);
@@ -2440,7 +2440,7 @@ pub fn collect_and_send_deep(override_url: Option<&str>, reason: &str) -> Result
     let last = LAST_SEND_MS.load(Ordering::Relaxed);
     if last > 0 && now_ms - last < 10_000 {
         return Err(
-            "diagnostics were sent less than 10 seconds ago — skipping duplicate send".into(),
+            "diagnostics were sent less than 10 seconds ago: skipping duplicate send".into(),
         );
     }
     LAST_SEND_MS.store(now_ms, Ordering::Relaxed);

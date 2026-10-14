@@ -106,7 +106,7 @@ pub fn set(t: Toggle, on: bool) -> Result<(), String> {
     log::debug!("ideapad::set({}, {on}) at {}", t.attr(), file.display());
     let r = write_verify(&file, t.attr(), on);
     if let Err(e) = &r {
-        log::warn!("ideapad::set — {e}");
+        log::warn!("ideapad::set: {e}");
     }
     r
 }

@@ -232,7 +232,7 @@ fn user_socket() -> Option<PathBuf> {
             Some(path)
         }
         Err(_) => {
-            log::trace!("user_socket: XDG_RUNTIME_DIR unset — no per-user candidate");
+            log::trace!("user_socket: XDG_RUNTIME_DIR unset: no per-user candidate");
             None
         }
     }
@@ -252,7 +252,7 @@ pub fn bind_socket_path() -> Result<PathBuf, String> {
                 Ok(path)
             }
             None => {
-                let msg = "XDG_RUNTIME_DIR is not set — cannot pick a safe per-user socket path"
+                let msg = "XDG_RUNTIME_DIR is not set: cannot pick a safe per-user socket path"
                     .to_string();
                 log::warn!("bind_socket_path: {msg}");
                 Err(msg)
@@ -839,7 +839,7 @@ mod tests {
         let st = GpuModeStatus {
             supported: true,
             model_verified: true,
-            model_note: "SMCN20WW · verified (SMCN)".into(),
+            model_note: "SMCN20WW, verified (SMCN)".into(),
             gamezone_present: true,
             acpi_call_loaded: true,
             backend: "acpi_call:\\_SB.GZFD.WMAA".into(),

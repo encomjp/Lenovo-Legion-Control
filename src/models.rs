@@ -61,9 +61,9 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Three,
         fan_rpm_fallback: FALLBACK_3FAN_GEN10,
-        notes: "Ryzen AI Max / 9955HX class · RTX 5070 Ti 140W or 5080 175W (PSREF) · \
-                Spectrum RGB · lenovo_wmi_other on kernel 6.14+",
-        source: "PSREF · ChaoticSi1ence Gen10 fork · live 83RU probe",
+        notes: "Ryzen AI Max / 9955HX class, RTX 5070 Ti 140W or 5080 175W (PSREF), \
+                Spectrum RGB, lenovo_wmi_other on kernel 6.14+",
+        source: "PSREF, ChaoticSi1ence Gen10 fork, live 83RU probe",
     },
     ModelProfile {
         machine_type: Some("83F5"),
@@ -73,8 +73,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Three,
         fan_rpm_fallback: FALLBACK_3FAN_GEN10,
-        notes: "Core Ultra 200HX · up to RTX 5090 · 3 fans (CPU/GPU/Aux) · WMI3",
-        source: "LenovoLegionLinux #385 · ChaoticSi1ence",
+        notes: "Core Ultra 200HX, up to RTX 5090, 3 fans (CPU/GPU/Aux), WMI3",
+        source: "LenovoLegionLinux #385, ChaoticSi1ence",
     },
     ModelProfile {
         machine_type: Some("83KY"),
@@ -84,7 +84,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Three,
         fan_rpm_fallback: FALLBACK_3FAN_GENERIC,
-        notes: "Gen 10 7-series sibling · EC dumps in LLL #409",
+        notes: "Gen 10 7-series sibling, EC dumps in LLL #409",
         source: "LenovoLegionLinux #409",
     },
     // ── Gen 10 Legion Pro 5 AMD (China R9000P) ──────────────────────────
@@ -96,9 +96,9 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Three,
         fan_rpm_fallback: FALLBACK_3FAN_83F6,
-        notes: "CN sibling of Legion Pro 5 16AFR10 (83F2, RECN) · Ryzen 9 9955HX · RTX 5060 · \
-                legion_hwmon fan1/fan2/fan3 (no lenovo_wmi_other on observed kernel, no PPT attrs) · \
-                Spectrum 048d:c197 (no c193) · AW88399 ACPI amp present",
+        notes: "CN sibling of Legion Pro 5 16AFR10 (83F2, RECN), Ryzen 9 9955HX, RTX 5060, \
+                legion_hwmon fan1/fan2/fan3 (no lenovo_wmi_other on observed kernel, no PPT attrs), \
+                Spectrum 048d:c197 (no c193), AW88399 ACPI amp present",
         source: "fleet telemetry (83F6 RECN20WW, EC 1.19, 2026-10)",
     },
     // ── Gen 10 Legion 5 (15") ───────────────────────────────────────────
@@ -110,9 +110,9 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN_83LY,
-        notes: "i7-13650HX · RTX 5060 · lenovo_wmi_other fans 1800–5400 · PPT pl1 50–100 / pl2 60–168 / \
-                cpu_cl 30–65 W · ITE 048d:c195 (white or 24-zone SKU) · no AW88399",
-        source: "fleet telemetry (83LY QNCN38WW) · LenovoLegionLinux model_qncn · PSREF",
+        notes: "i7-13650HX, RTX 5060, lenovo_wmi_other fans 1800–5400, PPT pl1 50–100 / pl2 60–168 / \
+                cpu_cl 30–65 W, ITE 048d:c195 (white or 24-zone SKU), no AW88399",
+        source: "fleet telemetry (83LY QNCN38WW), LenovoLegionLinux model_qncn, PSREF",
     },
     ModelProfile {
         machine_type: Some("83M0"),
@@ -122,10 +122,10 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN_83M0,
-        notes: "Ryzen 7 260 · RTX 5050 · lenovo_wmi_other fans 1800–4383 (idle fan-stop) · \
-                platform_profile low-power/balanced/performance only (no custom/max-power) · \
-                PPT pl1 40–90 / pl2 45–100 / pl3 55–125 W · ITE 048d:c195 · no AW88399",
-        source: "fleet telemetry (83M0 RGCN34WW) · LenovoLegionLinux #373/#387 · PSREF",
+        notes: "Ryzen 7 260, RTX 5050, lenovo_wmi_other fans 1800–4383 (idle fan-stop), \
+                platform_profile low-power/balanced/performance only (no custom/max-power), \
+                PPT pl1 40–90 / pl2 45–100 / pl3 55–125 W, ITE 048d:c195, no AW88399",
+        source: "fleet telemetry (83M0 RGCN34WW), LenovoLegionLinux #373/#387, PSREF",
     },
     // ── Gen 10 LOQ AMD ──────────────────────────────────────────────────
     ModelProfile {
@@ -136,9 +136,9 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN_83S0,
-        notes: "Ryzen 5 7535HS · RTX 3050 6GB · lenovo_wmi_other fans 2000–5200 · PPT pl1 20–59 / \
-                pl2 23–59 / pl3 25–70 / cpu_cl 20–40 W · gpu_nv_ac_offset 10–45 W · \
-                no ITE lighting HID (white or no backlight) · no AW88399",
+        notes: "Ryzen 5 7535HS, RTX 3050 6GB, lenovo_wmi_other fans 2000–5200, PPT pl1 20–59 / \
+                pl2 23–59 / pl3 25–70 / cpu_cl 20–40 W, gpu_nv_ac_offset 10–45 W, \
+                no ITE lighting HID (white or no backlight), no AW88399",
         source: "fleet telemetry (83S0 SUCN18WW)",
     },
     // ── Gen 6 Legion 5 17" (also matched via the generic GKCN row) ──────
@@ -150,8 +150,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 6,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Ryzen 7 5800H · RTX 3060 · no lenovo_wmi_other; RPM needs LenovoLegionLinux \
-                legion-laptop (EC 0x8227) or ec_sys (absent on Fedora) · ITE 048d:c101",
+        notes: "Ryzen 7 5800H, RTX 3060, no lenovo_wmi_other; RPM needs LenovoLegionLinux \
+                legion-laptop (EC 0x8227) or ec_sys (absent on Fedora), ITE 048d:c101",
         source: "fleet telemetry (82JY GKCN65WW)",
     },
     // ── Gen 9 Legion Y7000P (Intel 14th Gen) ───────────────────────────
@@ -163,8 +163,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 14th Gen HX (i7-14700HX) · RTX 4060/4070 140W (PSREF) · Dual fan · WMI3 platform profiles",
-        source: "fleet telemetry (83DG) · Lenovo PSREF",
+        notes: "Intel 14th Gen HX (i7-14700HX), RTX 4060/4070 140W (PSREF), Dual fan, WMI3 platform profiles",
+        source: "fleet telemetry (83DG), Lenovo PSREF",
     },
     // ── Gen 9 Legion 9 (Flagship Liquid-Cooled 3-Fan) ───────────────────
     ModelProfile {
@@ -175,8 +175,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Three,
         fan_rpm_fallback: FALLBACK_3FAN_GENERIC,
-        notes: "Intel Core i9-14900HX · RTX 4080/4090 175W (PSREF) · Integrated liquid loop + 3 cooling fans",
-        source: "LenovoLegionLinux #342 · Lenovo PSREF (83G0)",
+        notes: "Intel Core i9-14900HX, RTX 4080/4090 175W (PSREF), Integrated liquid loop + 3 cooling fans",
+        source: "LenovoLegionLinux #342, Lenovo PSREF (83G0)",
     },
     // ── LenovoLegionLinux BIOS-prefix map (examples from driver comments) ─
     ModelProfile {
@@ -187,7 +187,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 6,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Classic legion-laptop EC map · Family e.g. 15ACH6H",
+        notes: "Classic legion-laptop EC map, Family e.g. 15ACH6H",
         source: "LenovoLegionLinux legion-laptop.c",
     },
     ModelProfile {
@@ -254,7 +254,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
         notes: "God Mode often needs G9CN ≥24 on Windows LLT",
-        source: "LenovoLegionLinux · Legion Toolkit notes",
+        source: "LenovoLegionLinux, Legion Toolkit notes",
     },
     ModelProfile {
         machine_type: Some("82RF"),
@@ -264,8 +264,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 7,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 12th Gen (i7-12700H) · up to RTX 3070 Ti 150W · Dual fan",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 12th Gen (i7-12700H), up to RTX 3070 Ti 150W, Dual fan",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82RB"),
@@ -275,8 +275,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 7,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 12th Gen · up to RTX 3060 140W · Dual fan",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 12th Gen, up to RTX 3060 140W, Dual fan",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82WR"),
@@ -286,8 +286,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 13th Gen HX · up to RTX 4090 175W · Dual fan (Coldfront 5.0)",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 13th Gen HX, up to RTX 4090 175W, Dual fan (Coldfront 5.0)",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: None,
@@ -319,8 +319,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Ryzen 7 7745HX / Ryzen 9 7945HX · up to RTX 4070 140W",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Ryzen 7 7745HX / Ryzen 9 7945HX, up to RTX 4070 140W",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82Y9"),
@@ -330,8 +330,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Ryzen 7 7840HS · RTX 4060",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Ryzen 7 7840HS, RTX 4060",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82Y3"),
@@ -341,8 +341,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 13th Gen · RTX 4070",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 13th Gen, RTX 4070",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82Y4"),
@@ -353,7 +353,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
         notes: "Ryzen 7 7840HS + RTX 4060",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82YA"),
@@ -363,8 +363,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 13th Gen · RTX 4070",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 13th Gen, RTX 4070",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: None,
@@ -497,7 +497,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: LOQ 15APH8 (82XT), EC 0x8227",
+        notes: "Family-level, unverified, LLL: LOQ 15APH8 (82XT), EC 0x8227",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -508,7 +508,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion Pro 7 16IRX9H (83DE)",
+        notes: "Family-level, unverified, LLL: Legion Pro 7 16IRX9H (83DE)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -519,7 +519,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: LOQ 15ARP9 (83JC)",
+        notes: "Family-level, unverified, LLL: LOQ 15ARP9 (83JC)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -530,7 +530,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion Y7000 IRX9 (83JJ)",
+        notes: "Family-level, unverified, LLL: Legion Y7000 IRX9 (83JJ)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -541,7 +541,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 5 16IAX10 (83NX), Pro 5 16IAX10H (83LU), Pro 5 16IAX10 (83F3); different chassis share this BIOS",
+        notes: "Family-level, unverified, LLL: Legion 5 16IAX10 (83NX), Pro 5 16IAX10H (83LU), Pro 5 16IAX10 (83F3); different chassis share this BIOS",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -552,7 +552,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: LOQ 15IAX9E",
+        notes: "Family-level, unverified, LLL: LOQ 15IAX9E",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -563,7 +563,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion Pro 5 16ADR10 (83LT); 83LV R9000P shares the BIOS",
+        notes: "Family-level, unverified, LLL: Legion Pro 5 16ADR10 (83LT); 83LV R9000P shares the BIOS",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -574,7 +574,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 9 18IAX10 (83EY)",
+        notes: "Family-level, unverified, LLL: Legion 9 18IAX10 (83EY)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -585,7 +585,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 5 15IAX10 (83F0)",
+        notes: "Family-level, unverified, LLL: Legion 5 15IAX10 (83F0)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -596,7 +596,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion Y7000P IRX10 (83NN)",
+        notes: "Family-level, unverified, LLL: Legion Y7000P IRX10 (83NN)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -607,7 +607,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 0,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: LOQ Essential 15IRX11 (83SC)",
+        notes: "Family-level, unverified, LLL: LOQ Essential 15IRX11 (83SC)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -618,7 +618,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 0,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 5 15AHP11 (83Q7)",
+        notes: "Family-level, unverified, LLL: Legion 5 15AHP11 (83Q7)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -629,7 +629,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 0,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 5 15AGP11 (83Q6)",
+        notes: "Family-level, unverified, LLL: Legion 5 15AGP11 (83Q6)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     ModelProfile {
@@ -640,7 +640,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Unknown,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Family-level, unverified · LLL: Legion 5i Gen 10 (83VK)",
+        notes: "Family-level, unverified, LLL: Legion 5i Gen 10 (83VK)",
         source: "LenovoLegionLinux legion-laptop.c DMI table (family-level, unverified)",
     },
     // Older / IdeaPad Gaming / LOQ
@@ -652,7 +652,7 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 5,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Older EC — limited fan control on Windows LLT",
+        notes: "Older EC: limited fan control on Windows LLT",
         source: "LenovoLegionLinux legion-laptop.c",
     },
     ModelProfile {
@@ -718,8 +718,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 5,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "AMD Ryzen 4000H · GTX 1650 / 1650 Ti · IdeaPad Gaming — partial Legion EC support",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "AMD Ryzen 4000H, GTX 1650 / 1650 Ti, IdeaPad Gaming: partial Legion EC support",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("82K2"),
@@ -729,8 +729,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 6,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "AMD Ryzen 5000H · RTX 2050 (70W) / 3050 (85W) · Dual fan · EC fallback RPM (0x06/0x07)",
-        source: "fleet telemetry (82K2) · LenovoLegionLinux legion-laptop.c",
+        notes: "AMD Ryzen 5000H, RTX 2050 (70W) / 3050 (85W), Dual fan, EC fallback RPM (0x06/0x07)",
+        source: "fleet telemetry (82K2), LenovoLegionLinux legion-laptop.c",
     },
     ModelProfile {
         machine_type: None,
@@ -751,8 +751,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 7,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Ryzen 6000H · RTX 3050 / 3050 Ti",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Ryzen 6000H, RTX 3050 / 3050 Ti",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: None,
@@ -773,8 +773,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 8,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 13th Gen · RTX 3050 / 4050 / 4060 · LOQ shares Legion WMI subset",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 13th Gen, RTX 3050 / 4050 / 4060, LOQ shares Legion WMI subset",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("83DV"),
@@ -784,8 +784,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel 13th/14th Gen HX · RTX 3050 / 4050 / 4060",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel 13th/14th Gen HX, RTX 3050 / 4050 / 4060",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("83DX"),
@@ -795,8 +795,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 9,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Ryzen 7 8845HS · RTX 4050 / 4060",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Ryzen 7 8845HS, RTX 4050 / 4060",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
     ModelProfile {
         machine_type: Some("83JG"),
@@ -817,8 +817,8 @@ pub static MODEL_PROFILES: &[ModelProfile] = &[
         gen: 10,
         fans: FanLayout::Two,
         fan_rpm_fallback: FALLBACK_2FAN,
-        notes: "Intel Core 13th/14th Gen HX · RTX 5050 / 5060",
-        source: "LenovoLegionLinux legion-laptop.c · PSREF",
+        notes: "Intel Core 13th/14th Gen HX, RTX 5050 / 5060",
+        source: "LenovoLegionLinux legion-laptop.c, PSREF",
     },
 ];
 
@@ -875,14 +875,14 @@ pub fn lookup_match(
                 return Some(exact(p));
             }
             log::trace!(
-                "model lookup: row {} machine_type {:?} ≠ {mt:?} — no match",
+                "model lookup: row {} machine_type {:?} ≠ {mt:?}: no match",
                 p.bios_prefix,
                 p.machine_type
             );
         }
-        log::debug!("model lookup: tier 1 exhausted — no row for machine type {mt:?}");
+        log::debug!("model lookup: tier 1 exhausted: no row for machine type {mt:?}");
     } else {
-        log::debug!("model lookup: machine type {mt:?} unusable — tier 1 skipped");
+        log::debug!("model lookup: machine type {mt:?} unusable: tier 1 skipped");
     }
 
     if bios.len() >= 4 {
@@ -891,7 +891,7 @@ pub fn lookup_match(
         for p in MODEL_PROFILES.iter() {
             if !p.bios_prefix.eq_ignore_ascii_case(prefix) {
                 log::trace!(
-                    "model lookup: row {} bios prefix ≠ {prefix:?} — skipped (tier 2a)",
+                    "model lookup: row {} bios prefix ≠ {prefix:?}: skipped (tier 2a)",
                     p.bios_prefix
                 );
                 continue;
@@ -948,9 +948,9 @@ pub fn lookup_match(
                 family_only,
             });
         }
-        log::debug!("model lookup: tier 2 exhausted — no row for bios prefix {prefix:?}");
+        log::debug!("model lookup: tier 2 exhausted: no row for bios prefix {prefix:?}");
     } else {
-        log::debug!("model lookup: bios prefix {bios:?} too short — tier 2 skipped");
+        log::debug!("model lookup: bios prefix {bios:?} too short: tier 2 skipped");
     }
 
     // Fuzzy marketing match against known names.

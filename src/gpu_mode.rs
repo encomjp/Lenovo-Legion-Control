@@ -220,7 +220,7 @@ pub struct GpuModeStatus {
     pub supported: bool,
     /// BIOS family is on [`VERIFIED_BIOS_FAMILIES`].
     pub model_verified: bool,
-    /// Human-readable model verdict (e.g. "SMCN20WW · verified").
+    /// Human-readable model verdict (e.g. "SMCN20WW, verified").
     pub model_note: String,
     /// GameZone WMI block present with method object WMAA under `\_SB.GZFD`.
     pub gamezone_present: bool,
@@ -673,11 +673,11 @@ pub fn status_passive() -> GpuModeStatus {
         supported: false,
         model_verified,
         model_note: if bios.is_empty() {
-            "BIOS version unreadable · unverified on this model".into()
+            "BIOS version unreadable, unverified on this model".into()
         } else if model_verified {
-            format!("{bios} · verified ({family})")
+            format!("{bios}, verified ({family})")
         } else {
-            format!("{bios} · unverified on this model")
+            format!("{bios}, unverified on this model")
         },
         gamezone_present,
         acpi_call_loaded: Path::new(ACPI_CALL).exists(),
@@ -764,9 +764,9 @@ pub fn self_check(st: &GpuModeStatus) -> (bool, String) {
     match (&st.hybrid_block, doomed) {
         (Some(why), true) => {
             parts.push(format!("NEXT BOOT HYBRID BUT {why}"));
-            (false, parts.join(" · "))
+            (false, parts.join(", "))
         }
-        _ => (true, parts.join(" · ")),
+        _ => (true, parts.join(", ")),
     }
 }
 
@@ -818,7 +818,7 @@ pub fn check_switch(ctx: &SwitchContext, target: GpuMode, acknowledge: bool) -> 
     }
     if ctx.ac_online == Some(false) && ctx.battery_pct.is_some_and(|p| p < MIN_BATTERY_PCT) {
         return Err(format!(
-            "battery below {MIN_BATTERY_PCT}% on battery power — plug in the charger first"
+            "battery below {MIN_BATTERY_PCT}% on battery power: plug in the charger first"
         ));
     }
     Ok(())
@@ -843,7 +843,7 @@ pub fn set(target: GpuMode, acknowledge: bool) -> Result<GpuModeStatus, String> 
     }
     if st.configured == Some(target) {
         log::info!(
-            "gpu_mode: {} already selected — no firmware call",
+            "gpu_mode: {} already selected: no firmware call",
             target.as_str()
         );
         return Ok(st);
@@ -968,7 +968,7 @@ mod tests {
     fn ctx() -> SwitchContext {
         SwitchContext {
             model_verified: true,
-            model_note: "SMCN20WW · verified (SMCN)".into(),
+            model_note: "SMCN20WW, verified (SMCN)".into(),
             gamezone_present: true,
             acpi_call_loaded: true,
             supported: true,
@@ -990,7 +990,7 @@ mod tests {
     fn gate_refuses_unverified_model_and_missing_backend() {
         let mut c = ctx();
         c.model_verified = false;
-        c.model_note = "Q7CN23WW · unverified on this model".into();
+        c.model_note = "Q7CN23WW, unverified on this model".into();
         assert!(check_switch(&c, GpuMode::DgpuOnly, true)
             .unwrap_err()
             .contains("unverified"));
@@ -1157,7 +1157,7 @@ mod tests {
         let mut st = GpuModeStatus {
             gamezone_present: true,
             model_verified: true,
-            model_note: "SMCN20WW · verified (SMCN)".into(),
+            model_note: "SMCN20WW, verified (SMCN)".into(),
             active: Some(GpuMode::Hybrid),
             configured: Some(GpuMode::Hybrid),
             igpu_driver: Some("amdgpu".into()),

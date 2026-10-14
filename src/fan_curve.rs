@@ -424,7 +424,7 @@ impl Engine {
             Ok(t) => t,
             Err(e) => {
                 if self.status.fault.as_deref() != Some(e.as_str()) {
-                    log::warn!("fan-curve: sensor failure ({e}) — firmware control");
+                    log::warn!("fan-curve: sensor failure ({e}): firmware control");
                 }
                 self.release(io, "sensor failure");
                 self.status = LiveStatus {
@@ -437,7 +437,7 @@ impl Engine {
         let d = decide(&mut self.hyst, points, cpu, gpu);
         if d.safety && !self.status.safety {
             log::warn!(
-                "fan-curve: safety override — {:.1} °C ≥ {SAFETY_TEMP_C:.0} °C, all fans max",
+                "fan-curve: safety override: {:.1} °C ≥ {SAFETY_TEMP_C:.0} °C, all fans max",
                 d.temp_c
             );
         }
@@ -460,7 +460,7 @@ impl Engine {
             self.owned = true;
             if let Err(e) = io.set_rpm(w.id, rpm) {
                 let msg = format!("fan {} write failed: {e}", w.id);
-                log::warn!("fan-curve: {msg} — firmware control");
+                log::warn!("fan-curve: {msg}: firmware control");
                 self.release(io, "write failure");
                 self.status = LiveStatus {
                     fault: Some(msg),
@@ -572,7 +572,7 @@ pub fn run(shutdown: &AtomicBool) {
         }
     }
     if engine.owns_fans() {
-        log::info!("fan-curve: daemon stopping — fans back to firmware");
+        log::info!("fan-curve: daemon stopping: fans back to firmware");
         if let Err(e) = io.set_auto() {
             log::warn!("fan-curve: shutdown set_auto failed: {e}");
         }

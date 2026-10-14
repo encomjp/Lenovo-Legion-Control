@@ -184,7 +184,7 @@ fn main() {
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "legion-daemon {} — Legion Control hardware daemon\n\n\
+            "legion-daemon {}: Legion Control hardware daemon\n\n\
              Usage: legion-daemon [--version | --help]\n\n\
              Normally started by systemd: sudo systemctl enable --now legion-control",
             env!("CARGO_PKG_VERSION")
@@ -237,7 +237,7 @@ fn main() {
         }
         None => {
             log::error!(
-                "another legion-daemon appears to be running (lock held on {}) — exiting",
+                "another legion-daemon appears to be running (lock held on {}): exiting",
                 pidfile_path.display()
             );
             // Non-zero exit so systemd Restart=on-failure retries once the
@@ -256,7 +256,7 @@ fn main() {
              Install the system service: sudo systemctl enable --now legion-control"
         );
     } else {
-        log::debug!("running as root (euid=0) — privileged hardware access available");
+        log::debug!("running as root (euid=0): privileged hardware access available");
     }
 
     let listener = match UnixListener::bind(&path) {
@@ -302,7 +302,7 @@ fn main() {
             0o666
         } else {
             log::info!(
-                "group 'legion' does not exist — using mode 0666 so local users can connect"
+                "group 'legion' does not exist: using mode 0666 so local users can connect"
             );
             0o666
         };
@@ -324,11 +324,11 @@ fn main() {
     // LOQ 15AHP10 83JG — silently ensure yogafan is loaded (in-tree, Fedora 44+)
     // BEFORE device detection so OnceLock binds to the working tachometer backend.
     if legion_core::fans::needs_yogafan_setup() {
-        log::info!("fans: yogafan missing but WMI tach is 0 — attempting auto modprobe");
+        log::info!("fans: yogafan missing but WMI tach is 0: attempting auto modprobe");
         if legion_core::fans::ensure_yogafan_loaded() {
             log::info!("fans: yogafan auto-loaded");
         } else {
-            log::warn!("fans: yogafan auto-load failed — UI will show Unlock prompt");
+            log::warn!("fans: yogafan auto-load failed: UI will show Unlock prompt");
         }
     }
 
@@ -384,7 +384,7 @@ fn main() {
         );
     } else {
         log::debug!(
-            "seed_desired_from_effective: no effective limiter engaged — watchdog stays unseeded"
+            "seed_desired_from_effective: no effective limiter engaged: watchdog stays unseeded"
         );
     }
     battery::seed_desired_from_effective();
@@ -394,7 +394,7 @@ fn main() {
     // Surface it at boot instead of leaving a confusing 98% unexplained.
     if battery::charged_past_limiter() {
         log::warn!(
-            "battery is above the charge limiter threshold — it likely charged past the limit while the laptop was off/asleep (EC behavior). It will settle to ~80% with use; unplug AC when off to prevent this"
+            "battery is above the charge limiter threshold: it likely charged past the limit while the laptop was off/asleep (EC behavior). It will settle to ~80% with use; unplug AC when off to prevent this"
         );
     }
 
@@ -404,7 +404,7 @@ fn main() {
     let mut seeded_thermal = config::get().thermal.clone();
     if let Err(e) = thermal::validate(seeded_thermal.max_temp, true) {
         log::warn!(
-            "invalid thermal config from disk ({}: {e}) — using defaults",
+            "invalid thermal config from disk ({}: {e}): using defaults",
             seeded_thermal.max_temp
         );
         seeded_thermal = ThermalConfig::default();
@@ -496,7 +496,7 @@ fn main() {
     while !shutdown.load(Ordering::Relaxed) {
         // Check reload flag (set by SIGHUP) without blocking accept.
         if reload.swap(false, Ordering::Relaxed) {
-            log::info!("SIGHUP received — reloading log filter");
+            log::info!("SIGHUP received: reloading log filter");
             logging::reload_from_env();
         }
         match listener.accept() {
@@ -519,7 +519,7 @@ fn main() {
                 // client must never wedge the accept loop or clean shutdown.
                 if active_clients.load(Ordering::Relaxed) >= MAX_CLIENTS {
                     log::warn!(
-                        "connection limit reached — dropping client \
+                        "connection limit reached: dropping client \
                          (active={}, max={MAX_CLIENTS})",
                         active_clients.load(Ordering::Relaxed)
                     );
@@ -754,7 +754,7 @@ fn thermal_governor(
 
         if cpu_temp.is_none() && cpu_temp_2.is_none() && !warned_missing {
             log::warn!(
-                "thermal governor: no CPU temp source (k10temp/coretemp/x86_pkg_temp) — status will show None temps, no freq writes"
+                "thermal governor: no CPU temp source (k10temp/coretemp/x86_pkg_temp): status will show None temps, no freq writes"
             );
             warned_missing = true;
         } else if cpu_temp.is_some() || cpu_temp_2.is_some() {
@@ -803,7 +803,7 @@ fn thermal_governor(
         let cur = match cur_max_opt {
             Some(v) => v,
             None => {
-                log::warn!("thermal governor: cannot read scaling_max_freq — no throttle step");
+                log::warn!("thermal governor: cannot read scaling_max_freq: no throttle step");
                 std::thread::sleep(thermal::INTERVAL);
                 if shutdown.load(Ordering::Relaxed) {
                     break;
@@ -909,7 +909,7 @@ fn process_command(
                     s.profile
                 );
             } else {
-                log::trace!("sensors unchanged — throttled");
+                log::trace!("sensors unchanged: throttled");
             }
             DaemonResponse::Sensors(s)
         }
@@ -927,7 +927,7 @@ fn process_command(
         },
         DaemonCommand::SetFanTarget(fan, _) if fan_curve::is_active() => {
             DaemonResponse::Error(format!(
-                "Cannot set fan {fan}: a fan curve is controlling the fans for this power mode — \
+                "Cannot set fan {fan}: a fan curve is controlling the fans for this power mode: \
                  use 'Reset to firmware' (or legion-cli fan-curve disable <profile>) first"
             ))
         }
@@ -1039,7 +1039,7 @@ fn process_command(
                     Err(_) => DaemonResponse::Error(format!("Invalid PPT value '{value}'")),
                 }
             } else {
-                log::warn!("SetFwAttr '{name}' rejected — not on firmware attribute allow-list");
+                log::warn!("SetFwAttr '{name}' rejected: not on firmware attribute allow-list");
                 DaemonResponse::Error(format!("Unsupported firmware attribute '{name}'"))
             }
         }
@@ -1182,7 +1182,7 @@ fn process_command(
                 let mut g = match shared.write() {
                     Ok(g) => g,
                     Err(p) => {
-                        log::warn!("THERMAL_CONFIG lock was poisoned — recovering inner guard");
+                        log::warn!("THERMAL_CONFIG lock was poisoned: recovering inner guard");
                         p.into_inner()
                     }
                 };
@@ -1193,7 +1193,7 @@ fn process_command(
             // restore full speed immediately.
             if was_enabled && !enabled {
                 match thermal::restore_full_speed() {
-                    Ok(()) => log::info!("thermal governor disabled — restored full speed"),
+                    Ok(()) => log::info!("thermal governor disabled: restored full speed"),
                     Err(e) => log::warn!("thermal governor disable: restore failed: {e}"),
                 }
             }
@@ -1202,7 +1202,7 @@ fn process_command(
                 let mut flag = match lock.lock() {
                     Ok(g) => g,
                     Err(p) => {
-                        log::warn!("THERMAL_NOTIFY lock was poisoned — recovering inner guard");
+                        log::warn!("THERMAL_NOTIFY lock was poisoned: recovering inner guard");
                         p.into_inner()
                     }
                 };
@@ -1446,7 +1446,7 @@ fn rgb_watchdog(shutdown: Arc<AtomicBool>) {
         if !rgb_panic::needs_autofix(&d) {
             continue;
         }
-        log::warn!("RGB panic detected: {} — running auto-fix", d.summary);
+        log::warn!("RGB panic detected: {}: running auto-fix", d.summary);
         for line in &d.details {
             log::debug!("rgb: {line}");
         }
