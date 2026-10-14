@@ -33,6 +33,10 @@ install -Dm644 "$ROOT/data/icons/app-mark.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
 install -Dm644 "$ROOT/data/icons/tray.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+for mode in quiet balanced performance extreme; do
+    install -Dm644 "$ROOT/data/icons/tray-$mode.svg" \
+        "$STAGE/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$mode.svg"
+done
 install -Dm644 "$ROOT/README.md" "$STAGE/usr/share/doc/legion-control/README.md"
 
 mkdir -p "$STAGE/DEBIAN"

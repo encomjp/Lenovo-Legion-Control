@@ -41,6 +41,10 @@ install -Dm644 "$ROOT/data/icons/app-mark.svg" \
     "$APPDIR/usr/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
 install -Dm644 "$ROOT/data/icons/tray.svg" \
     "$APPDIR/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+for mode in quiet balanced performance extreme; do
+    install -Dm644 "$ROOT/data/icons/tray-$mode.svg" \
+        "$APPDIR/usr/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$mode.svg"
+done
 install -Dm644 "$ROOT/data/icons/app-mark.svg" \
     "$APPDIR/com.encomjp.legion-settings.svg"
 ln -s "usr/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg" \

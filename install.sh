@@ -479,6 +479,7 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
   DESKTOP_SRC="$ROOT/data/gui/com.encomjp.legion-settings.desktop"
   APP_ICON="$ROOT/data/icons/app-mark.svg"
   TRAY_ICON="$ROOT/data/icons/tray.svg"
+  TRAY_MODES=(quiet balanced performance extreme)
   if [[ -f "$DESKTOP_SRC" ]]; then
     info "Installing desktop menu entry…"
     if [[ "$PREFIX" == /usr* ]]; then
@@ -488,6 +489,10 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
         "${PREFIX}/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
       sudo_run install -Dm644 "$TRAY_ICON" \
         "${PREFIX}/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+      for m in "${TRAY_MODES[@]}"; do
+        sudo_run install -Dm644 "$ROOT/data/icons/tray-$m.svg" \
+          "${PREFIX}/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$m.svg"
+      done
       if need_cmd gtk-update-icon-cache; then
         sudo_run gtk-update-icon-cache -f -t "${PREFIX}/share/icons/hicolor" || true
       fi
@@ -498,6 +503,10 @@ if [[ "$DO_DESKTOP" -eq 1 ]]; then
         "${HOME}/.local/share/icons/hicolor/scalable/apps/com.encomjp.legion-settings.svg"
       install -Dm644 "$TRAY_ICON" \
         "${HOME}/.local/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray.svg"
+      for m in "${TRAY_MODES[@]}"; do
+        install -Dm644 "$ROOT/data/icons/tray-$m.svg" \
+          "${HOME}/.local/share/icons/hicolor/scalable/status/com.encomjp.legion-settings-tray-$m.svg"
+      done
       if need_cmd gtk-update-icon-cache; then
         gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" || true
       fi
