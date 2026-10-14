@@ -218,16 +218,12 @@ pub(crate) fn build_curve_optimizer(
         .subtitle("Checking…")
         .activatable(false)
         .build();
-    let install_button = primary_button_tip(
+    let install_button = secondary_button_tip(
         "Install backend",
         Some("Installs the bundled ryzen_smu driver through PolicyKit and DKMS"),
     );
     install_button.set_visible(false);
-    let refresh_button = gtk::Button::builder()
-        .icon_name("view-refresh-symbolic")
-        .tooltip_text("Refresh")
-        .valign(Align::Center)
-        .build();
+    let refresh_button = icon_button("view-refresh-symbolic", "Refresh");
     status_row.add_suffix(&install_button);
     status_row.add_suffix(&refresh_button);
     group.add(&status_row);
@@ -569,6 +565,7 @@ pub(crate) fn build_cpu_power_page(
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         val.add_css_class("scale-value");
+        val.set_xalign(1.0);
         let adj = gtk::Adjustment::new(
             lim.current as f64,
             lim.min as f64,
@@ -733,11 +730,18 @@ pub(crate) fn build_cpu_tuning_page(
     // then undervolt (AMD only) + stability + autostart.
     let is_intel = legion_core::device::detect().cpu_model.to_lowercase().contains("intel");
     page.append(&thermal);
-    if !is_intel {
-        page.append(&co);
-    }
-    page.append(&build_stability_group(toast_overlay));
     page.append(&autostart_group);
+    // Risky or rarely used tools stay folded away until asked for.
+    let advanced = gtk::Expander::new(Some("Advanced"));
+    advanced.add_css_class("section-expander");
+    let inner = gtk::Box::new(Orientation::Vertical, 12);
+    inner.set_margin_top(8);
+    if !is_intel {
+        inner.append(&co);
+    }
+    inner.append(&build_stability_group(toast_overlay));
+    advanced.set_child(Some(&inner));
+    page.append(&advanced);
     page
 }
 
@@ -854,9 +858,7 @@ pub(crate) fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk
     // One button, two roles — Start test ↔ Stop. A separate Stop button left
     // an odd half-empty actions row.
     let actions = adw::ActionRow::new();
-    let run_button = gtk::Button::with_label("Start test");
-    run_button.add_css_class("suggested-action");
-    run_button.add_css_class("pill-btn");
+    let run_button = secondary_button_tip("Start test", None);
     actions.add_suffix(&run_button);
     group.add(&actions);
     page.append(&group);
@@ -868,14 +870,12 @@ pub(crate) fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk
         Rc::new(move |on: bool| {
             if on {
                 run_button.set_label("Stop");
-                run_button.remove_css_class("suggested-action");
                 run_button.add_css_class("destructive-action");
                 status.set_title("Testing…");
                 status.set_subtitle("5:00 remaining");
             } else {
                 run_button.set_label("Start test");
                 run_button.remove_css_class("destructive-action");
-                run_button.add_css_class("suggested-action");
             }
         })
     };

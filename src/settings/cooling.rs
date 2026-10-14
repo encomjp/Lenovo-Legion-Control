@@ -121,12 +121,13 @@ pub(crate) fn build_cooling_overview_page(
     page.append(&curve_box);
 
     // ── Advanced: manual speed (existing per-fan controls) ──
-    let advanced = gtk::Expander::new(Some("Advanced: manual speed"));
+    let advanced = gtk::Expander::new(Some("Advanced"));
+    advanced.add_css_class("section-expander");
     advanced.set_margin_top(6);
     let inner = gtk::Box::new(Orientation::Vertical, 12);
     inner.set_margin_top(10);
     let hint = gtk::Label::new(Some(
-        "A fixed speed per fan. While a fan curve is running for the current power mode the daemon refuses manual speeds — use Reset to firmware first.",
+        "Set a fixed speed per fan. While a fan curve is running for the current power mode manual speeds are refused; use Reset to firmware first.",
     ));
     hint.set_wrap(true);
     hint.set_xalign(0.0);
@@ -152,7 +153,7 @@ pub(crate) fn build_cooling_overview_page(
         ));
     }
     let reset = pref_group("Automatic mode", None);
-    let btn = primary_button_tip(
+    let btn = secondary_button_tip(
         "All fans automatic",
         Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
     );
@@ -224,6 +225,7 @@ struct CurveUi {
     busy: Cell<bool>,
     headline: gtk::Label,
     state_label: gtk::Label,
+    state_dot: Option<gtk::Widget>,
     apply: gtk::Button,
     reset: gtk::Button,
     factory: gtk::Button,
@@ -262,35 +264,48 @@ impl CurveUi {
         let (_, enabled) = self.stored(&profile);
         let dirty = self.dirty();
         let st = self.status.borrow();
+        let mut kind = "";
         let text = match st.as_ref() {
-            None => "Connecting to the daemon…".to_string(),
+            None => "Connecting to the service…".to_string(),
             Some(st) => {
                 let now = st.current_profile == profile;
                 let base = if enabled && now && st.active {
                     let t = st.temp_c.map_or("—".into(), |t| format!("{t:.0} °C"));
                     let p = st.pct.map_or("—".into(), |p| format!("{p} %"));
                     if st.safety {
-                        format!("Safety max · {t} — all fans at 100 %")
+                        kind = "bad";
+                        format!("Safety max at {t}: all fans at 100 %")
                     } else {
-                        format!("Following curve · {t} → {p}")
+                        kind = "ok";
+                        format!("Following the curve: {t}, fans at {p}")
                     }
                 } else if enabled && now {
                     match &st.fault {
-                        Some(f) => format!("Firmware control — {f}"),
-                        None => "Curve enabled · starting…".to_string(),
+                        Some(f) => format!("Firmware is in control: {f}"),
+                        None => "Curve enabled, starting…".to_string(),
                     }
                 } else if enabled {
-                    "Curve saved · runs while this power mode is active".to_string()
+                    kind = "ok";
+                    "Curve saved. It runs while this power mode is active".to_string()
                 } else {
-                    "Firmware control (no curve)".to_string()
+                    "Firmware is in control (no custom curve)".to_string()
                 };
                 if dirty {
-                    format!("{base} · unsaved changes")
+                    kind = "warn";
+                    format!("{base}. Unsaved changes")
                 } else {
                     base
                 }
             }
         };
+        if let Some(dot) = &self.state_dot {
+            for k in ["ok", "warn", "bad"] {
+                dot.remove_css_class(k);
+            }
+            if !kind.is_empty() {
+                dot.add_css_class(kind);
+            }
+        }
         self.state_label.set_text(&text);
         let online = st.is_some() && !self.busy.get();
         self.apply.set_sensitive(online && (dirty || !enabled));
@@ -298,10 +313,8 @@ impl CurveUi {
         self.factory.set_sensitive(
             st.is_some() && self.editor.points() != legion_core::fan_curve::default_points(&profile),
         );
-        self.headline.set_text(&format!(
-            "{} curve · CPU/GPU temperature → fan speed",
-            profile_tab_label(&profile)
-        ));
+        self.headline
+            .set_text(&format!("Fan curve for {}", profile_tab_label(&profile)));
         self.editor.set_now(
             st.as_ref()
                 .filter(|s| s.current_profile == profile)
@@ -310,8 +323,8 @@ impl CurveUi {
         let following = st.as_ref().filter(|s| s.active).and_then(|s| s.pct);
         for c in &self.cards {
             c.source.set_text(&match following {
-                Some(p) => format!("Following curve · {p} %"),
-                None => "Firmware curve · may stop fans when cool".to_string(),
+                Some(p) => format!("Following the curve, {p} %"),
+                None => "Firmware curve".to_string(),
             });
         }
     }
@@ -331,38 +344,30 @@ impl CurveUi {
 
 fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi) {
     let card = gtk::Box::new(Orientation::Vertical, 6);
-    card.add_css_class("card");
+    card.add_css_class("panel");
+    card.add_css_class("fan-card");
     card.set_hexpand(true);
-    card.set_size_request(160, -1);
+    card.set_valign(Align::Fill);
+    tip(&card, &format!("{} · {}–{} rpm", ch.title, ch.min_rpm, ch.max_rpm));
     let top = gtk::Box::new(Orientation::Horizontal, 8);
-    top.set_margin_top(12);
-    top.set_margin_start(14);
-    top.set_margin_end(14);
     let title = gtk::Label::new(Some(&ch.title));
-    title.add_css_class("heading");
+    title.add_css_class("row-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
-    let range = gtk::Label::new(Some(&format!("{}–{} rpm", ch.min_rpm, ch.max_rpm)));
-    range.add_css_class("dim-label");
-    range.add_css_class("caption");
-    top.append(&title);
-    top.append(&range);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let rpm = gtk::Label::new(Some("— rpm"));
     rpm.add_css_class("numeric");
-    rpm.add_css_class("title-2");
-    rpm.set_xalign(0.0);
-    rpm.set_margin_start(14);
+    rpm.add_css_class("fan-rpm");
+    rpm.set_xalign(1.0);
+    top.append(&title);
+    top.append(&rpm);
     let bar = gtk::ProgressBar::new();
-    bar.set_margin_start(14);
-    bar.set_margin_end(14);
+    bar.add_css_class("card-bar");
     let source = gtk::Label::new(Some("Firmware curve"));
-    source.add_css_class("dim-label");
-    source.add_css_class("caption");
+    source.add_css_class("row-sub");
     source.set_xalign(0.0);
-    source.set_margin_start(14);
-    source.set_margin_bottom(12);
+    source.set_ellipsize(gtk::pango::EllipsizeMode::End);
     card.append(&top);
-    card.append(&rpm);
     card.append(&bar);
     card.append(&source);
     let ui = FanCardUi {
@@ -382,7 +387,7 @@ fn build_fan_curve_section(
     gate: &DaemonGate,
 ) -> gtk::Box {
     use legion_core::fan_curve;
-    let root = gtk::Box::new(Orientation::Vertical, 14);
+    let root = gtk::Box::new(Orientation::Vertical, 10);
 
     // Mode selector (power profile whose curve is edited).
     let mut choices = legion_core::profile::safe_choices();
@@ -401,13 +406,14 @@ fn build_fan_curve_section(
 
     let header = gtk::Box::new(Orientation::Horizontal, 12);
     let headline = gtk::Label::new(None);
-    headline.add_css_class("heading");
+    headline.add_css_class("section-title");
     headline.set_xalign(0.0);
     headline.set_hexpand(true);
     headline.set_wrap(true);
     header.append(&headline);
     let modes = gtk::Box::new(Orientation::Horizontal, 0);
     modes.add_css_class("linked");
+    modes.add_css_class("segmented");
     modes.set_valign(Align::Center);
     modes.update_property(&[gtk::accessible::Property::Label("Curve for power mode")]);
     let mut leader: Option<gtk::ToggleButton> = None;
@@ -429,55 +435,44 @@ fn build_fan_curve_section(
     // Editor + status + buttons.
     let editor = CurveEditor::new();
     let editor_frame = gtk::Box::new(Orientation::Vertical, 8);
-    editor_frame.add_css_class("card");
+    editor_frame.add_css_class("panel");
     editor_frame.set_hexpand(true);
-    editor.area.set_margin_top(10);
-    editor.area.set_margin_start(10);
-    editor.area.set_margin_end(10);
+    editor.area.set_margin_top(2);
     editor_frame.append(&editor.area);
-    let state_label = gtk::Label::new(None);
-    state_label.set_xalign(0.0);
-    state_label.set_wrap(true);
-    state_label.set_margin_start(14);
-    state_label.set_margin_end(14);
-    state_label.add_css_class("dim-label");
-    editor_frame.append(&state_label);
-    let safety_note = gtk::Label::new(Some(
-        "Above 90 °C every fan goes to 100 % regardless of the curve. Any sensor error hands the fans back to the firmware.",
-    ));
-    safety_note.set_xalign(0.0);
-    safety_note.set_wrap(true);
-    safety_note.set_margin_start(14);
-    safety_note.set_margin_end(14);
-    safety_note.add_css_class("caption");
-    editor_frame.append(&safety_note);
+    let (state_row, state_label) = status_line("", "");
+    state_row.set_valign(Align::Center);
     let buttons = gtk::Box::new(Orientation::Horizontal, 8);
     buttons.set_halign(Align::End);
-    buttons.set_margin_start(14);
-    buttons.set_margin_end(14);
-    buttons.set_margin_bottom(12);
-    let factory = gtk::Button::with_label("Factory shape");
-    factory.add_css_class("flat");
-    tip(
-        &factory,
-        "Put this mode's points back to the built-in shape (not applied until you press Apply curve)",
+    let factory = secondary_button_tip(
+        "Factory shape",
+        Some("Put this mode's points back to the built-in shape (not applied until you press Apply curve)"),
     );
-    let reset = gtk::Button::with_label("Reset to firmware");
-    tip(
-        &reset,
-        "Stop the software curve for this power mode — the fans go back to the firmware curve",
+    let reset = secondary_button_tip(
+        "Reset to firmware",
+        Some("Stop the software curve for this power mode and give the fans back to the firmware"),
     );
-    let apply = gtk::Button::with_label("Apply curve");
-    apply.add_css_class("suggested-action");
-    tip(&apply, "Save this curve and let the daemon drive the fans with it");
+    let apply = primary_button_tip(
+        "Apply curve",
+        Some("Save this curve and let the daemon drive the fans with it"),
+    );
     buttons.append(&factory);
     buttons.append(&reset);
     buttons.append(&apply);
-    editor_frame.append(&buttons);
+    let action_row = gtk::Box::new(Orientation::Horizontal, 12);
+    state_row.set_hexpand(true);
+    action_row.append(&state_row);
+    action_row.append(&buttons);
+    editor_frame.append(&action_row);
+    tip(
+        &editor_frame,
+        "Above 90 °C every fan goes to 100 % regardless of the curve. Any sensor error hands the fans back to the firmware.",
+    );
+    let state_dot = state_row.first_child();
 
     // Fan cards.
-    let cards_box = gtk::Box::new(Orientation::Horizontal, 12);
+    let cards_box = gtk::Box::new(Orientation::Horizontal, 10);
     cards_box.set_homogeneous(true);
+    cards_box.set_valign(Align::Start);
     let mut card_uis = Vec::new();
     for ch in channels {
         let (w, ui) = fan_card_ui(ch);
@@ -497,6 +492,7 @@ fn build_fan_curve_section(
         busy: Cell::new(false),
         headline,
         state_label,
+        state_dot,
         apply: apply.clone(),
         reset: reset.clone(),
         factory: factory.clone(),

@@ -15,8 +15,8 @@ use std::rc::Rc;
 const AXIS_T_MIN: f64 = 30.0;
 const AXIS_T_MAX: f64 = 100.0;
 const MARGIN_L: f64 = 44.0;
-const MARGIN_R: f64 = 14.0;
-const MARGIN_T: f64 = 16.0;
+const MARGIN_R: f64 = 22.0;
+const MARGIN_T: f64 = 10.0;
 const MARGIN_B: f64 = 30.0;
 const HIT_RADIUS: f64 = 16.0;
 const ACCENT: (f64, f64, f64) = (0.784, 0.063, 0.180);
@@ -73,7 +73,7 @@ impl Geo {
 impl CurveEditor {
     pub fn new() -> Self {
         let area = gtk::DrawingArea::new();
-        area.set_content_height(300);
+        area.set_content_height(190);
         area.set_content_width(420);
         area.set_hexpand(true);
         area.set_focusable(true);
@@ -216,12 +216,12 @@ impl CurveEditor {
                 tc += 10.0;
             }
             cr.set_source_rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.95);
-            cr.move_to(g.x(90.0) + 4.0, g.t + 13.0);
+            cr.move_to(g.x(90.0) + 4.0, g.t + g.h - 6.0);
             let _ = cr.show_text("safety max");
 
             // Curve polyline (flat extension to both axis edges).
             cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
-            cr.set_line_width(3.0);
+            cr.set_line_width(2.5);
             cr.set_line_join(gtk::cairo::LineJoin::Round);
             let first = st.points[0];
             cr.move_to(g.x(AXIS_T_MIN), g.y(first.1 as f64));
@@ -254,7 +254,7 @@ impl CurveEditor {
             for (i, &(t, p)) in st.points.iter().enumerate() {
                 let (x, y) = (g.x(t as f64), g.y(p as f64));
                 let selected = i == st.focused;
-                cr.arc(x, y, 7.0, 0.0, std::f64::consts::TAU);
+                cr.arc(x, y, 6.0, 0.0, std::f64::consts::TAU);
                 if selected {
                     cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
                 } else {

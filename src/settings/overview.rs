@@ -9,93 +9,78 @@ use super::*;
 /// Navigation callback: (stack page id, header title).
 pub(crate) type NavFn = Rc<dyn Fn(&'static str, &'static str)>;
 
-/// Build a linked segmented control with radio semantics. Returns the box and
-/// its buttons (index == option index); `active` starts checked.
-fn segmented(labels: &[String], active: u32) -> (gtk::Box, Vec<gtk::ToggleButton>) {
-    let bx = gtk::Box::builder()
-        .orientation(Orientation::Horizontal)
-        .accessible_role(gtk::AccessibleRole::RadioGroup)
-        .build();
-    bx.add_css_class("linked");
-    bx.add_css_class("segmented");
-    bx.set_halign(Align::Start);
-    let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
-    for (i, label) in labels.iter().enumerate() {
-        let b = gtk::ToggleButton::builder()
-            .label(label)
-            .accessible_role(gtk::AccessibleRole::Radio)
-            .build();
-        b.add_css_class("seg-btn");
-        if let Some(first) = buttons.first() {
-            b.set_group(Some(first));
-        }
-        b.set_active(i as u32 == active);
-        bx.append(&b);
-        buttons.push(b);
-    }
-    (bx, buttons)
-}
-
-/// One quick-toggle tile: name + hint on the left, switch on the right.
-/// Starts hidden; the capability probe reveals it.
+/// One quick-toggle tile: name on the left, switch on the right; the hint
+/// is a tooltip. Starts hidden; the capability probe reveals it.
 fn quick_tile(name: &str, hint: &str) -> (gtk::Box, gtk::Switch) {
-    let tile = gtk::Box::new(Orientation::Horizontal, 12);
+    let tile = gtk::Box::new(Orientation::Horizontal, 8);
     tile.add_css_class("quick-tile");
     tile.set_visible(false);
-    let text = gtk::Box::new(Orientation::Vertical, 2);
-    text.set_hexpand(true);
-    text.set_valign(Align::Center);
+    tip(&tile, hint);
     let n = gtk::Label::new(Some(name));
     n.add_css_class("quick-name");
     n.set_halign(Align::Start);
     n.set_xalign(0.0);
-    let h = gtk::Label::new(Some(hint));
-    h.add_css_class("quick-hint");
-    h.set_halign(Align::Start);
-    h.set_xalign(0.0);
-    h.set_wrap(true);
-    text.append(&n);
-    text.append(&h);
+    n.set_hexpand(true);
+    n.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let sw = gtk::Switch::new();
     sw.set_valign(Align::Center);
     sw.update_property(&[gtk::accessible::Property::Label(name)]);
-    tile.append(&text);
+    tile.append(&n);
     tile.append(&sw);
     (tile, sw)
 }
 
-/// A live card = metric chip + a thin usage bar underneath.
+/// A live row: name, thin usage bar and the current value. The secondary
+/// detail (watts, load, per-fan rpm) is kept off-screen as a tooltip.
 fn live_card(
     title: &str,
     tooltip: &str,
 ) -> (gtk::Box, gtk::Label, gtk::Label, gtk::Label, gtk::ProgressBar) {
-    let (chip, value, detail) = metric_chip_tip(title, Some(tooltip));
-    chip.add_css_class("live-card");
-    detail.set_max_width_chars(22);
-    detail.set_ellipsize(gtk::pango::EllipsizeMode::None);
-    detail.set_wrap(true);
-    detail.set_xalign(0.0);
-    let title_label = chip
-        .first_child()
-        .and_then(|w| w.downcast::<gtk::Label>().ok())
-        .unwrap_or_else(|| gtk::Label::new(None));
+    let row = gtk::Box::new(Orientation::Horizontal, 14);
+    row.add_css_class("live-row");
+    tip(&row, tooltip);
+    let name = gtk::Label::new(Some(title));
+    name.add_css_class("live-name");
+    name.set_xalign(0.0);
+    name.set_width_chars(10);
     let bar = gtk::ProgressBar::new();
     bar.add_css_class("card-bar");
-    bar.set_margin_top(8);
-    chip.append(&bar);
-    (chip, title_label, value, detail, bar)
+    bar.set_hexpand(true);
+    bar.set_valign(Align::Center);
+    let value = gtk::Label::new(Some("—"));
+    value.add_css_class("value");
+    value.add_css_class("numeric");
+    value.set_xalign(1.0);
+    value.set_width_chars(9);
+    let detail = gtk::Label::new(None);
+    {
+        let row = row.clone();
+        let base = tooltip.to_string();
+        detail.connect_label_notify(move |l| {
+            let d = l.text();
+            row.set_tooltip_text(Some(&if d.is_empty() {
+                base.clone()
+            } else {
+                format!("{d}\n{base}")
+            }));
+        });
+    }
+    row.append(&name);
+    row.append(&bar);
+    row.append(&value);
+    (row, name, value, detail, bar)
 }
 
 fn section_label(text: &str) -> gtk::Label {
     let l = gtk::Label::new(Some(text));
-    l.add_css_class("cc-section");
+    l.add_css_class("section-title");
     l.set_halign(Align::Start);
     l.set_xalign(0.0);
     l
 }
 
 /// Issue count from the read-only self-checks plus non-info faults.
-fn health_issue_count() -> usize {
+pub(crate) fn health_issue_count() -> usize {
     let checks = legion_core::selftest::run_self_checks();
     let faults = legion_core::selftest::scan_faults();
     checks.iter().filter(|c| !c.ok).count()
@@ -103,26 +88,6 @@ fn health_issue_count() -> usize {
             .iter()
             .filter(|f| f.severity != legion_core::selftest::Severity::Info)
             .count()
-}
-
-fn apply_health_pill(pill: &gtk::Label, issues: Option<usize>) {
-    for c in ["status-ok", "status-warn", "status-bad", "status-muted"] {
-        pill.remove_css_class(c);
-    }
-    match issues {
-        None => {
-            pill.set_text("Checking…");
-            pill.add_css_class("status-muted");
-        }
-        Some(0) => {
-            pill.set_text("All systems healthy");
-            pill.add_css_class("status-ok");
-        }
-        Some(n) => {
-            pill.set_text(&format!("{n} issue{} found", if n == 1 { "" } else { "s" }));
-            pill.add_css_class("status-warn");
-        }
-    }
 }
 
 /// Everything the capability probe for the quick toggles learns.
@@ -217,93 +182,9 @@ pub(crate) fn build_overview(
         page.append(&banner);
     }
 
-    // ── Header: model + machine line, single health pill ────────────────
-    let header = gtk::Box::new(Orientation::Horizontal, 12);
-    header.add_css_class("cc-header");
-    let titles = gtk::Box::new(Orientation::Vertical, 2);
-    titles.set_hexpand(true);
-    titles.set_valign(Align::Center);
-    let model_name = if info.model.is_empty() {
-        "Legion laptop".to_string()
-    } else {
-        info.model.clone()
-    };
-    let model_l = gtk::Label::new(Some(&model_name));
-    model_l.add_css_class("cc-model");
-    model_l.set_halign(Align::Start);
-    model_l.set_xalign(0.0);
-    model_l.set_wrap(true);
-    let machine_l = gtk::Label::new(None);
-    machine_l.add_css_class("cc-machine");
-    machine_l.set_halign(Align::Start);
-    machine_l.set_xalign(0.0);
-    machine_l.set_wrap(true);
-    let machine_prefix = {
-        let mut parts: Vec<String> = Vec::new();
-        if !info.machine_type.is_empty() {
-            parts.push(info.machine_type.clone());
-        }
-        if !info.bios_version.is_empty() {
-            parts.push(format!("BIOS {}", info.bios_version));
-        }
-        parts.join(" · ")
-    };
-    let set_machine_line = {
-        let machine_l = machine_l.clone();
-        let prefix = machine_prefix.clone();
-        move |on_ac: Option<bool>| {
-            let power = match on_ac {
-                Some(true) => Some("on AC power"),
-                Some(false) => Some("on battery"),
-                None => None,
-            };
-            let mut parts: Vec<&str> = Vec::new();
-            if !prefix.is_empty() {
-                parts.push(&prefix);
-            }
-            if let Some(p) = power {
-                parts.push(p);
-            }
-            machine_l.set_text(&parts.join(" · "));
-        }
-    };
-    set_machine_line(None);
-    titles.append(&model_l);
-    titles.append(&machine_l);
-    header.append(&titles);
-
-    let health_pill = status_pill_tip(
-        "Checking…",
-        "muted",
-        Some("Read-only self-checks and fault scan — click to open Health"),
-    );
-    let health_btn = gtk::Button::new();
-    health_btn.add_css_class("flat");
-    health_btn.add_css_class("cc-health-btn");
-    health_btn.set_valign(Align::Center);
-    health_btn.set_child(Some(&health_pill));
-    {
-        let nav = nav.clone();
-        health_btn.connect_clicked(move |_| nav("health", "Health"));
-    }
-    header.append(&health_btn);
-    page.append(&header);
-    {
-        let pill = health_pill.clone();
-        let refresh = Rc::new(move || {
-            let pill = pill.clone();
-            dispatch_async(
-                || Ok::<usize, String>(health_issue_count()),
-                "Health check stopped without a result",
-                move |res| apply_health_pill(&pill, res.ok()),
-            );
-        });
-        refresh();
-        glib::timeout_add_seconds_local(60, move || {
-            refresh();
-            glib::ControlFlow::Continue
-        });
-    }
+    // Home starts directly with the power mode: model/BIOS details live on
+    // Settings, health on the sidebar footer.
+    let set_machine_line = |_on_ac: Option<bool>| {};
 
     // ── Power mode (segmented, radio semantics) ─────────────────────────
     let blocked = legion_core::profile::blocked_choices();
@@ -324,38 +205,28 @@ pub(crate) fn build_overview(
     let drop = string_combo_row("Mode", "", &label_refs, active);
     *mode_drop_slot.borrow_mut() = Some(drop.clone());
 
-    let power_box = gtk::Box::new(Orientation::Vertical, 8);
-    power_box.add_css_class("cc-block");
-    let power_head = gtk::Box::new(Orientation::Horizontal, 12);
+    let power_box = gtk::Box::new(Orientation::Horizontal, 12);
     let power_title = section_label("Power mode");
     power_title.set_hexpand(true);
-    let mode_hint = gtk::Label::new(Some(profile_blurb(&current)));
-    mode_hint.add_css_class("cc-hint");
-    mode_hint.set_halign(Align::End);
-    mode_hint.set_xalign(1.0);
-    mode_hint.set_wrap(true);
-    power_head.append(&power_title);
-    power_head.append(&mode_hint);
-    power_box.append(&power_head);
+    power_box.append(&power_title);
     let (seg_box, seg_buttons) = segmented(&labels, active);
+    seg_box.set_halign(Align::End);
     tip(
         &seg_box,
-        "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
+        &if blocked_note.is_empty() {
+            "Custom unlocks the CPU and GPU power sliders".to_string()
+        } else {
+            blocked_note.clone()
+        },
     );
     for (b, c) in seg_buttons.iter().zip(choices.iter()) {
         tip(b, profile_tooltip(c));
     }
     power_box.append(&seg_box);
-    if !blocked_note.is_empty() {
-        let note = gtk::Label::new(Some(&blocked_note));
-        note.add_css_class("cc-hint");
-        note.set_halign(Align::Start);
-        note.set_xalign(0.0);
-        note.set_wrap(true);
-        power_box.append(&note);
-    }
     page.append(&power_box);
     gate.track(&seg_box);
+    // The mode blurb is only a tooltip now (one short line, no filler).
+    let mode_hint = gtk::Label::new(Some(profile_blurb(&current)));
 
     let seg_guard = Rc::new(Cell::new(false));
     for (i, b) in seg_buttons.iter().enumerate() {
@@ -501,18 +372,12 @@ pub(crate) fn build_overview(
     );
 
     // ── Live cards: CPU · GPU · Fans · Battery ──────────────────────────
-    let cards = gtk::FlowBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .max_children_per_line(4)
-        .min_children_per_line(1)
-        .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
-        .build();
-    cards.add_css_class("metric-grid");
+    let cards = gtk::Box::new(Orientation::Vertical, 0);
+    cards.add_css_class("panel");
+    cards.add_css_class("live-panel");
 
     let (cpu_card, _cpu_t, cpu_v, cpu_d, cpu_bar) = live_card(
-        "CPU",
+        "CPU temperature",
         &format!(
             "{} — package temperature, power and load",
             if info.cpu_model.is_empty() {
@@ -523,7 +388,7 @@ pub(crate) fn build_overview(
         ),
     );
     let (gpu_card, _gpu_t, gpu_v, gpu_d, gpu_bar) = live_card(
-        "GPU",
+        "GPU temperature",
         &format!(
             "{} — discrete GPU temperature, power and utilization",
             if info.gpu_model.is_empty() {
@@ -543,11 +408,11 @@ pub(crate) fn build_overview(
         .filter(|m| *m > 0)
         .unwrap_or(6000) as f64;
     let (fan_card, fan_t, fan_v, fan_d, fan_bar) = live_card(
-        "Fans · automatic",
-        "Fastest fan in RPM · automatic = the firmware curve is in charge",
+        "Fans",
+        "Fastest fan · Idle means the firmware has stopped the fans until it warms up",
     );
     let (bat_card, bat_t, bat_v, bat_d, bat_bar) =
-        live_card("Battery", "Charge level, state and cycle count");
+        live_card("Battery", "Charge level and state");
     cards.append(&cpu_card);
     cards.append(&gpu_card);
     if !fan_channels.is_empty() {
@@ -562,27 +427,14 @@ pub(crate) fn build_overview(
     const MAX_T: f64 = 100.0;
     let history: Rc<RefCell<std::collections::VecDeque<(f64, f64)>>> =
         Rc::new(RefCell::new(std::collections::VecDeque::new()));
-    let chart_head = gtk::Box::new(Orientation::Horizontal, 12);
-    let chart_title = section_label("Temperature · last 5 min");
-    chart_title.set_hexpand(true);
-    chart_head.append(&chart_title);
-    if !fan_channels.is_empty() {
-        let link = gtk::Button::with_label("Edit fan curve");
-        link.add_css_class("flat");
-        link.add_css_class("cc-link");
-        tip(&link, "Open Cooling to tune the fans");
-        let nav = nav.clone();
-        link.connect_clicked(move |_| nav("cooling-fans", "Cooling"));
-        chart_head.append(&link);
-    }
-    let chart_card = gtk::Box::new(Orientation::Vertical, 0);
-    chart_card.add_css_class("cc-chart");
+    let chart_card = gtk::Box::new(Orientation::Vertical, 4);
+    chart_card.add_css_class("panel");
     tip(
         &chart_card,
         "CPU (red) and GPU (amber) temperature, sampled every 2 s",
     );
     let area = gtk::DrawingArea::new();
-    area.set_height_request(120);
+    area.set_height_request(90);
     area.set_hexpand(true);
     let area_hist = history.clone();
     area.set_draw_func(move |area, cr, w, h| {
@@ -644,7 +496,7 @@ pub(crate) fn build_overview(
             cr.set_source_rgba(fr, fg_g, fb, 0.55);
             cr.set_font_size(12.0);
             cr.move_to(left + 10.0, h / 2.0 + 4.0);
-            let _ = cr.show_text("Collecting temperature…");
+            let _ = cr.show_text("Collecting temperature...");
         }
     });
     chart_card.append(&area);
@@ -655,14 +507,17 @@ pub(crate) fn build_overview(
         l.add_css_class(css);
         legend.append(&l);
     }
-    let span = gtk::Label::new(Some("−5 min → now"));
+    let span = gtk::Label::new(Some("Last 5 minutes"));
     span.add_css_class("cc-hint");
     span.set_hexpand(true);
     span.set_halign(Align::End);
     legend.append(&span);
     chart_card.append(&legend);
-    page.append(&chart_head);
-    page.append(&chart_card);
+    let chart_expander = gtk::Expander::new(Some("Temperature history"));
+    chart_expander.set_expanded(false);
+    chart_expander.add_css_class("section-expander");
+    chart_card.set_margin_top(6);
+    chart_expander.set_child(Some(&chart_card));
     {
         let history_feed = history.clone();
         let area_feed = area.clone();
@@ -677,17 +532,17 @@ pub(crate) fn build_overview(
     }
 
     // ── Quick toggles (only what this hardware supports) ────────────────
-    let (kbd_tile, kbd_sw) = quick_tile("Keyboard light", "On / off");
-    let (fan_tile, fan_sw) = quick_tile("Fans full speed", "Maximum airflow");
-    let (fnl_tile, fnl_sw) = quick_tile("Fn Lock", "F1–F12 act as function keys");
-    let (usb_tile, usb_sw) = quick_tile("Always-on USB", "Powered while off or asleep");
+    let (kbd_tile, kbd_sw) = quick_tile("Keyboard light", "Turn the keyboard backlight on or off");
+    let (fan_tile, fan_sw) = quick_tile("Fans full speed", "Run every fan at maximum for maximum airflow");
+    let (fnl_tile, fnl_sw) = quick_tile("Fn lock", "F1 to F12 act as function keys without holding Fn");
+    let (usb_tile, usb_sw) = quick_tile("Always-on USB", "Keep the USB port powered while the laptop is off or asleep");
     let quick_grid = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(2)
-        .min_children_per_line(1)
+        .min_children_per_line(2)
         .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
+        .column_spacing(8)
+        .row_spacing(8)
         .build();
     quick_grid.add_css_class("metric-grid");
     for t in [&kbd_tile, &fan_tile, &fnl_tile, &usb_tile] {
@@ -697,7 +552,7 @@ pub(crate) fn build_overview(
             slot.set_visible(false);
         }
     }
-    let quick_wrap = gtk::Box::new(Orientation::Vertical, 8);
+    let quick_wrap = gtk::Box::new(Orientation::Vertical, 6);
     quick_wrap.append(&section_label("Quick toggles"));
     quick_wrap.append(&quick_grid);
     quick_wrap.set_visible(false);
@@ -907,66 +762,25 @@ pub(crate) fn build_overview(
     }
 
     // ── GPU mode (read-only) + charge limit ─────────────────────────────
-    let gpu_group = pref_group("", None);
-    gpu_group.set_visible(false);
-    let gpu_row = adw::ActionRow::builder()
-        .title("GPU mode")
-        .subtitle("Reading…")
-        .activatable(false)
-        .build();
-    let gpu_mode_l = gtk::Label::new(Some("—"));
-    gpu_mode_l.add_css_class("cc-mode-value");
-    gpu_row.add_suffix(&gpu_mode_l);
-    let gpu_link = gtk::Button::with_label("Change in Performance");
-    gpu_link.add_css_class("flat");
-    gpu_link.add_css_class("cc-link");
-    gpu_link.set_valign(Align::Center);
-    tip(
-        &gpu_link,
-        "Switching needs a reboot — open Performance → Features",
-    );
-    {
-        let nav = nav.clone();
-        gpu_link.connect_clicked(move |_| nav("cpu", "Performance"));
-    }
-    gpu_row.add_suffix(&gpu_link);
-    gpu_group.add(&gpu_row);
-    page.append(&gpu_group);
-    {
-        let gpu_group = gpu_group.clone();
-        let gpu_row = gpu_row.clone();
-        let gpu_mode_l = gpu_mode_l.clone();
-        run_daemon_command_async(DaemonCommand::GetGpuMode, move |result| {
-            if let Ok(DaemonResponse::GpuMode(st)) = result {
-                if st.supported {
-                    let shown = st.configured.or(st.active);
-                    gpu_mode_l.set_text(shown.map(|m| m.label()).unwrap_or("Unknown"));
-                    gpu_row.set_subtitle(if st.reboot_pending {
-                        "Applies after reboot"
-                    } else {
-                        "Active this boot"
-                    });
-                    gpu_group.set_visible(true);
-                }
-            }
-        });
-    }
+    let basics = gtk::Box::new(Orientation::Vertical, 0);
+    basics.add_css_class("panel");
 
-    let limit_box = gtk::Box::new(Orientation::Vertical, 8);
-    limit_box.add_css_class("cc-block");
-    let limit_head = gtk::Box::new(Orientation::Horizontal, 12);
-    let limit_title = section_label("Charge limit");
-    limit_title.set_hexpand(true);
-    let limit_hint = gtk::Label::new(Some(
-        "Stops charging at this level while plugged in — gentler on the pack",
-    ));
-    limit_hint.add_css_class("cc-hint");
+    let limit_box = gtk::Box::new(Orientation::Horizontal, 12);
+    limit_box.add_css_class("panel-row");
+    limit_box.add_css_class("first");
+    let limit_text = gtk::Box::new(Orientation::Vertical, 0);
+    limit_text.set_hexpand(true);
+    limit_text.set_valign(Align::Center);
+    let limit_title = gtk::Label::new(Some("Charge limit"));
+    limit_title.add_css_class("row-title");
+    limit_title.set_xalign(0.0);
+    limit_text.append(&limit_title);
+    let limit_hint = gtk::Label::new(Some("Stop charging at this level while plugged in"));
+    limit_hint.add_css_class("row-sub");
+    limit_hint.set_xalign(0.0);
     limit_hint.set_wrap(true);
-    limit_hint.set_halign(Align::End);
-    limit_hint.set_xalign(1.0);
-    limit_head.append(&limit_title);
-    limit_head.append(&limit_hint);
-    limit_box.append(&limit_head);
+    limit_text.append(&limit_hint);
+    limit_box.append(&limit_text);
     let limit_values = [60u32, 80, 100];
     let limit_labels: Vec<String> = limit_values.iter().map(|p| format!("{p}%")).collect();
     let (limit_seg, limit_buttons) = segmented(&limit_labels, u32::MAX);
@@ -980,9 +794,63 @@ pub(crate) fn build_overview(
             },
         );
     }
+    limit_seg.set_halign(Align::End);
+    limit_seg.set_valign(Align::Center);
     limit_box.append(&limit_seg);
-    page.append(&limit_box);
+    basics.append(&limit_box);
     gate.track(&limit_seg);
+
+    // GPU mode (read-only here; switching lives in Performance).
+    let gpu_row = gtk::Box::new(Orientation::Horizontal, 12);
+    gpu_row.add_css_class("panel-row");
+    gpu_row.set_visible(false);
+    let gpu_text = gtk::Box::new(Orientation::Vertical, 0);
+    gpu_text.set_hexpand(true);
+    gpu_text.set_valign(Align::Center);
+    let gpu_title = gtk::Label::new(Some("GPU mode"));
+    gpu_title.add_css_class("row-title");
+    gpu_title.set_xalign(0.0);
+    let gpu_sub = gtk::Label::new(Some("Reading…"));
+    gpu_sub.add_css_class("row-sub");
+    gpu_sub.set_xalign(0.0);
+    gpu_text.append(&gpu_title);
+    gpu_text.append(&gpu_sub);
+    let gpu_mode_l = gtk::Label::new(Some("—"));
+    gpu_mode_l.add_css_class("row-title");
+    gpu_mode_l.set_valign(Align::Center);
+    let gpu_link = secondary_button_tip(
+        "Change",
+        Some("Switching needs a reboot — opens Performance"),
+    );
+    {
+        let nav = nav.clone();
+        gpu_link.connect_clicked(move |_| nav("cpu", "Performance"));
+    }
+    gpu_row.append(&gpu_text);
+    gpu_row.append(&gpu_mode_l);
+    gpu_row.append(&gpu_link);
+    basics.append(&gpu_row);
+    page.append(&basics);
+    page.append(&chart_expander);
+    {
+        let gpu_row = gpu_row.clone();
+        let gpu_sub = gpu_sub.clone();
+        let gpu_mode_l = gpu_mode_l.clone();
+        run_daemon_command_async(DaemonCommand::GetGpuMode, move |result| {
+            if let Ok(DaemonResponse::GpuMode(st)) = result {
+                if st.supported {
+                    let shown = st.configured.or(st.active);
+                    gpu_mode_l.set_text(shown.map(|m| m.label()).unwrap_or("Unknown"));
+                    gpu_sub.set_text(if st.reboot_pending {
+                        "Applies after reboot"
+                    } else {
+                        "Active this boot"
+                    });
+                    gpu_row.set_visible(true);
+                }
+            }
+        });
+    }
     {
         let guard = Rc::new(Cell::new(true));
         let last = Rc::new(Cell::new(0u32));
@@ -1144,13 +1012,11 @@ pub(crate) fn build_overview(
                     d.push_str(&format!(" · {c} cycles"));
                 }
                 bat_d.set_text(&d);
-                bat_t.set_text(&match b.health {
-                    Some(h) => {
-                        let (text, _) = legion_core::battery::health_display(h);
-                        format!("Battery · health {text}")
-                    }
-                    None => "Battery".into(),
-                });
+                if let Some(h) = b.health {
+                    let (text, _) = legion_core::battery::health_display(h);
+                    bat_d.set_text(&format!("{d} · health {text}"));
+                }
+                let _ = &bat_t;
                 bat_card_c.remove_css_class("hot");
                 bat_card_c.remove_css_class("warm");
                 if b.status == "Discharging" {
@@ -1219,13 +1085,7 @@ pub(crate) fn build_overview(
                     // is warm (≈73 °C in Balanced on 83RU). Say so — a bare
                     // "0 rpm" next to a hot CPU reads like broken fans.
                     let stopped = !manual && top == 0;
-                    fan_t.set_text(if manual {
-                        "Fans · manual"
-                    } else if stopped {
-                        "Fans · idle"
-                    } else {
-                        "Fans · automatic"
-                    });
+                    fan_t.set_text(if manual { "Fans (manual)" } else { "Fans" });
                     fan_v.set_text(&if stopped {
                         "Idle".to_string()
                     } else {
@@ -1357,6 +1217,7 @@ pub(crate) fn attach_custom_ppt_group(
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         val.add_css_class("scale-value");
+        val.set_xalign(1.0);
         tip(&val, &ppt_tip);
 
         let adj = gtk::Adjustment::new(

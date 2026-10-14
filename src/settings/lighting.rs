@@ -2,7 +2,10 @@
 
 use super::{run_daemon_command_async, toast_error};
 use crate::perkey;
-use crate::widgets::{effect_tooltip, labeled_row_tip, page_lede, section_tip, tip};
+use crate::widgets::{
+    effect_tooltip, labeled_row_tip, page_lede, primary_button_tip, secondary_button_tip,
+    section_tip, tip,
+};
 use legion_core::comms::{DaemonCommand, DaemonResponse};
 use legion_core::config::ZoneEffect;
 use legion_core::keyboard::{RgbEffect, RgbZone};
@@ -70,7 +73,7 @@ pub fn build_lighting(
             &cfg,
             page,
             "Keyboard backlight",
-            "This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off.",
+            "This model has a single-zone white backlight. Brightness: fn+Q cycles 50%, 100% and Off.",
             toast_overlay,
         );
     }
@@ -78,6 +81,7 @@ pub fn build_lighting(
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
 
     let tabs = adw::ViewStack::new();
+    tabs.set_hhomogeneous(false);
     tabs.set_vhomogeneous(false);
     tabs.set_vexpand(true);
     tabs.add_titled_with_icon(
@@ -137,7 +141,7 @@ pub fn build_lighting(
 
 const FZ_SPEED_LABELS: &[&str] = &["Slowest", "Slow", "Fast", "Fastest"];
 const FZ_BRIGHTNESS_LABELS: &[&str] = &["Off", "Low", "High"];
-const FZ_DIR_LABELS: &[&str] = &["Left → right", "Right → left"];
+const FZ_DIR_LABELS: &[&str] = &["Left to right", "Right to left"];
 
 /// Which controls make sense for an effect: (colours, speed, direction).
 fn fz_sensitivity(fx: legion_core::fourzone::FzEffect) -> (bool, bool, bool) {
@@ -162,10 +166,7 @@ fn build_fourzone_page(
     let state = Rc::new(Cell::new(cfg.four_zone.to_state()));
     let s0 = state.get();
 
-    let (sec, card) = section_tip(
-        "4-zone RGB keyboard",
-        Some("Experimental — tested by reference packets only"),
-    );
+    let (sec, card) = section_tip("4-zone RGB keyboard", None);
     let warn = gtk::Label::new(Some(
         "Experimental — tested by reference packets only. The 33-byte packets follow the layout \
          used by L5P-Keyboard-RGB, l5p-kbl, OpenRGB and Lenovo Legion Toolkit, \
@@ -173,10 +174,7 @@ fn build_fourzone_page(
     ));
     warn.set_wrap(true);
     warn.set_xalign(0.0);
-    warn.set_margin_start(12);
-    warn.set_margin_end(12);
-    warn.set_margin_top(4);
-    warn.add_css_class("dim-label");
+    warn.add_css_class("row-sub");
     card.append(&warn);
 
     let labels: Vec<&str> = FzEffect::ALL.iter().map(|f| f.display_name()).collect();
@@ -225,7 +223,7 @@ fn build_fourzone_page(
             s.colors[i] = [r, g, b];
             state_c.set(s);
         });
-        tip(&picker, &format!("Zone {} colour (left → right)", i + 1));
+        tip(&picker, &format!("Zone {} colour (left to right)", i + 1));
         let col = gtk::Box::new(Orientation::Vertical, 4);
         let l = gtk::Label::new(Some(&format!("Zone {}", i + 1)));
         l.add_css_class("dim-label");
@@ -290,16 +288,9 @@ fn build_fourzone_page(
         });
     }
 
-    let apply = gtk::Button::with_label("Apply");
-    apply.add_css_class("suggested-action");
+    let apply = primary_button_tip("Apply", Some("Send this state to the 4-zone controller and save it"));
     apply.set_halign(Align::End);
     apply.set_margin_top(8);
-    apply.set_margin_end(12);
-    apply.set_margin_bottom(8);
-    tip(
-        &apply,
-        "Send this state to the 4-zone controller and save it",
-    );
     let toast = toast_overlay.clone();
     apply.connect_clicked(move |btn| {
         let s = state.get();
@@ -314,9 +305,9 @@ fn build_fourzone_page(
                 match res {
                     Ok(()) => {
                         let msg = if s.brightness == 0 {
-                            "4-zone keyboard → off".to_string()
+                            "4-zone keyboard off".to_string()
                         } else {
-                            format!("4-zone keyboard → {}", s.effect.display_name())
+                            format!("4-zone keyboard: {}", s.effect.display_name())
                         };
                         let t = adw::Toast::new(&msg);
                         t.set_timeout(2);
@@ -348,14 +339,11 @@ fn build_simple_backlight_page(
     let (sec, card) = section_tip(title, Some(note));
     let note = gtk::Label::new(Some(
         "This keyboard has white backlight only — no RGB zones or effects.\n\
-         Adjust brightness with fn+Q (50% → 100% → Off), or with the slider here:",
+         Adjust brightness with fn+Q (50%, 100%, Off) or with the slider here.",
     ));
     note.set_wrap(true);
     note.set_xalign(0.0);
-    note.set_margin_start(12);
-    note.set_margin_end(12);
-    note.set_margin_top(4);
-    note.add_css_class("dim-label");
+    note.add_css_class("row-sub");
     card.append(&note);
 
     // Brightness slider — reads are local sysfs, writes go through the daemon.
@@ -445,26 +433,21 @@ fn build_keyboard_tab(
     toast: &adw::ToastOverlay,
     app: &adw::Application,
 ) -> gtk::Box {
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
     let (sec_fx, fx_card) = section_tip("Whole keyboard", None);
-    fx_card.append(&zone_editor(RgbZone::Keyboard, layer, true, toast));
+    fx_card.append(&zone_editor(RgbZone::Keyboard, layer, false, toast));
     box_.append(&sec_fx);
 
-    let (sec_brush, brush_card) = section_tip("Paint colour", None);
-    brush_card.append(&colour_toolbar(brush));
-    box_.append(&sec_brush);
-
     let (sec_map, map_card) = section_tip("Per-key lighting", None);
-    let open_btn = gtk::Button::with_label("Open individual key lighting…");
-    open_btn.add_css_class("suggested-action");
-    open_btn.add_css_class("pill-btn");
-    open_btn.set_halign(Align::Start);
-    tip(
-        &open_btn,
-        "Opens a dedicated window with a full-size per-key painter",
+    map_card.append(&colour_toolbar(brush));
+    let open_btn = secondary_button_tip(
+        "Open key painter",
+        Some("Opens a dedicated window with a full-size per-key painter"),
     );
+    open_btn.set_halign(Align::End);
+    open_btn.set_margin_top(8);
     let brush_w = brush.clone();
     let app_w = app.clone();
     let win_slot: Rc<RefCell<Option<adw::Window>>> = Rc::new(RefCell::new(None));
@@ -542,8 +525,8 @@ fn build_zone_tab(
     layer: &ZoneEffect,
     toast: &adw::ToastOverlay,
 ) -> gtk::Box {
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
     let (sec, card) = section_tip(title, None);
     card.append(&zone_editor(zone, layer, false, toast));
@@ -579,8 +562,8 @@ fn logo_power_row(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
 
 fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverlay) -> gtk::Box {
     let toast = toast.clone();
-    let box_ = gtk::Box::new(Orientation::Vertical, 0);
-    box_.set_margin_top(14);
+    let box_ = gtk::Box::new(Orientation::Vertical, 10);
+    box_.set_margin_top(4);
 
     let (sec_look, look) = section_tip("Keyboard brightness", None);
 
@@ -589,7 +572,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     bright.set_draw_value(false);
     bright.set_digits(0);
     bright.set_hexpand(true);
-    bright.set_width_request(240);
+    bright.set_width_request(160);
     let bright_val = gtk::Label::new(Some(&cfg.brightness.to_string()));
     bright_val.add_css_class("numeric");
     bright_val.add_css_class("scale-value");
@@ -616,7 +599,7 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
                 let msg = if level == 0 {
                     "Lights off".to_string()
                 } else {
-                    format!("Brightness → {level}")
+                    format!("Brightness {level}")
                 };
                 let t = adw::Toast::new(&msg);
                 t.set_timeout(1);
@@ -649,11 +632,9 @@ fn build_more_tab(cfg: &legion_core::config::AppConfig, toast: &adw::ToastOverla
     box_.append(&sec_all);
 
     let (sec_r, restore_card) = section_tip("Session", None);
-    let restore = gtk::Button::with_label("Re-apply saved");
-    restore.add_css_class("flat");
-    tip(
-        &restore,
-        "Push ~/.config/legion-control/settings.json to the Spectrum hardware again",
+    let restore = secondary_button_tip(
+        "Re-apply saved",
+        Some("Push the saved lighting settings to the Spectrum hardware again"),
     );
     let toast_r = toast.clone();
     restore.connect_clicked(move |_| {
@@ -793,7 +774,7 @@ fn zone_editor(
         bright_slider.set_draw_value(false);
         bright_slider.set_digits(0);
         bright_slider.set_hexpand(true);
-        bright_slider.set_width_request(220);
+        bright_slider.set_width_request(160);
         let bright_val = gtk::Label::new(Some(&brightness.get().to_string()));
         bright_val.add_css_class("numeric");
         bright_val.add_css_class("scale-value");
@@ -821,7 +802,7 @@ fn zone_editor(
 
         let apply = apply_button(&effect_dd, &color, &speed, &brightness, zone, &toast);
         apply.set_halign(Align::End);
-        apply.set_margin_top(10);
+        apply.set_margin_top(8);
         wrap.append(&apply);
     }
 
@@ -842,7 +823,8 @@ fn colour_toolbar(brush: &Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
 
     let text = gtk::Box::new(Orientation::Vertical, 0);
     text.set_hexpand(true);
-    let t = gtk::Label::new(Some("Brush"));
+    text.set_valign(Align::Center);
+    let t = gtk::Label::new(Some("Brush colour"));
     t.add_css_class("row-title");
     t.set_halign(Align::Start);
     tip(
@@ -863,8 +845,9 @@ fn colour_toolbar(brush: &Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
 
     let hex = gtk::Entry::builder()
         .placeholder_text("#RRGGBB")
-        .width_chars(9)
+        .width_chars(8)
         .max_length(7)
+        .valign(Align::Center)
         .build();
     tip(&hex, "Type a hex colour like #C8102E and press Return");
     let (r, g, b) = brush.get();
@@ -955,11 +938,9 @@ fn apply_button(
     zone: RgbZone,
     toast: &adw::ToastOverlay,
 ) -> gtk::Button {
-    let apply = gtk::Button::with_label("Apply");
-    apply.add_css_class("suggested-action");
-    tip(
-        &apply,
-        "Send this effect, colour, speed, and brightness to the Spectrum controller now",
+    let apply = primary_button_tip(
+        "Apply",
+        Some("Send this effect, colour, speed, and brightness to the Spectrum controller now"),
     );
     let effect_dd_c = effect_dd.clone();
     let color_a = color.clone();
@@ -972,7 +953,7 @@ fn apply_button(
         let (r, g, b) = color_a.get();
         apply_lighting(id, r, g, b, speed_a.get(), brightness_a.get(), zone);
         let label = EFFECT_LABELS.get(idx).copied().unwrap_or("Effect");
-        let t = adw::Toast::new(&format!("{label} → {}", zone.display_name()));
+        let t = adw::Toast::new(&format!("{label} applied to {}", zone.display_name()));
         t.set_timeout(2);
         toast_a.add_toast(t);
     });

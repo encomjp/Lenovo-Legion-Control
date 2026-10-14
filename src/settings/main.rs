@@ -157,8 +157,7 @@ fn toast_with_button(
 /// Quiet row-suffix button for opening external links.
 fn flat_open_button(tooltip: &str) -> gtk::Button {
     let btn = gtk::Button::with_label("Open");
-    btn.add_css_class("flat");
-    btn.add_css_class("open-btn");
+    btn.add_css_class("pill-btn");
     btn.set_valign(Align::Center);
     tip(&btn, tooltip);
     btn
@@ -228,6 +227,8 @@ fn hub_page(
 ) -> (gtk::Box, adw::ViewStack) {
     let tabs = adw::ViewStack::new();
     tabs.set_vexpand(true);
+    tabs.set_hhomogeneous(false);
+    tabs.set_vhomogeneous(false);
     for (page, id, title) in children {
         let w = page_shell(&page);
         // ViewSwitcher shows an icon when the page has one — missing icons
@@ -480,7 +481,7 @@ fn build_ui(app: &adw::Application) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Legion Control")
-        .default_width(1060)
+        .default_width(1000)
         .default_height(680)
         .build();
 
@@ -494,12 +495,15 @@ fn build_ui(app: &adw::Application) {
     let ppt_suppress_slot: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let trend_feed_slot: Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>> = Rc::new(RefCell::new(None));
     let split = adw::NavigationSplitView::new();
-    split.set_min_sidebar_width(228.0);
-    split.set_max_sidebar_width(280.0);
-    split.set_sidebar_width_fraction(0.2);
+    split.set_min_sidebar_width(190.0);
+    split.set_max_sidebar_width(230.0);
+    split.set_sidebar_width_fraction(0.19);
 
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
+    // Only the visible page may set the minimum size, not the widest sibling.
+    stack.set_hhomogeneous(false);
+    stack.set_vhomogeneous(false);
 
     // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
     let legion_page_req = std::env::var("LEGION_PAGE").ok();
@@ -572,7 +576,7 @@ fn build_ui(app: &adw::Application) {
     let brand = gtk::Box::new(Orientation::Horizontal, 12);
     brand.add_css_class("sidebar-brand");
     brand.set_valign(Align::Center);
-    let brand_icon = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 40);
+    let brand_icon = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 32);
     brand.append(&brand_icon);
     let brand_text = gtk::Box::new(Orientation::Vertical, 0);
     let brand_name = gtk::Label::new(Some("Legion Control"));
@@ -647,9 +651,7 @@ fn build_ui(app: &adw::Application) {
             .title(title)
             .activatable(true)
             .build();
-        let ic = color_icon(icon, 15);
-        ic.set_opacity(0.72);
-        row.add_prefix(&ic);
+        row.add_prefix(&mono_icon(icon, 16));
         tip(&row, tooltip);
         nav_list.append(&row);
     }
@@ -665,6 +667,8 @@ fn build_ui(app: &adw::Application) {
     );
     let dot = gtk::Box::new(Orientation::Vertical, 0);
     dot.add_css_class("conn-dot");
+    dot.set_valign(Align::Start);
+    dot.set_halign(Align::Center);
     let foot_text = gtk::Box::new(Orientation::Vertical, 0);
     foot_text.set_hexpand(true);
     let conn_l = gtk::Label::new(Some("Connected"));
@@ -677,6 +681,37 @@ fn build_ui(app: &adw::Application) {
     tip(&conn_s, "Click to check service status");
     foot_text.append(&conn_l);
     foot_text.append(&conn_s);
+    // Health summary lives here (not on Home): issue count from the same
+    // read-only self-checks the Health page runs.
+    let conn_h = gtk::Label::new(Some("Checking health…"));
+    conn_h.add_css_class("conn-sub");
+    conn_h.set_halign(Align::Start);
+    conn_h.set_xalign(0.0);
+    tip(&conn_h, "Read-only self-checks and fault scan — details on the Health page");
+    foot_text.append(&conn_h);
+    {
+        let conn_h = conn_h.clone();
+        let refresh = Rc::new(move || {
+            let conn_h = conn_h.clone();
+            dispatch_async(
+                || Ok::<usize, String>(health_issue_count()),
+                "Health check stopped without a result",
+                move |res| match res {
+                    Ok(0) => conn_h.set_text("No issues found"),
+                    Ok(n) => conn_h.set_text(&format!(
+                        "{n} issue{} on the Health page",
+                        if n == 1 { "" } else { "s" }
+                    )),
+                    Err(_) => conn_h.set_text("Health check unavailable"),
+                },
+            );
+        });
+        refresh();
+        glib::timeout_add_seconds_local(90, move || {
+            refresh();
+            glib::ControlFlow::Continue
+        });
+    }
     foot.append(&dot);
     foot.append(&foot_text);
     sidebar_box.append(&foot);
@@ -713,10 +748,7 @@ fn build_ui(app: &adw::Application) {
         .menu_model(&menu)
         .primary(true)
         .build();
-    menu_btn.set_child(Some(&color_icon(
-        include_bytes!("../../data/icons/menu.svg"),
-        22,
-    )));
+    menu_btn.set_icon_name("open-menu-symbolic");
     header.pack_end(&menu_btn);
     content_toolbar.add_top_bar(&header);
 
@@ -1121,10 +1153,18 @@ fn build_ui(app: &adw::Application) {
     // offenders when a page stops scaling at narrow sizes.
     if std::env::var_os("LEGION_DEBUG_LAYOUT").is_some() {
         let probe_root = window.clone();
+        let threshold: i32 = std::env::var("LEGION_DEBUG_LAYOUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v| *v > 100)
+            .unwrap_or(760);
         glib::timeout_add_local(Duration::from_secs(2), move || {
-            fn walk(w: &gtk::Widget, depth: usize, out: &mut Vec<String>) {
+            fn walk(w: &gtk::Widget, depth: usize, out: &mut Vec<String>, threshold: i32) {
+                if !w.is_visible() {
+                    return;
+                }
                 let (min, _, _, _) = w.measure(gtk::Orientation::Horizontal, -1);
-                if min > 900 {
+                if min > threshold {
                     out.push(format!(
                         "{}{} ({}) min={min} classes={:?}",
                         "  ".repeat(depth),
@@ -1135,14 +1175,14 @@ fn build_ui(app: &adw::Application) {
                 }
                 let mut child = w.first_child();
                 while let Some(c) = child {
-                    walk(&c, depth + 1, out);
+                    walk(&c, depth + 1, out, threshold);
                     child = c.next_sibling();
                 }
             }
             let mut out = Vec::new();
-            walk(probe_root.upcast_ref::<gtk::Widget>(), 0, &mut out);
+            walk(probe_root.upcast_ref::<gtk::Widget>(), 0, &mut out, threshold);
             if out.is_empty() {
-                log::info!("layout probe: no widget wider than 900px");
+                log::info!("layout probe: no widget wider than 760px");
             } else {
                 for line in out {
                     log::warn!("layout probe: {line}");
@@ -1730,7 +1770,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // Same visual grammar as the sections below (Curve Optimizer etc.):
     // chips row directly on the page, then a plain boxed-list group — no
     // extra .card wrapper that made this section wider than its neighbours.
-    let page = gtk::Box::new(Orientation::Vertical, 18);
+    let page = gtk::Box::new(Orientation::Vertical, 10);
     let group = pref_group("Thermal throttle", None);
     tip(
         &group,
@@ -1797,6 +1837,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     temp_top.append(&temp_title);
     temp_top.append(&value);
     let temp_box = gtk::Box::new(Orientation::Vertical, 6);
+    temp_box.add_css_class("panel");
     temp_box.set_hexpand(true);
     temp_box.append(&temp_top);
     temp_box.append(&scale);
@@ -1824,10 +1865,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let chips = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .max_children_per_line(3)
-        .min_children_per_line(2)
+        .min_children_per_line(3)
         .homogeneous(true)
-        .column_spacing(12)
-        .row_spacing(12)
+        .column_spacing(10)
+        .row_spacing(10)
         .build();
     chips.add_css_class("metric-grid");
     let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) = metric_chip_tip(
@@ -1840,6 +1881,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
         "Max freq",
         Some("Current scaling_max_freq across online CPUs"),
     );
+    // Secondary detail lines stay out of sight: the numbers are enough.
+    for d in [&cpu_temp_d, &cpu_temp_2_d, &freq_d] {
+        d.set_visible(false);
+    }
     chips.append(&cpu_temp_chip);
     chips.append(&cpu_temp_2_chip);
     chips.append(&freq_chip);
