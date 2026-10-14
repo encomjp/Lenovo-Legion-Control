@@ -16,10 +16,15 @@ pub enum Health {
     Ok,
     /// Amp stack OK but mute / volume / sink / UCM needs a soft reset.
     SoftIssue,
-    /// ACPI amp is there (or expected) but driver/firmware/bind is broken.
+    /// Modules and firmware are present but the amp still did not bind to HDA
+    /// (or an expected amp is absent from ACPI).
     HardwareBroken,
     /// No smart-amp hardware detected on this machine.
     NotApplicable,
+    /// ACPI amp is present but the kernel modules and/or the firmware file are
+    /// missing. Not a hardware fault: installing the firmware package (or a
+    /// kernel with the AW88399 HDA side-codec) fixes it.
+    DriverMissing,
 }
 
 #[derive(Debug, Clone)]
@@ -150,7 +155,7 @@ pub fn diagnose() -> Diagnosis {
         Health::Ok => log::info!(
             "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?})"
         ),
-        Health::SoftIssue | Health::HardwareBroken => log::warn!(
+        Health::SoftIssue | Health::HardwareBroken | Health::DriverMissing => log::warn!(
             "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?} muted={speakers_muted} bass_off={bass_off} volume_low={volume_low} wrong_sink={wrong_default_sink})"
         ),
         Health::NotApplicable => log::info!(
@@ -207,12 +212,14 @@ fn classify(
     if amp_bound {
         details.push("AW88399 HDA side-codec bound".into());
     } else if amp_acpi {
-        details.push("AW88399 present but NOT bound to HDA — amp dead".into());
+        details.push("AW88399 present but not bound to HDA (amp not active)".into());
     }
     if firmware_ok {
         details.push("Firmware aw88399_acf.bin found".into());
     } else if amp_acpi || amp_modules {
-        details.push("Missing /lib/firmware/aw88399_acf.bin".into());
+        details.push(
+            "Missing aw88399_acf.bin (also checked .bin.zst / .bin.xz) in /lib/firmware".into(),
+        );
     }
     if let Some(c) = hda_card {
         details.push(format!("ALC / onboard HDA card: hw:{c}"));
@@ -240,8 +247,9 @@ fn classify(
         details.push(format!("Default sink: {s}"));
     }
 
-    // Hardware broken: ACPI sees amp but stack incomplete.
-    if amp_acpi && (!amp_modules || !amp_bound || !firmware_ok) {
+    // Driver stack incomplete: ACPI sees the amp but modules and/or firmware
+    // are absent. This is a software/packaging problem, not broken hardware.
+    if amp_acpi && (!amp_modules || !firmware_ok) {
         let mut why = Vec::new();
         if !firmware_ok {
             why.push("firmware");
@@ -249,25 +257,45 @@ fn classify(
         if !amp_modules {
             why.push("kernel modules");
         }
-        if !amp_bound {
-            why.push("HDA bind");
+        let summary = format!("Smart amp driver incomplete — missing {}", why.join(" / "));
+        if !firmware_ok {
+            details.push(
+                "Install the linux-firmware package that ships aw88399_acf.bin (a \
+                 recent linux-firmware; on Arch/CachyOS it may be split into a \
+                 linux-firmware-* subpackage), then reboot or reload the \
+                 snd_hda_scodec_aw88399_i2c module."
+                    .into(),
+            );
         }
-        let summary = format!("Smart amp not working — missing {}", why.join(" / "));
+        if !amp_modules {
+            details.push(
+                "The kernel lacks the AW88399 HDA side-codec \
+                 (CONFIG_SND_HDA_SCODEC_AW88399*, mainline from 7.3). Use a kernel \
+                 that includes it. Reference: \
+                 github.com/marco-giunta/legion-pro7-gen10-audio."
+                    .into(),
+            );
+        }
+        return (Health::DriverMissing, summary, details, true);
+    }
+
+    // Modules + firmware are fine but the amp never bound: genuinely broken.
+    if amp_acpi && !amp_bound {
+        let summary =
+            "Smart amp not working — modules and firmware OK but HDA bind failed".to_string();
         details.push(
-            "Soft reset cannot invent the AW88399 driver. Need aw88399_acf.bin in \
-             /lib/firmware + CONFIG_SND_HDA_SCODEC_AW88399* (kernel 7.3+ ships it; \
-             on CachyOS 7.2 it is already built in — usually only the firmware \
-             file is missing). Reference: \
-             github.com/marco-giunta/legion-pro7-gen10-audio."
+            "Modules and firmware are present yet the amp did not bind. Check \
+             `dmesg | grep -i aw88399` after a cold boot; this may be a hardware \
+             or BIOS problem."
                 .into(),
         );
         return (Health::HardwareBroken, summary, details, soft);
     }
 
     // Known Gen10 smart-amp model with no ACPI — unusual; still report.
-    if !amp_acpi && looks_like_gen10_smart_amp_model() {
+    if !amp_acpi && looks_like_smart_amp_machine() {
         details.push(
-            "This Legion Gen 10 model usually has AW88399; ACPI device missing — \
+            "This machine type usually has AW88399; ACPI device missing — \
              check BIOS / kernel ACPI."
                 .into(),
         );
@@ -528,6 +556,13 @@ pub fn troubleshoot() -> FixReport {
                 "Re-check: amp still broken — soft reset cannot fix missing driver/firmware".into(),
             );
         }
+        Health::DriverMissing => {
+            log::warn!("audio: re-check: amp driver/firmware still missing");
+            steps.push(
+                "Re-check: amp driver/firmware still missing — install aw88399_acf.bin (linux-firmware) / a kernel with the AW88399 codec"
+                    .into(),
+            );
+        }
         Health::NotApplicable => {}
     }
     log::info!(
@@ -573,34 +608,48 @@ fn aw88399_modules_loaded() -> bool {
         || Path::new("/sys/module/snd_soc_aw88399").is_dir()
 }
 
+const FIRMWARE_DIRS: &[&str] = &[
+    "/lib/firmware",
+    "/usr/lib/firmware",
+    "/lib/firmware/awinic",
+    "/usr/lib/firmware/awinic",
+];
+
+/// Accepted file names: plain plus the compressed forms linux-firmware ships on
+/// Arch/CachyOS (`.zst`) and Fedora (`.xz`).
+const FIRMWARE_NAMES: &[&str] = &[
+    "aw88399_acf.bin",
+    "aw88399_acf.bin.zst",
+    "aw88399_acf.bin.xz",
+];
+
 fn aw88399_firmware_present() -> bool {
-    [
-        "/lib/firmware/aw88399_acf.bin",
-        "/usr/lib/firmware/aw88399_acf.bin",
-        "/lib/firmware/awinic/aw88399_acf.bin",
-        "/usr/lib/firmware/awinic/aw88399_acf.bin",
-    ]
-    .iter()
-    .any(|p| Path::new(p).is_file())
+    firmware_present_in(FIRMWARE_DIRS, |p| p.is_file())
 }
 
-fn looks_like_gen10_smart_amp_model() -> bool {
-    let ver = std::fs::read_to_string("/sys/class/dmi/id/product_version")
-        .unwrap_or_default()
-        .to_uppercase();
-    let name = std::fs::read_to_string("/sys/class/dmi/id/product_name")
-        .unwrap_or_default()
-        .to_uppercase();
-    const HINTS: &[&str] = &[
-        // Legion Pro 7 / Pro 7i Gen 10 (16AFR10H / 16IAX10H) — the reference
-        // AW88399 models; R9000P ADR10(H) and Y9000P IAX10 share the amp per
-        // marco-giunta/legion-pro7-gen10-audio; LOQ 15IRX10/15IAX10 match the
-        // "Gen 10 IRX/IAX" naming. Checked against product_version AND
-        // product_name (83JG-style DMI names differ between the two files).
-        "16AFR10H", "16IAX10H", "16IRX10", "16IAX10", "16ARP10", "ADR10", "IAX10H", "83RU", "83JG",
-        "R9000P", "Y9000P",
-    ];
-    HINTS.iter().any(|h| ver.contains(h) || name.contains(h))
+/// Pure path matcher so the search set can be unit-tested without touching `/lib`.
+fn firmware_present_in(dirs: &[&str], is_file: impl Fn(&Path) -> bool) -> bool {
+    dirs.iter().any(|d| {
+        FIRMWARE_NAMES
+            .iter()
+            .any(|n| is_file(&Path::new(d).join(n)))
+    })
+}
+
+/// Machine types known (fleet telemetry) to carry the AW88399 amp. Exact match
+/// against DMI `product_name`; the non-H Legion 7 16IAX10 (83KY) has no amp.
+const SMART_AMP_MACHINE_TYPES: &[&str] = &["83RU", "83F5", "83F6"];
+
+fn is_smart_amp_machine_type(product_name: &str) -> bool {
+    let name = product_name.trim();
+    SMART_AMP_MACHINE_TYPES
+        .iter()
+        .any(|mt| name.eq_ignore_ascii_case(mt))
+}
+
+fn looks_like_smart_amp_machine() -> bool {
+    let name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+    is_smart_amp_machine_type(&name)
 }
 
 /// Prefer the Realtek/ALC onboard card (not NVIDIA HDMI).
@@ -929,7 +978,7 @@ malformed-line-without-tabs\n\
     }
 
     #[test]
-    fn classify_hardware_broken_when_amp_acpi_without_modules() {
+    fn classify_driver_missing_when_amp_acpi_without_modules() {
         let (health, summary, _, fixable) = classify(
             true,
             false,
@@ -944,9 +993,107 @@ malformed-line-without-tabs\n\
             &None,
             &None,
         );
+        assert_eq!(health, Health::DriverMissing);
+        assert!(summary.contains("kernel modules"));
+        assert!(fixable);
+    }
+
+    #[test]
+    fn classify_firmware_missing_is_driver_missing_not_broken() {
+        // 83RU / 83F5: modules loaded, firmware absent, amp unbound.
+        let (health, summary, details, fixable) = classify(
+            true,
+            false,
+            true,
+            false,
+            Some(2),
+            false,
+            false,
+            false,
+            false,
+            false,
+            &None,
+            &None,
+        );
+        assert_eq!(health, Health::DriverMissing);
+        assert!(summary.contains("firmware"));
+        assert!(!summary.contains("kernel modules"));
+        assert!(fixable);
+        assert!(details.iter().any(|d| d.contains("linux-firmware")));
+    }
+
+    #[test]
+    fn classify_modules_missing_with_firmware_is_driver_missing() {
+        // 83F6 Debian: firmware present, kernel lacks the codec.
+        let (health, summary, _, fixable) = classify(
+            true,
+            false,
+            false,
+            true,
+            Some(0),
+            false,
+            false,
+            false,
+            false,
+            false,
+            &None,
+            &None,
+        );
+        assert_eq!(health, Health::DriverMissing);
+        assert!(summary.contains("kernel modules"));
+        assert!(fixable);
+    }
+
+    #[test]
+    fn classify_hardware_broken_only_when_stack_ok_but_unbound() {
+        let (health, summary, _, fixable) = classify(
+            true,
+            false,
+            true,
+            true,
+            Some(0),
+            false,
+            false,
+            false,
+            false,
+            false,
+            &None,
+            &None,
+        );
         assert_eq!(health, Health::HardwareBroken);
-        assert!(summary.contains("Smart amp not working"));
+        assert!(summary.contains("bind failed"));
         assert!(!fixable);
+    }
+
+    #[test]
+    fn firmware_matches_plain_and_compressed_in_every_dir() {
+        for dir in FIRMWARE_DIRS {
+            for name in FIRMWARE_NAMES {
+                let want = Path::new(dir).join(name);
+                assert!(
+                    firmware_present_in(FIRMWARE_DIRS, |p| p == want),
+                    "{want:?} not accepted"
+                );
+            }
+        }
+        assert!(FIRMWARE_NAMES.contains(&"aw88399_acf.bin.zst"));
+        assert!(FIRMWARE_NAMES.contains(&"aw88399_acf.bin.xz"));
+        assert!(!firmware_present_in(FIRMWARE_DIRS, |_| false));
+        // Unrelated / misnamed files must not match.
+        assert!(!firmware_present_in(FIRMWARE_DIRS, |p| p
+            .file_name()
+            .is_some_and(|n| n == "aw88399_acf.bin.gz")));
+    }
+
+    #[test]
+    fn machine_type_match_is_exact() {
+        for mt in ["83RU", "83F5", "83F6", " 83ru\n"] {
+            assert!(is_smart_amp_machine_type(mt), "{mt}");
+        }
+        // Legion 7 16IAX10 (83KY) has no amp; substrings must not match.
+        for mt in ["83KY", "16IAX10", "IAX10H", "83RU1", "", "83JG"] {
+            assert!(!is_smart_amp_machine_type(mt), "{mt}");
+        }
     }
 
     #[test]

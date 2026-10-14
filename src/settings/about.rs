@@ -1418,6 +1418,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             Health::Ok => "Refresh and re-check",
             Health::SoftIssue => "Repair speakers",
             Health::HardwareBroken => "Try soft fix anyway",
+            Health::DriverMissing => "Try soft fix anyway",
             Health::NotApplicable => "Not applicable",
         },
         Some(amp_action_tooltip(diag0.health)),
@@ -1495,6 +1496,10 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                         &overlay,
                         "Amp driver still missing — soft fix can’t finish this",
                     ),
+                    Health::DriverMissing => toast_error(
+                        &overlay,
+                        "Amp firmware/driver missing — install linux-firmware (see details)",
+                    ),
                     Health::NotApplicable => toast_ok(&overlay, &report.after.summary),
                 }
 
@@ -1502,6 +1507,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                     Health::Ok => "Refresh and re-check",
                     Health::SoftIssue => "Repair speakers",
                     Health::HardwareBroken => "Try soft fix anyway",
+                    Health::DriverMissing => "Try soft fix anyway",
                     Health::NotApplicable => "Check speakers",
                 };
                 set_busy(&btn_c, false, idle);
@@ -1527,6 +1533,7 @@ pub(crate) fn amp_pill(health: legion_core::audio::Health) -> (&'static str, &'s
         Health::Ok => ("OK", "ok"),
         Health::SoftIssue => ("Needs fix", "warn"),
         Health::HardwareBroken => ("Broken", "bad"),
+        Health::DriverMissing => ("Driver missing", "warn"),
         Health::NotApplicable => ("N/A", "muted"),
     }
 }
@@ -1541,6 +1548,9 @@ pub(crate) fn amp_pill_tooltip(health: legion_core::audio::Health) -> &'static s
         Health::HardwareBroken => {
             "Amp ACPI/driver/firmware incomplete — soft fix cannot invent a missing kernel driver"
         }
+        Health::DriverMissing => {
+            "Amp is present but its firmware (aw88399_acf.bin) or kernel codec is missing — not a hardware fault"
+        }
         Health::NotApplicable => "This machine does not expose an AW88399 smart amp",
     }
 }
@@ -1554,6 +1564,9 @@ pub(crate) fn amp_action_tooltip(health: legion_core::audio::Health) -> &'static
         }
         Health::HardwareBroken => {
             "Still tries unmute/PipeWire — will not pretend the amp driver is fixed if it is missing"
+        }
+        Health::DriverMissing => {
+            "Still tries unmute/PipeWire — the amp itself needs the firmware/kernel codec installed first"
         }
         Health::NotApplicable => {
             "Gen10 Pro 7 only (AW88399) — no action on this hardware; will be removed once kernel 7.3 ships"
@@ -1570,6 +1583,9 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
         }
         Health::HardwareBroken => {
             "The woofer amp isn’t loaded. Soft fixes help mute/sink issues only — you may need a patched kernel."
+        }
+        Health::DriverMissing => {
+            "The woofer amp has no firmware or kernel codec yet. Install the linux-firmware package providing aw88399_acf.bin (and a kernel with the AW88399 codec), then reboot."
         }
         Health::NotApplicable => {
             "No AW88399 smart amp on this model — Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."
