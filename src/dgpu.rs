@@ -282,6 +282,43 @@ pub fn discrete_state() -> &'static str {
     }
 }
 
+/// dGPU temperature as seen by the fan-curve engine.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThermalState {
+    /// No discrete GPU, or no way to read it (no nvidia-smi / non-NVIDIA
+    /// without an amdgpu hwmon) — contributes nothing.
+    NotApplicable,
+    /// Runtime-suspended: cold by definition, and we must not wake it.
+    Asleep,
+    /// Awake with a plausible reading (°C).
+    Temp(f64),
+    /// Awake but the reading failed — callers must treat as a sensor fault.
+    Failed,
+}
+
+/// Temperature for safety/curve decisions. Never wakes a sleeping dGPU.
+pub fn thermal_state() -> ThermalState {
+    if !discrete_present() {
+        return ThermalState::NotApplicable;
+    }
+    if crate::device::gpu_inventory().discrete_vendor.as_deref() != Some("NVIDIA") {
+        return match crate::sensors::amd_dgpu_temp_c() {
+            Some(t) => ThermalState::Temp(t),
+            None => ThermalState::NotApplicable,
+        };
+    }
+    if find_nvidia_smi().is_none() {
+        return ThermalState::NotApplicable;
+    }
+    if nvidia_runtime_suspended() {
+        return ThermalState::Asleep;
+    }
+    match read_metrics_batch().temp {
+        Some(t) if t.is_finite() && t > 0.0 => ThermalState::Temp(t),
+        _ => ThermalState::Failed,
+    }
+}
+
 pub fn read_temp() -> Option<f64> {
     read_metrics_batch().temp
 }

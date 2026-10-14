@@ -10,7 +10,7 @@ use legion_core::comms::{
 };
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
-    battery, config, cpu, device, fans, gpu_mode, ideapad, keyboard, logging, profile, rgb_panic,
+    battery, config, cpu, device, fan_curve, fans, gpu_mode, ideapad, keyboard, logging, profile, rgb_panic,
     sensors, thermal, undervolt,
 };
 
@@ -457,6 +457,23 @@ fn main() {
         log::info!("thermal-governor thread started");
     }
 
+    // Software fan-curve engine (idle unless a curve is enabled for the
+    // current profile; hands fans back to firmware on stop / fault).
+    let shutdown_fc = shutdown.clone();
+    let fan_curve_handle = match std::thread::Builder::new()
+        .name("fan-curve".into())
+        .spawn(move || fan_curve::run(&shutdown_fc))
+    {
+        Ok(h) => {
+            log::info!("fan-curve thread started");
+            Some(h)
+        }
+        Err(e) => {
+            log::error!("failed to start fan-curve thread: {e}");
+            None
+        }
+    };
+
     // Telemetry push scheduler: gzipped diagnostics push every
     // auto_interval_secs (default 60 s) while telemetry is enabled
     // (on by default; the user can opt out in Settings). NAT-friendly:
@@ -544,6 +561,11 @@ fn main() {
     // Give the governor a moment to notice the shutdown flag before we
     // restore hardware state (it ticks every ~100 ms).
     std::thread::sleep(Duration::from_millis(300));
+    // The fan-curve engine hands the fans back itself; join so its final
+    // set_auto cannot race the cleanup below.
+    if let Some(h) = fan_curve_handle {
+        let _ = h.join();
+    }
     restore_hardware_on_shutdown();
 
     undervolt::clear_persistence_armed_on_clean_shutdown();
@@ -893,13 +915,22 @@ fn process_command(
         }
         DaemonCommand::GetProfile => DaemonResponse::Profile(profile::current()),
         DaemonCommand::SetProfile(name) => match profile::set(&name) {
-            Ok(()) => DaemonResponse::Ok,
+            Ok(()) => {
+                fan_curve::poke();
+                DaemonResponse::Ok
+            }
             Err(e) => DaemonResponse::Error(e),
         },
         DaemonCommand::GetFanRpm(fan) => match fans::read_rpm(fan) {
             Some(rpm) => DaemonResponse::FanRpm(rpm),
             None => DaemonResponse::Error(format!("Cannot read fan {}", fan)),
         },
+        DaemonCommand::SetFanTarget(fan, _) if fan_curve::is_active() => {
+            DaemonResponse::Error(format!(
+                "Cannot set fan {fan}: a fan curve is controlling the fans for this power mode — \
+                 use 'Reset to firmware' (or legion-cli fan-curve disable <profile>) first"
+            ))
+        }
         DaemonCommand::SetFanTarget(fan, rpm) => match fans::set_target(fan, rpm) {
             Ok(()) => DaemonResponse::Ok,
             Err(e) => DaemonResponse::Error(format!("Cannot set fan {}: {}", fan, e)),
@@ -1203,6 +1234,15 @@ fn process_command(
         DaemonCommand::GetDaemonVersion => {
             DaemonResponse::DaemonVersion(env!("CARGO_PKG_VERSION").to_string())
         }
+        DaemonCommand::GetFanCurves => DaemonResponse::FanCurves(fan_curve::status()),
+        DaemonCommand::SetFanCurve {
+            profile,
+            points,
+            enabled,
+        } => match fan_curve::store(&profile, points, enabled) {
+            Ok(()) => DaemonResponse::FanCurves(fan_curve::status()),
+            Err(e) => DaemonResponse::Error(e),
+        },
         DaemonCommand::GetGpuMode => DaemonResponse::GpuMode(gpu_mode::status()),
         DaemonCommand::SetGpuMode { mode, acknowledge } => match gpu_mode::set(mode, acknowledge) {
             Ok(st) => DaemonResponse::GpuMode(st),
