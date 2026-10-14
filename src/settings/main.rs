@@ -305,7 +305,7 @@ pub(crate) fn start_legion_control() -> Result<(), String> {
         .output()
     {
         Ok(out) if out.status.success() => {
-            log::info!("systemctl start succeeded — waiting for socket");
+            log::info!("systemctl start succeeded, waiting for socket");
             return wait_for_daemon_socket();
         }
         Ok(out) => {
@@ -360,8 +360,8 @@ fn sync_daemon_ui(
 
 fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdate) {
     if !online {
-        banner.set_title("Service offline — fans, profile, and charge need it");
-        banner.set_button_label(Some("Start daemon"));
+        banner.set_title("Service offline. Fans, profile and charge limit need it");
+        banner.set_button_label(Some("Start service"));
         banner.set_revealed(true);
         return;
     }
@@ -369,17 +369,17 @@ fn apply_banner_state(banner: &adw::Banner, online: bool, pending: &PendingUpdat
     match legion_core::comms::query_daemon_version() {
         Ok(v) if v != current_ver => {
             banner.set_title(&format!(
-                "Daemon version mismatch: running v{v}, GUI is v{current_ver}"
+                "Service v{v} doesn't match app v{current_ver}"
             ));
-            banner.set_button_label(Some("Restart daemon"));
+            banner.set_button_label(Some("Restart service"));
             banner.set_revealed(true);
             return;
         }
         Err(_) => {
             banner.set_title(&format!(
-                "Daemon is outdated (legacy pre-v0.2.11, GUI is v{current_ver})"
+                "Service is outdated (app is v{current_ver})"
             ));
-            banner.set_button_label(Some("Restart daemon"));
+            banner.set_button_label(Some("Restart service"));
             banner.set_revealed(true);
             return;
         }
@@ -447,9 +447,9 @@ fn apply_charge_limit_blocking(pct: u32) -> Result<(), String> {
     match send_command(DaemonCommand::SetChargeLimit(pct)) {
         Ok(DaemonResponse::Ok) => Ok(()),
         Ok(DaemonResponse::Error(e)) => Err(e),
-        Err(e) if is_version_skew_error(&e) => Err("Service outdated — reinstall to update".into()),
+        Err(e) if is_version_skew_error(&e) => Err("Service outdated, reinstall to update".into()),
         _ => legion_core::battery::set_charge_limit_pct(pct)
-            .map_err(|_| "Service outdated — reinstall to update".into()),
+            .map_err(|_| "Service outdated, reinstall to update".into()),
     }
 }
 
@@ -619,12 +619,12 @@ fn build_ui(app: &adw::Application) {
         (
             include_bytes!("../../data/icons/cpu.svg"),
             "Performance",
-            "Features (boost, GPU mode) · Tuning · Power limits · Saved profiles",
+            "Features (boost, GPU mode), Tuning, Power limits, Saved profiles",
         ),
         (
             include_bytes!("../../data/icons/cooling.svg"),
             "Cooling",
-            "All fans at a glance — per-fan tuning and reset",
+            "All fans at a glance, per-fan tuning and reset",
         ),
         (
             include_bytes!("../../data/icons/lighting.svg"),
@@ -642,7 +642,7 @@ fn build_ui(app: &adw::Application) {
             "Self-checks, speakers, RGB repair and logs",
         ),
         (
-            include_bytes!("../../data/icons/about.svg"),
+            include_bytes!("../../data/icons/settings.svg"),
             "Settings",
             "Setup, hardware, help",
         ),
@@ -687,7 +687,7 @@ fn build_ui(app: &adw::Application) {
     conn_h.add_css_class("conn-sub");
     conn_h.set_halign(Align::Start);
     conn_h.set_xalign(0.0);
-    tip(&conn_h, "Read-only self-checks and fault scan — details on the Health page");
+    tip(&conn_h, "Read-only self-checks and fault scan, details on the Health page");
     foot_text.append(&conn_h);
     {
         let conn_h = conn_h.clone();
@@ -697,9 +697,9 @@ fn build_ui(app: &adw::Application) {
                 || Ok::<usize, String>(health_issue_count()),
                 "Health check stopped without a result",
                 move |res| match res {
-                    Ok(0) => conn_h.set_text("No issues found"),
+                    Ok(0) => conn_h.set_text("No problems found"),
                     Ok(n) => conn_h.set_text(&format!(
-                        "{n} issue{} on the Health page",
+                        "{n} problem{} on the Health page",
                         if n == 1 { "" } else { "s" }
                     )),
                     Err(_) => conn_h.set_text("Health check unavailable"),
@@ -752,8 +752,8 @@ fn build_ui(app: &adw::Application) {
     header.pack_end(&menu_btn);
     content_toolbar.add_top_bar(&header);
 
-    let banner = adw::Banner::new("Service offline — fans, profile, and charge need it");
-    banner.set_button_label(Some("Start daemon"));
+    let banner = adw::Banner::new("Service offline. Fans, profile and charge limit need it");
+    banner.set_button_label(Some("Start service"));
     banner.set_revealed(false);
     content_toolbar.add_top_bar(&banner);
     content_toolbar.set_content(Some(&stack));
@@ -830,9 +830,9 @@ fn build_ui(app: &adw::Application) {
                         &pending_c,
                     );
                     if online {
-                        toast_ok(&overlay_c, "Daemon online — service ready");
+                        toast_ok(&overlay_c, "Service is running");
                     } else {
-                        toast_error(&overlay_c, "Daemon offline — start legion-control.service");
+                        toast_error(&overlay_c, "Service is offline. Start legion-control.service");
                     }
                     glib::ControlFlow::Break
                 }
@@ -864,7 +864,7 @@ fn build_ui(app: &adw::Application) {
             }
             return;
         }
-        if banner_b.button_label().as_deref() == Some("Restart daemon") {
+        if banner_b.button_label().as_deref() == Some("Restart service") {
             starting_b.set(true);
             banner_b.set_button_label(Some("Restarting…"));
             let overlay = overlay_banner.clone();
@@ -881,10 +881,10 @@ fn build_ui(app: &adw::Application) {
                 match result {
                     Ok(_) => {
                         sync_daemon_ui(true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending);
-                        toast_ok(&overlay, "Hardware daemon restarted");
+                        toast_ok(&overlay, "Service restarted");
                     }
                     Err(e) => {
-                        banner.set_button_label(Some("Restart daemon"));
+                        banner.set_button_label(Some("Restart service"));
                         toast_error(&overlay, &e);
                     }
                 }
@@ -929,7 +929,7 @@ fn build_ui(app: &adw::Application) {
             glib::timeout_add_local(Duration::from_millis(200), move || match rx.try_recv() {
                 Ok(Ok(())) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     sync_daemon_ui(
                         true, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
                     );
@@ -938,19 +938,19 @@ fn build_ui(app: &adw::Application) {
                 }
                 Ok(Err(e)) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     sync_daemon_ui(
                         false, &dot, &conn_l, &conn_s, &foot, &banner, &gate, &pending,
                     );
                     let overlay_c = overlay.clone();
                     toast_with_button(
                         &overlay,
-                        &format!("Could not start daemon — {e}"),
+                        &format!("Couldn't start the service: {e}"),
                         "Copy fix",
                         8,
                         move || {
                             copy_daemon_fix_cmd();
-                            toast_ok(&overlay_c, "Command copied — paste in a terminal");
+                            toast_ok(&overlay_c, "Command copied, paste in a terminal");
                         },
                     );
                     glib::ControlFlow::Break
@@ -958,7 +958,7 @@ fn build_ui(app: &adw::Application) {
                 Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     starting.set(false);
-                    banner.set_button_label(Some("Start daemon"));
+                    banner.set_button_label(Some("Start service"));
                     glib::ControlFlow::Break
                 }
             });
@@ -1299,12 +1299,12 @@ fn build_ui(app: &adw::Application) {
                 let overlay = overlay_r.clone();
                 toast_with_button(
                     &overlay_r,
-                    "Service offline — start it from the banner",
+                    "Service offline, start it from the banner",
                     "Copy fix",
                     5,
                     move || {
                         copy_daemon_fix_cmd();
-                        toast_ok(&overlay, "Command copied — paste in a terminal");
+                        toast_ok(&overlay, "Command copied, paste in a terminal");
                     },
                 );
             }
@@ -1313,7 +1313,7 @@ fn build_ui(app: &adw::Application) {
     foot.add_controller(foot_click);
     tip(
         &foot,
-        "Shows whether the root legion-control service is reachable — click to check again",
+        "Shows whether the root legion-control service is reachable, click to check again",
     );
 
     // Live daemon status in the sidebar (and banner).
@@ -1416,46 +1416,46 @@ fn apply_conn_status(
         let current_ver = legion_core::update::CURRENT_VERSION;
         match legion_core::comms::query_daemon_version() {
             Ok(v) if v == current_ver => {
-                conn_l.set_text("Connected");
-                conn_s.set_text(&format!("Daemon v{v} ready"));
-                tip(conn_l, "Root legion-control service is reachable and up to date");
+                conn_l.set_text("Service running");
+                conn_s.set_text(&format!("Version {v}"));
+                tip(conn_l, "The background service is running and up to date");
             }
             Ok(v) => {
                 conn_l.set_text("Outdated");
-                conn_s.set_text(&format!("Daemon v{v} (GUI v{current_ver})"));
-                tip(conn_l, "Daemon is older than GUI — restart to update");
+                conn_s.set_text(&format!("Service v{v}, app v{current_ver}"));
+                tip(conn_l, "The service is older than the app. Restart it to update");
             }
             Err(_) => {
                 conn_l.set_text("Outdated");
-                conn_s.set_text(&format!("Legacy daemon (GUI v{current_ver})"));
-                tip(conn_l, "Daemon is pre-v0.2.11 — restart to update");
+                conn_s.set_text(&format!("Old service, app v{current_ver}"));
+                tip(conn_l, "The service is very old. Restart it to update");
             }
         }
         tip(
             conn_s,
             "Fans, profile, charge, and PPT commands can be applied",
         );
-        tip(dot, "Green = daemon online");
+        tip(dot, "Green: service is running");
         tip(
             foot,
             "Root legion-control service is reachable for fans, profile, and charge",
         );
     } else {
         dot.add_css_class("off");
-        conn_l.set_text("Offline");
-        conn_s.set_text("Start legion-control service");
+        conn_l.set_text("Service offline");
+        conn_s.set_text("Start it to continue");
         tip(
             conn_l,
-            "Service offline — fans, profile, and charge need it",
+            "Service offline. Fans, profile and charge limit need it",
         );
         tip(
             conn_s,
-            "Use Start daemon in the banner, or: sudo systemctl enable --now legion-control",
+            "Use Start service in the banner, or: sudo systemctl enable --now legion-control",
         );
-        tip(dot, "Red = daemon offline");
+        tip(dot, "Red: service is offline");
         tip(
             foot,
-            "Service offline — start it from the banner, or: sudo systemctl enable --now legion-control",
+            "Service offline, start it from the banner, or: sudo systemctl enable --now legion-control",
         );
     }
 }
@@ -1683,7 +1683,7 @@ fn run_daemon_command_async(
 ) {
     dispatch_async(
         move || send_command(command),
-        "Daemon request stopped without a result",
+        "Service request stopped without a result",
         done,
     );
 }
@@ -1771,10 +1771,10 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // chips row directly on the page, then a plain boxed-list group — no
     // extra .card wrapper that made this section wider than its neighbours.
     let page = gtk::Box::new(Orientation::Vertical, 10);
-    let group = pref_group("Thermal throttle", None);
+    let group = pref_group("Thermal throttle", Some("Slows the CPU above the limit below"));
     tip(
         &group,
-        "Governor clamps scaling_max_freq when hot — gentle 100 MHz steps near the limit, up to 300 MHz for big overshoots, 1 s poll with sensor-spike smoothing. Restores 7 °C below on a 100 MHz/s ramp. TjMax 95 °C is the hardware failsafe (daemon-native port of cpu-throttle-95.sh, k10temp/coretemp/x86_pkg_temp).",
+        "When the CPU gets hotter than the limit, the service lowers its top speed in small steps, then restores it once it is 7 °C cooler. 95 °C is the chip's own safety limit."
     );
 
     // Bare switch in the group header — the slider below explains itself,
@@ -1783,7 +1783,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     enabled.set_valign(Align::Center);
     tip(
         &enabled,
-        "On = daemon steps scaling_max_freq when temp ≥ max; Off = no clamp",
+        "On: slows the CPU when it reaches the limit. Off: no slowing.",
     );
     group.set_header_suffix(Some(&enabled));
 
@@ -1799,20 +1799,20 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     scale.set_width_request(180);
     value.set_width_chars(6);
     value.set_xalign(1.0);
-    tip(&scale, "Maximum temperature — restore point is 7 °C below");
+    tip(&scale, "Temperature at which the CPU is slowed. Speed returns 7 °C below.");
     tip(&value, "Current threshold");
     // TjMax tick labels under the trough
     let scale_marks = gtk::Box::new(Orientation::Horizontal, 0);
     scale_marks.add_css_class("scale-marks");
     scale_marks.set_hexpand(true);
     scale_marks.set_halign(Align::Fill);
-    let mark_70 = gtk::Label::new(Some("70"));
+    let mark_70 = gtk::Label::new(Some("70 °C"));
     mark_70.set_halign(Align::Start);
     mark_70.set_hexpand(true);
-    let mark_95 = gtk::Label::new(Some("95 TjMax"));
+    let mark_95 = gtk::Label::new(Some("95 °C (chip limit)"));
     mark_95.set_halign(Align::Center);
     mark_95.set_hexpand(true);
-    let mark_98 = gtk::Label::new(Some("98"));
+    let mark_98 = gtk::Label::new(Some("98 °C"));
     mark_98.set_halign(Align::End);
     mark_98.set_hexpand(true);
     scale_marks.append(&mark_70);
@@ -1823,12 +1823,12 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     // below, marks aligned to the slider. (The old ActionRow squeezed the
     // scale into a suffix box next to the title, which overflowed the card
     // edge and duplicated the switch row's state text.)
-    let temp_title = gtk::Label::new(Some("Maximum temperature"));
+    let temp_title = gtk::Label::new(Some("Temperature limit"));
     temp_title.add_css_class("row-title");
     temp_title.set_halign(Align::Start);
     tip(
         &temp_title,
-        "70–98 °C slider — 96–98 °C needs explicit confirmation (above TjMax)",
+        "70 to 98 °C. Values from 96 °C ask for confirmation (above the chip limit).",
     );
     value.set_halign(Align::End);
     value.set_hexpand(true);
@@ -1857,7 +1857,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
             } else {
                 scale_c.add_css_class("muted");
                 row_c.set_sensitive(false);
-                marks_c.set_opacity(0.42);
+                marks_c.set_opacity(0.65);
             }
         })
     };
@@ -1873,13 +1873,13 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     chips.add_css_class("metric-grid");
     let (cpu_temp_chip, cpu_temp_v, cpu_temp_d) = metric_chip_tip(
         "CPU temp",
-        Some("Main CPU temperature (k10temp/coretemp/x86_pkg_temp)"),
+        Some("Main CPU temperature"),
     );
     let (cpu_temp_2_chip, cpu_temp_2_v, cpu_temp_2_d) =
-        metric_chip_tip("CPU CCD 2", Some("Second CPU CCD/core temperature"));
+        metric_chip_tip("Core temp 2", Some("Temperature of the second CPU core group"));
     let (freq_chip, freq_v, freq_d) = metric_chip_tip(
         "Max freq",
-        Some("Current scaling_max_freq across online CPUs"),
+        Some("Current top speed allowed for the CPU"),
     );
     // Secondary detail lines stay out of sight: the numbers are enough.
     for d in [&cpu_temp_d, &cpu_temp_2_d, &freq_d] {
@@ -1996,7 +1996,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     let do_apply_ok = do_apply_cc.clone();
                     confirm_risk(
                         &scale_cc,
-                        "Exceed TjMax 95 °C?",
+                        "Go above the 95 °C chip limit?",
                         THERMAL_TJMAX_WARNING,
                         &format!("Use {max_temp} °C anyway"),
                         move |ok| {
@@ -2059,7 +2059,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
                         tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_v_c.set_text("-");
                         cpu_temp_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_chip_c, 0.0);
                     }
@@ -2068,7 +2068,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_2_d_c.set_text("");
                         tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_v_c.set_text("-");
                         cpu_temp_2_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
@@ -2085,17 +2085,17 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                     }
                 }
                 Ok(DaemonResponse::Error(e)) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&e);
-                    cpu_temp_2_v_c.set_text("—");
-                    freq_v_c.set_text("—");
+                    cpu_temp_2_v_c.set_text("-");
+                    freq_v_c.set_text("-");
                 }
                 Ok(other) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&format!("{other:?}"));
                 }
                 Err(e) => {
-                    cpu_temp_v_c.set_text("—");
+                    cpu_temp_v_c.set_text("-");
                     cpu_temp_d_c.set_text(&e);
                 }
             }
@@ -2124,7 +2124,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                 let apply_mute_ok = apply_mute_c.clone();
                 confirm_risk(
                     row,
-                    "Exceed TjMax 95 °C?",
+                    "Go above the 95 °C chip limit?",
                     THERMAL_TJMAX_WARNING,
                     &format!("Use {max_temp} °C anyway"),
                     move |ok| {
@@ -2208,7 +2208,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_d_c.set_text(if st.active { "throttling" } else { "idle" });
                         tint_temp(&cpu_temp_chip_c, c);
                     } else {
-                        cpu_temp_v_c.set_text("—");
+                        cpu_temp_v_c.set_text("-");
                         cpu_temp_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_chip_c, 0.0);
                     }
@@ -2217,7 +2217,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
                         cpu_temp_2_d_c.set_text("");
                         tint_temp(&cpu_temp_2_chip_c, c);
                     } else {
-                        cpu_temp_2_v_c.set_text("—");
+                        cpu_temp_2_v_c.set_text("-");
                         cpu_temp_2_d_c.set_text("no sensor");
                         tint_temp(&cpu_temp_2_chip_c, 0.0);
                     }
@@ -2319,7 +2319,7 @@ mod tests {
 
     #[test]
     fn offsets_text_formats_uniform_mixed_and_empty() {
-        assert_eq!(offsets_text(&[]), "—");
+        assert_eq!(offsets_text(&[]), "-");
         assert_eq!(offsets_text(&[-15, -15, -15]), "All cores: -15");
         assert_eq!(offsets_text(&[-15, -4, -15]), "Mixed");
     }

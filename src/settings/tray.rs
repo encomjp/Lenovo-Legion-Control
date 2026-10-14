@@ -44,7 +44,7 @@ pub enum Kbd {
 /// jitter in the readings does not cause a D-Bus update every poll.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TrayState {
-    /// Daemon answered the last poll.
+    /// The service answered the last poll.
     pub connected: bool,
     pub profile: Option<String>,
     /// `profile::safe_choices()`.
@@ -128,39 +128,39 @@ pub fn format_tooltip(s: &TrayState) -> (String, String) {
     if !s.connected {
         return (
             "Legion Control".into(),
-            "Daemon not reachable — click to open".into(),
+            "Service not reachable. Click to open".into(),
         );
     }
     let title = match &s.profile {
-        Some(p) => format!("Legion Control · {}", friendly_profile(p)),
+        Some(p) => format!("Legion Control, {}", friendly_profile(p)),
         None => "Legion Control".into(),
     };
     let mut lines = Vec::new();
     if let Some(t) = s.cpu_temp {
         lines.push(match s.cpu_watts {
-            Some(w) => format!("CPU  {t} °C · {w} W"),
-            None => format!("CPU  {t} °C"),
+            Some(w) => format!("CPU: {t} °C, {w} W"),
+            None => format!("CPU: {t} °C"),
         });
     }
     if s.gpu_present {
         lines.push(match (s.gpu_temp, &s.gpu_mode) {
-            (None, _) => "GPU  asleep".to_string(),
-            (Some(t), Some(m)) => format!("GPU  {t} °C · {m}"),
-            (Some(t), None) => format!("GPU  {t} °C"),
+            (None, _) => "GPU: asleep".to_string(),
+            (Some(t), Some(m)) => format!("GPU: {t} °C, {m}"),
+            (Some(t), None) => format!("GPU: {t} °C"),
         });
     }
     if let Some(rpm) = s.fan_rpm {
         let mode = if s.fans_auto { "auto" } else { "manual" };
-        lines.push(if rpm == 0 && s.fans_auto {
-            "Fans  idle (fan stop)".to_string()
+        lines.push(if rpm == 0 {
+            "Fans: Idle".to_string()
         } else {
-            format!("Fans  {rpm} rpm · {mode}")
+            format!("Fans: {rpm} rpm, {mode}")
         });
     }
     if let Some(p) = s.battery_pct {
         lines.push(match s.charge_limit {
-            Some(l) => format!("Battery  {p} % · limit {l} %"),
-            None => format!("Battery  {p} %"),
+            Some(l) => format!("Battery: {p}%, limit {l}%"),
+            None => format!("Battery: {p}%"),
         });
     }
     (title, lines.join("\n"))
@@ -185,7 +185,7 @@ fn kbd_label(spectrum: bool, level: u8, max: u8) -> String {
 pub fn build_menu(s: &TrayState) -> Vec<Entry> {
     let mut out = Vec::new();
     if !s.connected {
-        out.push(Entry::Header("Daemon not running".into()));
+        out.push(Entry::Header("Service not running".into()));
         out.push(Entry::Separator);
     } else {
         if !s.profile_choices.is_empty() {
@@ -278,19 +278,22 @@ pub fn build_menu(s: &TrayState) -> Vec<Entry> {
         }
         if let Some(limit) = s.charge_limit {
             out.push(Entry::Sub {
-                label: format!("Charge limit: {limit} %"),
+                label: format!("Charge limit: {limit}%"),
                 entries: vec![Entry::Radio {
                     options: CHARGE_LIMITS
                         .iter()
-                        .map(|&l| (format!("{l} %"), Action::ChargeLimit(l)))
+                        .map(|&l| (format!("{l}%"), Action::ChargeLimit(l)))
                         .collect(),
                     selected: CHARGE_LIMITS.iter().position(|&l| l == limit),
                 }],
             });
         }
         if let Some(on) = s.fn_lock {
+            if !matches!(out.last(), Some(Entry::Separator) | None) {
+                out.push(Entry::Separator);
+            }
             out.push(Entry::Check {
-                label: "Fn Lock".into(),
+                label: "Fn lock".into(),
                 checked: on,
                 action: Action::FnLock(!on),
             });
@@ -301,6 +304,7 @@ pub fn build_menu(s: &TrayState) -> Vec<Entry> {
         label: "Open Legion Control".into(),
         action: Action::Show,
     });
+    out.push(Entry::Separator);
     out.push(Entry::Item {
         label: "Quit".into(),
         action: Action::Quit,
@@ -708,10 +712,10 @@ mod tests {
     #[test]
     fn tooltip_matches_design() {
         let (t, d) = format_tooltip(&state());
-        assert_eq!(t, "Legion Control · Balanced");
+        assert_eq!(t, "Legion Control, Balanced");
         assert_eq!(
             d,
-            "CPU  64 °C · 45 W\nGPU  48 °C · Hybrid\nFans  1800 rpm · auto\nBattery  97 % · limit 100 %"
+            "CPU: 64 °C, 45 W\nGPU: 48 °C, Hybrid\nFans: 1800 rpm, auto\nBattery: 97%, limit 100%"
         );
     }
 
@@ -723,12 +727,36 @@ mod tests {
         s.cpu_watts = None;
         s.charge_limit = None;
         let (_, d) = format_tooltip(&s);
-        assert!(d.contains("CPU  64 °C\n"));
-        assert!(d.contains("GPU  asleep"));
-        assert!(d.contains("1800 rpm · manual"));
-        assert!(d.ends_with("Battery  97 %"));
+        assert!(d.contains("CPU: 64 °C\n"));
+        assert!(d.contains("GPU: asleep"));
+        assert!(d.contains("1800 rpm, manual"));
+        assert!(d.ends_with("Battery: 97%"));
         s.gpu_present = false;
         assert!(!format_tooltip(&s).1.contains("GPU"));
+    }
+
+    #[test]
+    fn tooltip_fans_idle() {
+        let mut s = state();
+        s.fan_rpm = Some(0);
+        assert!(format_tooltip(&s).1.contains("Fans: Idle"));
+        s.fans_auto = false;
+        assert!(format_tooltip(&s).1.contains("Fans: Idle"));
+        assert!(!format_tooltip(&s).1.contains("  "));
+    }
+
+    #[test]
+    fn menu_separates_fn_lock_and_quit() {
+        let m = build_menu(&state());
+        let fn_idx = m
+            .iter()
+            .position(|e| matches!(e, Entry::Check { .. }))
+            .unwrap();
+        assert_eq!(m[fn_idx - 1], Entry::Separator);
+        // No two separators in a row.
+        assert!(!m
+            .windows(2)
+            .any(|w| w[0] == Entry::Separator && w[1] == Entry::Separator));
     }
 
     #[test]
@@ -776,21 +804,22 @@ mod tests {
             [
                 "Fans: Automatic",
                 "Keyboard light: High",
-                "Charge limit: 100 %"
+                "Charge limit: 100%"
             ]
         );
         assert!(m.contains(&Entry::Check {
-            label: "Fn Lock".into(),
+            label: "Fn lock".into(),
             checked: false,
             action: Action::FnLock(true)
         }));
         assert_eq!(
-            m[m.len() - 2],
+            m[m.len() - 3],
             Entry::Item {
                 label: "Open Legion Control".into(),
                 action: Action::Show
             }
         );
+        assert_eq!(m[m.len() - 2], Entry::Separator);
         assert_eq!(
             m[m.len() - 1],
             Entry::Item {

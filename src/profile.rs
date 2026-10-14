@@ -277,7 +277,7 @@ const PPT_IDS: &[(&str, &str, LimitUnit)] = &[
 /// Only attributes with a real firmware min/max range are exposed — some BIOS
 /// builds list cTGP/PPAB but reject writes (EINVAL).
 const GPU_PPT_IDS: &[(&str, &str, LimitUnit)] = &[
-    ("gpu_nv_ac_offset", "GPU AC power target", LimitUnit::Watts),
+    ("gpu_nv_ac_offset", "GPU power on AC", LimitUnit::Watts),
     ("gpu_nv_ctgp", "GPU cTGP", LimitUnit::Watts),
     ("gpu_nv_ppab", "GPU PPAB", LimitUnit::Watts),
     ("gpu_nv_cpu_boost", "GPU↔CPU boost", LimitUnit::Watts),

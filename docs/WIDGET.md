@@ -21,7 +21,6 @@ kde-widget/
         └── ui/
             ├── main.qml
             ├── BatteryBar.qml
-            ├── ActionButton.qml
             ├── AppMark.qml
             ├── MiniCard.qml
             ├── QuickControl.qml
@@ -42,11 +41,11 @@ The root item in [`kde-widget/package/contents/ui/main.qml`](../kde-widget/packa
 
 ### Compact panel representation
 
-A chip with a power-mode colour dot (Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Extreme/Custom `#8E5BD6`), the CPU temperature (red at 90 °C and above) and a fan glyph. It lays out as a row in horizontal panels and a column in vertical panels (`Plasmoid.formFactor === PlasmaCore.Types.Vertical`). Click or Enter toggles the popup; mouse-wheel scrolling cycles power modes. The `ToolTipArea` shows mode, CPU/dGPU temperatures and power, fan RPM with auto/manual, and battery.
+A chip with a power-mode colour dot (Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Max power/Custom `#8E5BD6`), the CPU temperature (red at 90 °C and above) and a fan glyph. It lays out as a row in horizontal panels and a column in vertical panels (`Plasmoid.formFactor === PlasmaCore.Types.Vertical`). Click or Enter toggles the popup; mouse-wheel scrolling cycles power modes. The `ToolTipArea` shows mode, CPU/dGPU temperatures and power, fan RPM with auto/manual, and battery.
 
 ### Expanded representation
 
-Header (brand mark drawn by `AppMark.qml`, not an SVG `Image`, plus health text), the power-mode segmented control, CPU/GPU/Fans `MiniCard`s (optional sparklines), CPU/GPU fan rows with auto/manual badges, the battery bar with charge limit, Keyboard light and Fans auto buttons, a GPU mode label with the Fn Lock switch, and the **Open Legion Control** button. `ActionButton` is keyboard-focusable and exposes button/radio accessibility roles.
+Header (brand mark drawn by `AppMark.qml`, not an SVG `Image`, plus health text), the power-mode segmented control, CPU/GPU/Fans `MiniCard`s (optional sparklines), CPU/GPU fan rows with auto/manual badges, the battery bar with charge limit, Keyboard light and Fans auto buttons, a GPU mode label with the Fn Lock switch, and the **Open Legion Control** button. `Buttons are plain PlasmaComponents buttons.
 
 ## Polling and data contract
 
@@ -95,7 +94,7 @@ All writes go through [`legion-command.sh`](../kde-widget/package/contents/ui/le
 
 | Widget action | Command |
 | --- | --- |
-| Power mode segment / scroll on the panel chip | `set-profile quiet\|balanced\|performance\|max-power` (Extreme = `max-power`; `custom` is shown but not selectable) |
+| Power mode segment / scroll on the panel chip | `set-profile quiet\|balanced\|performance\|max-power` (Max power = `max-power`; `custom` is shown but not selectable) |
 | Fan row click | `set-fan 1\|2 0\|3000\|3500\|4000\|4500` (cycles presets; 0 = auto) |
 | Fans · auto | `fan-auto` |
 | Charge limit | `charge-limit 100\|80\|60` (click the limit text to cycle) |

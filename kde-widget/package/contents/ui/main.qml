@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.15
 import org.kde.plasma.plasmoid 2.0
 import org.kde.kirigami 2.20 as Kirigami
 import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasma5support 2.0 as Plasma5Support
 
 PlasmoidItem {
@@ -53,10 +54,10 @@ PlasmoidItem {
 
     // Power modes: label, legion-cli argument and accent colour.
     readonly property var modes: [
-        { label: "Quiet",       short: "Quiet",    cli: "quiet",       color: "#3A7BD5" },
-        { label: "Balanced",    short: "Balanced", cli: "balanced",    color: "#C8102E" },
-        { label: "Performance", short: "Perf.",    cli: "performance", color: "#E0892B" },
-        { label: "Extreme",     short: "Extreme",  cli: "max-power",   color: "#8E5BD6" }
+        { label: "Quiet",       cli: "quiet",       color: "#3A7BD5" },
+        { label: "Balanced",    cli: "balanced",    color: "#C8102E" },
+        { label: "Performance", cli: "performance", color: "#E0892B" },
+        { label: "Max power",   cli: "max-power",   color: "#8E5BD6" }
     ]
     readonly property string profileKey: profileKeyOf(profile)
     readonly property int modeIndex: {
@@ -65,14 +66,14 @@ PlasmoidItem {
         return -1
     }
     readonly property string modeLabel: modeIndex >= 0 ? modes[modeIndex].label
-        : profileKey === "custom" ? "Custom" : (profile === "--" ? "—" : profile)
-    // Custom (and unknown) profiles share the Extreme/Custom purple.
+        : profileKey === "custom" ? "Custom" : (profile === "--" ? "-" : profile)
+    // Custom (and unknown) profiles share the Max power purple.
     readonly property color modeColor: modeIndex >= 0 ? modes[modeIndex].color
         : (profile === "--" ? Kirigami.Theme.disabledTextColor : "#8E5BD6")
 
     readonly property bool cpuHot: parseFloat(root.cpuTemp) >= 90
-    readonly property string healthText: !daemonOnline ? "service offline" : cpuHot ? "running hot" : "healthy"
-    readonly property color healthColor: !daemonOnline ? "#E67E22" : cpuHot ? "#E5484D" : "#7FD69E"
+    readonly property string healthText: !daemonOnline ? "Service offline" : cpuHot ? "Running hot" : "Healthy"
+    readonly property color healthColor: !daemonOnline ? Kirigami.Theme.neutralTextColor : cpuHot ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
 
     function compactHardwareName(name, fallback) {
         var value = (name || "").replace(/\s+/g, " ").trim()
@@ -95,10 +96,10 @@ PlasmoidItem {
     }
 
     function isNum(v) { return v !== "--" && v !== "" && !isNaN(parseFloat(v)) }
-    function tempText(v) { return isNum(v) && parseFloat(v) >= 0 ? Math.round(parseFloat(v)) + "°" : "—" }
+    function tempText(v) { return isNum(v) && parseFloat(v) >= 0 ? Math.round(parseFloat(v)) + "°" : "-" }
     function fanIsAuto(target) { return target === 0 }
     function rpmShort(v) {
-        if (!isNum(v)) return "—"
+        if (!isNum(v)) return "-"
         var n = parseInt(v)
         return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n)
     }
@@ -170,15 +171,15 @@ PlasmoidItem {
 
     // Plasma 6: the compact representation hosts a ToolTipArea (below);
     // these helpers feed it.
-    readonly property string tooltipTitle: "Legion Control · " + modeLabel
+    readonly property string tooltipTitle: "Legion Control, " + modeLabel
 
     function tooltipSubText() {
         var l = []
         if (!daemonOnline) l.push("Service offline")
-        if (isNum(cpuTemp)) l.push("CPU: " + cpuTemp + "°C" + (isNum(cpuPower) ? " · " + cpuPower + " W" : ""))
-        if (isNum(gpuTemp) && parseFloat(root.gpuTemp) >= 0) l.push("dGPU: " + gpuTemp + "°C" + (isNum(gpuPower) && parseFloat(gpuPower) >= 0 ? " · " + gpuPower + " W" : ""))
-        if (isNum(fanCpu)) l.push("Fan CPU: " + fanCpu + " RPM" + (fanIsAuto(fanCpuTarget) ? " (auto)" : " (manual)"))
-        if (isNum(fanGpu)) l.push("Fan GPU: " + fanGpu + " RPM" + (fanIsAuto(fanGpuTarget) ? " (auto)" : " (manual)"))
+        if (isNum(cpuTemp)) l.push("CPU: " + cpuTemp + " °C" + (isNum(cpuPower) ? ", " + cpuPower + " W" : ""))
+        if (isNum(gpuTemp) && parseFloat(root.gpuTemp) >= 0) l.push("GPU: " + gpuTemp + " °C" + (isNum(gpuPower) && parseFloat(gpuPower) >= 0 ? ", " + gpuPower + " W" : ""))
+        if (isNum(fanCpu)) l.push("CPU fan: " + fanCpu + " rpm" + (fanIsAuto(fanCpuTarget) ? " (auto)" : " (manual)"))
+        if (isNum(fanGpu)) l.push("GPU fan: " + fanGpu + " rpm" + (fanIsAuto(fanGpuTarget) ? " (auto)" : " (manual)"))
         if (isNum(batteryPct)) l.push("Battery: " + batteryPct + "%" + (batWatts !== "--" && batWatts !== "0.0" ? " (" + batWatts + " W)" : ""))
         l.push("Scroll to change power mode")
         return l.join("\n")
@@ -256,10 +257,9 @@ PlasmoidItem {
                 Text {
                     Layout.alignment: Qt.AlignCenter
                     text: root.tempText(root.cpuTemp)
-                    font.family: "monospace"
                     font.pixelSize: compact.vertical ? Math.max(9, Math.round(Kirigami.Theme.defaultFont.pixelSize * 0.9)) : Kirigami.Theme.defaultFont.pixelSize
                     font.weight: Font.DemiBold
-                    color: root.cpuHot ? "#E5484D" : Kirigami.Theme.textColor
+                    color: root.cpuHot ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                 }
                 Kirigami.Icon {
                     Layout.alignment: Qt.AlignCenter
@@ -286,11 +286,11 @@ PlasmoidItem {
         id: fullRoot
         readonly property int pad: 16
         Layout.minimumWidth: Kirigami.Units.gridUnit * 19
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 21
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 24
         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         Layout.minimumHeight: col.implicitHeight + pad * 2
         Layout.preferredHeight: col.implicitHeight + pad * 2
-        implicitWidth: Kirigami.Units.gridUnit * 21
+        implicitWidth: Kirigami.Units.gridUnit * 24
         implicitHeight: col.implicitHeight + pad * 2
 
         ColumnLayout {
@@ -325,36 +325,23 @@ PlasmoidItem {
                 }
             }
 
-            // Power mode segmented control
-            Rectangle {
+            // Power mode: one plain button per mode, the active one highlighted
+            RowLayout {
                 Layout.fillWidth: true
-                implicitHeight: 48
-                radius: 10
-                color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.08)
-                Accessible.role: Accessible.RadioButton
+                spacing: 6
+                Accessible.role: Accessible.Grouping
                 Accessible.name: "Power mode"
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    spacing: 4
-                    Repeater {
-                        model: root.modes
-                        delegate: ActionButton {
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: 1
-                            Layout.fillHeight: true
-                            radio: true
-                            radiusPx: 7
-                            // Short text fits the 4-up segment; full name for a11y.
-                            text: modelData.short
-                            Accessible.name: modelData.label
-                            checked: root.modeIndex === index
-                            activeColor: modelData.color
-                            enabled: root.daemonOnline
-                            onClicked: root.setMode(index)
-                        }
+                Repeater {
+                    model: root.modes
+                    delegate: PlasmaComponents.Button {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 1
+                        text: modelData.label
+                        highlighted: root.modeIndex === index
+                        enabled: root.daemonOnline
+                        onClicked: root.setMode(index)
                     }
                 }
             }
@@ -364,9 +351,9 @@ PlasmoidItem {
                 visible: !root.daemonOnline
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                text: "Service offline — mode, fan and charge controls are unavailable."
+                text: "Service offline. Mode, fan and charge controls are unavailable."
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: "#E67E22"
+                color: Kirigami.Theme.neutralTextColor
             }
 
             // CPU / GPU / Fans mini cards
@@ -402,54 +389,23 @@ PlasmoidItem {
             // Fan rows: live RPM + auto/manual; click to step through presets
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 4
+                spacing: 6
                 Repeater {
                     model: [
                         { name: "CPU fan", fan: 1 },
                         { name: "GPU fan", fan: 2 }
                     ]
-                    delegate: ActionButton {
+                    delegate: PlasmaComponents.Button {
                         required property var modelData
                         readonly property int target: modelData.fan === 1 ? root.fanCpuTarget : root.fanGpuTarget
                         readonly property string rpm: modelData.fan === 1 ? root.fanCpu : root.fanGpu
                         Layout.fillWidth: true
-                        implicitHeight: 34
-                        fillColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
                         enabled: root.daemonOnline
-                        text: ""
-                        Accessible.name: modelData.name + " " + (root.isNum(rpm) ? rpm + " RPM" : "unknown") + ", " + (target === 0 ? "auto" : "manual " + target + " RPM") + ". Activate to change."
+                        text: modelData.name + ": "
+                            + (!root.isNum(rpm) ? "unknown" : (Number(rpm) === 0 && target === 0 ? "Idle" : rpm + " rpm"))
+                            + (target === 0 ? ", auto" : ", manual " + (target / 1000).toFixed(1) + "k")
+                        Accessible.description: "Activate to change the fan speed"
                         onClicked: root.cycleFan(modelData.fan)
-                        contentItem: RowLayout {
-                            spacing: 8
-                            Text {
-                                text: modelData.name
-                                Layout.leftMargin: 10
-                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 1
-                                color: Kirigami.Theme.textColor
-                                opacity: 0.8
-                            }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                text: !root.isNum(rpm) ? "—" : (Number(rpm) === 0 && target === 0 ? "Idle" : rpm + " RPM")
-                                font.family: "monospace"
-                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 1
-                                color: Kirigami.Theme.textColor
-                            }
-                            Rectangle {
-                                Layout.rightMargin: 8
-                                Layout.preferredWidth: modeTag.implicitWidth + 12
-                                Layout.preferredHeight: 18
-                                radius: 9
-                                color: target === 0 ? Qt.rgba(0.5, 0.84, 0.62, 0.18) : Qt.rgba(0.88, 0.54, 0.17, 0.25)
-                                Text {
-                                    id: modeTag
-                                    anchors.centerIn: parent
-                                    text: target === 0 ? "auto" : "manual " + (target / 1000).toFixed(1) + "k"
-                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize - 1
-                                    color: target === 0 ? "#7FD69E" : "#E0892B"
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -473,34 +429,18 @@ PlasmoidItem {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
-                            text: "Battery " + (root.isNum(root.batteryPct) ? root.batteryPct + " %" : "—")
-                                + (root.batteryStatus === "Charging" ? " · charging" : "")
+                            text: "Battery " + (root.isNum(root.batteryPct) ? root.batteryPct + "%" : "-")
+                                + (root.batteryStatus === "Charging" ? ", charging" : "")
                             font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                             color: Kirigami.Theme.textColor
                         }
                         Item { Layout.fillWidth: true }
-                        QQC2.AbstractButton {
+                        PlasmaComponents.Button {
                             id: limitBtn
                             enabled: root.daemonOnline
-                            hoverEnabled: true
-                            focusPolicy: Qt.StrongFocus
-                            text: "limit " + (root.chargeLimit === "" ? "100" : root.chargeLimit) + " %"
+                            text: "Limit " + (root.chargeLimit === "" ? "100" : root.chargeLimit) + "%"
                             Accessible.name: "Charge limit " + (root.chargeLimit === "" ? "100" : root.chargeLimit) + " percent. Activate to change."
                             onClicked: root.cycleChargeLimit()
-                            padding: 2
-                            contentItem: Text {
-                                text: limitBtn.text
-                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize + 1
-                                color: root.chargeLimit !== "" ? "#F5A524" : Kirigami.Theme.textColor
-                                opacity: limitBtn.hovered ? 1.0 : 0.65
-                                font.underline: limitBtn.hovered
-                            }
-                            background: Rectangle {
-                                color: "transparent"
-                                border.width: limitBtn.visualFocus ? 2 : 0
-                                border.color: Kirigami.Theme.focusColor
-                                radius: 4
-                            }
                         }
                     }
                     Rectangle {
@@ -512,7 +452,7 @@ PlasmoidItem {
                             width: parent.width * Math.max(0, Math.min(100, parseInt(root.batteryPct) || 0)) / 100
                             height: parent.height
                             radius: 3
-                            color: (parseInt(root.batteryPct) || 0) <= 15 && root.batteryStatus !== "Charging" ? "#E5484D" : "#2E9E5B"
+                            color: (parseInt(root.batteryPct) || 0) <= 15 && root.batteryStatus !== "Charging" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
                             Behavior on width { NumberAnimation { duration: 300 } }
                         }
                     }
@@ -523,22 +463,18 @@ PlasmoidItem {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
-                ActionButton {
+                PlasmaComponents.Button {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
-                    text: "Keyboard light" + (root.kbdLevel === "" ? "" : " · " + (parseInt(root.kbdLevel) > 0 ? "on" : "off"))
-                    fillColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
-                    borderColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.18)
+                    text: "Keyboard light" + (root.kbdLevel === "" ? "" : ", " + (parseInt(root.kbdLevel) > 0 ? "on" : "off"))
                     enabled: root.daemonOnline && root.kbdLevel !== ""
                     onClicked: root.toggleKeyboard()
                 }
-                ActionButton {
+                PlasmaComponents.Button {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
-                    text: "Fans · " + (root.fanIsAuto(root.fanCpuTarget) && root.fanIsAuto(root.fanGpuTarget) ? "auto" : "set auto")
-                    fillColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
-                    borderColor: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.18)
-                    enabled: root.daemonOnline
+                    text: "Set fans to automatic"
+                    enabled: root.daemonOnline && !(root.fanIsAuto(root.fanCpuTarget) && root.fanIsAuto(root.fanGpuTarget))
                     onClicked: root.allFansAuto()
                 }
             }
@@ -560,20 +496,19 @@ PlasmoidItem {
                 QQC2.Switch {
                     id: fnSwitch
                     visible: root.fnLock !== ""
-                    text: "Fn Lock"
+                    text: "Fn lock"
                     checked: root.fnLock === "on"
                     enabled: root.daemonOnline
                     onToggled: root.setFnLock(checked)
-                    Accessible.name: "Fn Lock"
+                    Accessible.name: "Fn lock"
                 }
             }
 
             // Open the full app
-            ActionButton {
+            PlasmaComponents.Button {
                 Layout.fillWidth: true
                 text: "Open Legion Control"
-                solid: true
-                activeColor: root.accentRed
+                highlighted: true
                 onClicked: executable.exec("bash " + root.scriptPath("legion-settings.sh"))
             }
         }

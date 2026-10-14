@@ -4,11 +4,11 @@ Live telemetry and quick controls for Lenovo Legion laptops.
 
 ## Features
 - **Panel chip (compact view)** — power-mode colour dot, CPU temperature and a fan glyph. Works in horizontal and vertical panels. Click to expand, **scroll to cycle power modes**, hover for a tooltip with mode, temperatures, fans and battery.
-- **Power mode selector** — Quiet / Balanced / Performance / Extreme (max-power) segmented control. Mode colours: Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Extreme/Custom `#8E5BD6`.
+- **Power mode selector** — Quiet / Balanced / Performance / Max power (max-power) segmented control. Mode colours: Quiet `#3A7BD5`, Balanced `#C8102E`, Performance `#E0892B`, Max power/Custom `#8E5BD6`.
 - **CPU / GPU / Fans cards** — temperature, power, optional sparklines, GPU (MUX) mode label.
 - **Fan rows** — live RPM for CPU and GPU fans with an `auto` / `manual` badge; click a row to step through manual presets (auto, 3000, 3500, 4000, 4500 RPM). "Fans · auto" restores all fans to auto.
 - **Battery bar** with charge limit (click the limit to cycle 100 / 80 / 60 %).
-- **Quick buttons** — Keyboard light on/off, Fans auto, **Fn Lock** switch (shown only when `legion-cli fn-lock` reports support), read-only **GPU mode** label (`legion-cli gpu-mode`), and **Open Legion Control**.
+- **Quick buttons** — Keyboard light on/off, Set fans to automatic, **Fn lock** switch (shown only when `legion-cli fn-lock` reports support), read-only **GPU mode** label (`legion-cli gpu-mode`), and **Open Legion Control**.
 - **Configurable** — refresh interval, CPU/GPU/Fans cards toggle, sparklines toggle.
 - **Theme-aware** — Kirigami colours, adapts to Breeze Dark / Light.
 
@@ -54,7 +54,6 @@ kde-widget/
             ├── main.qml          # PlasmoidItem: compact chip + expanded popup
             ├── AppMark.qml       # Brand mark drawn in QML (no SVG file dependency)
             ├── MiniCard.qml      # CPU / GPU / Fans card
-            ├── ActionButton.qml  # Segmented-mode / quick-action button
             ├── Sparkline.qml     # Mini history chart used inside cards
             ├── legion-poll.sh    # Sensor poller (status/profile/battery/kbd)
             ├── legion-info.sh    # One-shot: CPU/GPU names, Fn Lock, GPU mode
@@ -62,4 +61,4 @@ kde-widget/
             ├── legion-settings.sh
             └── icons/
 ```
-`BatteryBar`, `PerfCard`, `QuickControl`, `SectionCard`, `HistoryGraph` and `_test_full.qml` are legacy components from the previous layout and are no longer used by `main.qml`.
+`BatteryBar`, `PerfCard`, `QuickControl`, `SectionCard` and `HistoryGraph` are legacy components from the previous layout and are no longer used by `main.qml`.

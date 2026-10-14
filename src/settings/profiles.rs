@@ -59,6 +59,7 @@ pub(crate) fn apply_profile_blocking(
 }
 
 pub(crate) fn apply_profile(
+    name: &str,
     p: &legion_core::config::UserProfile,
     overlay: &adw::ToastOverlay,
     toast: bool,
@@ -66,7 +67,7 @@ pub(crate) fn apply_profile(
 ) {
     legion_core::config::apply_profile_to_config(p);
 
-    let ok_msg = format!("Restored · {}", friendly_profile(&p.platform_profile));
+    let ok_msg = format!("Loaded “{name}”");
     let (sender, receiver) = mpsc::channel();
     let p = p.clone();
     std::thread::spawn(move || {
@@ -82,7 +83,7 @@ pub(crate) fn apply_profile(
                         toast_ok(&overlay, &ok_msg);
                     } else {
                         overlay.add_toast(adw::Toast::new(&format!(
-                            "{} error(s) applying profile",
+                            "Couldn't apply profile ({} errors)",
                             errors.len()
                         )));
                     }
@@ -106,7 +107,7 @@ pub(crate) fn profile_summary(p: &legion_core::config::UserProfile) -> String {
         }
     };
     format!(
-        "{} · fans {}/{}/{} · brightness {} · limit {}% · rgb {}",
+        "{}, fans {}/{}/{}, brightness {}, limit {}%, rgb {}",
         friendly_profile(&p.platform_profile),
         fan(p.fan1),
         fan(p.fan2),
@@ -135,17 +136,17 @@ pub(crate) fn build_profiles_page(
     tip(&entry, "Type a name, then Save current");
     let entry_row = adw::ActionRow::builder()
         .title("Name")
-        .subtitle("Snapshots power mode, limits, fans, lighting and charge limit")
+        .subtitle("Saves power mode, limits, fans, lighting and charge limit")
         .activatable(false)
         .build();
     tip(
         &entry_row,
-        "Presets are stored in ~/.config/legion-control/",
+        "Profiles are stored in ~/.config/legion-control/",
     );
     entry_row.add_suffix(&entry);
     let save = primary_button_tip(
         "Save current",
-        Some("Snapshot power mode, PPT, fans, lighting, and charge limit"),
+        Some("Saves power mode, power limits, fans, lighting and charge limit"),
     );
     save.set_valign(Align::Center);
     entry_row.add_suffix(&save);
@@ -177,7 +178,7 @@ pub(crate) fn build_profiles_page(
             if names.is_empty() {
                 let empty = adw::ActionRow::builder()
                     .title("Nothing saved yet")
-                    .subtitle("Name your current setup above and press Save current")
+                    .subtitle("Name your current setup above, then press Save current")
                     .activatable(false)
                     .build();
                 list_group.add(&empty);
@@ -191,7 +192,7 @@ pub(crate) fn build_profiles_page(
                 let short = legion_core::config::get_named_profile(&name)
                     .map(|p| {
                         format!(
-                            "{} · charge limit {}%",
+                            "{}, charge limit {}%",
                             friendly_profile(&p.platform_profile),
                             p.charge_limit
                         )
@@ -221,10 +222,10 @@ pub(crate) fn build_profiles_page(
                     let refresh = refresh.clone();
                     load.connect_clicked(move |_| {
                         let Some(p) = legion_core::config::get_named_profile(&name) else {
-                            toast_error(&overlay, "Profile missing");
+                            toast_error(&overlay, "That profile is missing");
                             return;
                         };
-                        apply_profile(&p, &overlay, true, true);
+                        apply_profile(&name, &p, &overlay, true, true);
                         legion_core::config::update(|cfg| cfg.active_profile = name.clone());
                         let choices = choices_slot.borrow();
                         if let Some(i) = choices.iter().position(|c| c == &p.platform_profile) {
@@ -284,7 +285,7 @@ pub(crate) fn build_profiles_page(
             );
         }
         legion_core::config::save_named_profile(&name);
-        toast_ok(&overlay, &format!("Saved profile “{name}”"));
+        toast_ok(&overlay, &format!("Saved “{name}”"));
         entry_s.set_text("");
         rebuild_s();
     };

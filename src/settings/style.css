@@ -686,3 +686,22 @@ scale slider {
     font-size: 0.82rem;
     opacity: 0.7;
 }
+
+/* ── C: performance, settings ── */
+.slider-row {
+    padding: 8px 12px;
+    border-top: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.slider-row:first-child {
+    border-top: none;
+}
+
+.bordered-combo > box > menubutton > button,
+.bordered-combo > box > box > menubutton > button,
+.bordered-combo menubutton > button {
+    background: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.30);
+    border-radius: 8px;
+    box-shadow: none;
+}

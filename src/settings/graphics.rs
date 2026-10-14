@@ -19,7 +19,7 @@ fn fetch_status_blocking() -> Result<GpuModeStatus, String> {
         Ok(DaemonResponse::GpuMode(st)) => Ok(st),
         Ok(DaemonResponse::Error(e)) => Err(e),
         Ok(_) => Err("Unexpected response from service".into()),
-        Err(e) if is_version_skew_error(&e) => Err("Service outdated — reinstall to update".into()),
+        Err(e) if is_version_skew_error(&e) => Err("Service is outdated. Reinstall to update".into()),
         Err(e) => Err(e),
     }
 }
@@ -31,6 +31,7 @@ struct GpuModeUi {
     banner: adw::Banner,
     combo: adw::ComboRow,
     active_row: adw::ActionRow,
+    active_value: gtk::Label,
     note_row: adw::ActionRow,
     setup_row: adw::ActionRow,
     setup_btn: gtk::Button,
@@ -58,15 +59,22 @@ impl GpuModeUi {
             }
             self.combo.set_sensitive(st.model_verified);
             self.combo.set_subtitle(&if st.model_verified {
-                format!("Firmware setting · applies at boot · {}", st.backend)
+                "Firmware setting, applies after restart".to_string()
             } else {
-                "Unverified on this model — switching is disabled".to_string()
+                "Not verified on this model, so switching is off".to_string()
             });
-            self.active_row
-                .set_subtitle(&format!("{} (detected from the boot GPU)", name(st.active)));
+            tip(
+                &self.combo,
+                &format!(
+                    "Hybrid: the integrated GPU drives the panel and the NVIDIA GPU renders on demand. \
+                     dGPU only: the panel is wired straight to the NVIDIA GPU. Applies after a restart.\n\nBackend: {}",
+                    st.backend
+                ),
+            );
+            self.active_value.set_label(name(st.active));
             self.banner.set_revealed(st.reboot_pending);
             self.banner.set_title(&format!(
-                "Reboot required — {} takes effect on the next boot",
+                "Restart required. {} applies on the next boot",
                 name(st.configured)
             ));
             self.note_row.set_visible(!st.detail.is_empty());
@@ -82,7 +90,7 @@ impl GpuModeUi {
             self.setup_row.set_visible(true);
             self.setup_btn.set_visible(false);
             self.setup_row.set_subtitle(&format!(
-                "Unverified on this model ({}). Use BIOS setup (F2) to change the GPU mode.",
+                "Not verified on this model ({}). Change the GPU mode in the BIOS (F2).",
                 st.model_note
             ));
         } else if st.needs_acpi_call() {
@@ -95,9 +103,9 @@ impl GpuModeUi {
             self.setup_row.set_visible(true);
             self.setup_btn.set_visible(st.acpi_call_installed);
             self.setup_row.set_subtitle(if st.acpi_call_installed {
-                "GPU mode switching needs the acpi_call kernel module. Load it for this boot (one password prompt); nothing is changed until you pick a mode."
+                "Switching needs the acpi_call component. Load it for this session; nothing changes until you pick a mode."
             } else {
-                "GPU mode switching needs the acpi_call kernel module, which is not installed. Install your distribution's acpi_call package (e.g. acpi_call, acpi_call-dkms), then reopen this page."
+                "Switching needs the acpi_call component, which isn't installed. Install your distribution's acpi_call package, then reopen this page."
             });
         } else {
             self.group.set_visible(false);
@@ -129,7 +137,7 @@ pub(crate) fn build_gpu_mode_group(
     group.set_visible(false);
     gate.track(&group);
 
-    let banner = adw::Banner::new("Reboot required");
+    let banner = adw::Banner::new("Restart required");
     banner.set_revealed(false);
     group.add(&banner);
 
@@ -142,14 +150,22 @@ pub(crate) fn build_gpu_mode_group(
         .model(&model)
         .visible(false)
         .build();
+    combo.add_css_class("bordered-combo");
     tip(
         &combo,
         "Hybrid: the integrated GPU drives the panel and the NVIDIA GPU renders on demand. \
-         dGPU only: the MUX wires the panel straight to the NVIDIA GPU. Applies after a reboot.",
+         dGPU only: the MUX wires the panel straight to the NVIDIA GPU. Applies after a restart.",
     );
     group.add(&combo);
 
-    let active_row = property_row("Active this boot", "—", None);
+    let active_row = adw::ActionRow::builder()
+        .title("Active this boot")
+        .activatable(false)
+        .build();
+    let active_value = gtk::Label::new(Some("Unknown"));
+    active_value.add_css_class("dim-label");
+    active_value.set_valign(Align::Center);
+    active_row.add_suffix(&active_value);
     active_row.set_visible(false);
     group.add(&active_row);
 
@@ -171,6 +187,7 @@ pub(crate) fn build_gpu_mode_group(
         banner,
         combo: combo.clone(),
         active_row,
+        active_value,
         note_row,
         setup_row,
         setup_btn: setup_btn.clone(),
@@ -223,7 +240,7 @@ pub(crate) fn build_gpu_mode_group(
                 row,
                 &format!("Switch GPU mode to {}?", target.label()),
                 legion_core::gpu_mode::RISK_TEXT,
-                "Switch and reboot later",
+                "Switch, restart later",
                 move |ok| {
                     if !ok {
                         return;
@@ -244,14 +261,14 @@ pub(crate) fn build_gpu_mode_group(
                                     toast_ok(
                                         &overlay,
                                         &format!(
-                                            "GPU mode set to {} — reboot to apply",
+                                            "GPU mode set to {}. Restart to apply",
                                             target.label()
                                         ),
                                     );
                                 }
                                 Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
                                 Err(e) if is_version_skew_error(&e) => {
-                                    toast_error(&overlay, "Service outdated — reinstall to update")
+                                    toast_error(&overlay, "Service is outdated. Reinstall to update")
                                 }
                                 Err(e) => toast_error(&overlay, &e),
                                 Ok(_) => toast_error(&overlay, "Unexpected response from service"),

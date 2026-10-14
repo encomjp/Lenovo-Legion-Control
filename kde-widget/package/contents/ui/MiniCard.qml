@@ -39,7 +39,6 @@ Rectangle {
         }
         Text {
             text: card.value
-            font.family: "monospace"
             font.pixelSize: Math.round(Kirigami.Theme.defaultFont.pixelSize * 1.6)
             color: Kirigami.Theme.textColor
             Layout.fillWidth: true

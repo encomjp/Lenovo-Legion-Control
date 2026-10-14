@@ -15,9 +15,10 @@ pub(crate) struct CurveOptimizerUi {
     persistence_suppress: Rc<Cell<bool>>,
 }
 
+#[cfg(test)]
 pub(crate) fn offsets_text(values: &[i16]) -> String {
     match values.first().copied() {
-        None => "—".into(),
+        None => "-".into(),
         Some(first) if values.iter().all(|value| *value == first) => {
             format!("All cores: {first}")
         }
@@ -62,23 +63,17 @@ pub(crate) fn update_curve_optimizer_ui(
         .copied()
         .filter(|v| status.boot_baseline.iter().all(|x| x == v));
     let prev = status.previous.filter(|p| Some(*p) != current_val);
-    // Keep this unambiguous: the applied offset is live (the slider mirrors
-    // it); baseline/history are only context. Never print the same number
-    // twice — "reset -4 · previous -4" reads like the value reverted.
-    let mut subtitle = format!(
-        "Applied {}",
-        offsets_text(&status.current).replace("All cores: ", "")
-    );
+    let minus = |v: i16| v.to_string().replace('-', "\u{2212}");
+    let mut subtitle = match current_val {
+        Some(c) => format!("Applied {} on all cores", minus(c)),
+        None => "Applied, different per core".to_string(),
+    };
     if let Some(b) = baseline_val {
         if Some(b) != current_val {
-            subtitle.push_str(&format!(" · Reset goes back to {b}"));
+            subtitle.push_str(&format!(", Reset returns to {}", minus(b)));
         }
     }
-    if let Some(p) = prev {
-        if Some(p) != baseline_val {
-            subtitle.push_str(&format!(" · was {p} before"));
-        }
-    }
+    let _ = prev;
     ui.status_row.set_subtitle(&subtitle);
     ui.offset_scale
         .set_range(status.minimum as f64, status.maximum as f64);
@@ -111,16 +106,16 @@ pub(crate) fn update_curve_optimizer_persistence_ui(
     ui.startup_switch.set_sensitive(!status.recovery_blocked);
     if status.recovery_blocked {
         ui.startup_switch
-            .set_subtitle("Disabled after an interrupted validation window");
+            .set_subtitle("Turned off after an interrupted test");
     } else if status.enabled {
         ui.startup_switch.set_subtitle(&format!(
-            "Applies {} after a 60-second delay",
+            "Applies {} one minute after startup",
             status.offset
         ));
     } else {
         // Hint flow: must Apply & verify first before enabling startup.
         let hint = if ui.offset_scale.is_sensitive() {
-            "Off · Apply and verify an offset first"
+            "Off, apply an offset first"
         } else {
             "Off"
         };
@@ -210,11 +205,11 @@ pub(crate) fn build_curve_optimizer(
     let group = pref_group("Curve Optimizer", None);
     tip(
         &group,
-        "All-core CPU offset via ryzen_smu. Unstable values can crash the system.",
+        "Lowers CPU voltage on all cores. Unstable values can crash the system.",
     );
 
     let status_row = adw::ActionRow::builder()
-        .title("AMD backend")
+        .title("AMD tuning driver")
         .subtitle("Checking…")
         .activatable(false)
         .build();
@@ -237,7 +232,7 @@ pub(crate) fn build_curve_optimizer(
         &offset_row,
         "All-core Curve Optimizer offset (-30..0, more negative = more undervolt)",
     );
-    let offset_value = gtk::Label::new(Some("—"));
+    let offset_value = gtk::Label::new(Some("-"));
     offset_value.add_css_class("numeric");
     offset_value.add_css_class("scale-value");
     offset_value.set_width_chars(4);
@@ -272,7 +267,7 @@ pub(crate) fn build_curve_optimizer(
         .valign(Align::Center)
         .sensitive(false)
         .build();
-    apply_button.add_css_class("destructive-action");
+    apply_button.add_css_class("suggested-action");
     apply_button.add_css_class("pill-btn");
     actions_row.add_suffix(&reset_button);
     actions_row.add_suffix(&apply_button);
@@ -483,7 +478,7 @@ pub(crate) fn build_cpu_power_page(
         let empty_group = pref_group("Power limits", None);
         let row = adw::ActionRow::builder()
             .title("Not available on this model")
-            .subtitle("Configurable CPU/GPU wattage targets (PPT/TGP) are not exposed by this system's ACPI/WMI firmware.")
+            .subtitle("This laptop's firmware doesn't expose power limits.")
             .activatable(false)
             .build();
         empty_group.add(&row);
@@ -493,74 +488,80 @@ pub(crate) fn build_cpu_power_page(
     let mode = legion_core::profile::current();
     let custom_active = mode == "custom";
 
-    // Guidance row — live wording, one clear way out.
-    let guide = pref_group("Power limits", None);
-    tip(
-        &guide,
-        if custom_active {
-            "Custom mode is active — the watt sliders below are live and write through the daemon"
+    // One group: a status row with the way out, then the sliders.
+    let preview = pref_group("Custom power limits", None);
+    let lock_title = |custom: bool| {
+        if custom {
+            "Custom mode is on"
         } else {
-            "CPU PPT and GPU power sliders are edited on Home — they unlock when Power mode is Custom"
-        },
-    );
+            "Sliders unlock in Custom mode"
+        }
+    };
+    let lock_tip = |custom: bool| {
+        if custom {
+            "Drag a slider to apply it."
+        } else {
+            "Firmware only accepts power limits in Custom mode. Switch to Custom to edit them."
+        }
+    };
     let lock_row = adw::ActionRow::builder()
-        .title(if custom_active {
-            "Custom mode is active — sliders below are live"
-        } else {
-            "Locked outside Custom mode"
-        })
+        .title(lock_title(custom_active))
         .activatable(false)
         .build();
-    tip(
-        &lock_row,
-        "Firmware PPT/attribute writes are only accepted while the EC is in Custom mode — other modes use firmware defaults",
-    );
-    let go_home = go_home.clone();
+    tip(&lock_row, lock_tip(custom_active));
+    let _ = go_home;
     let overlay = toast_overlay.clone();
-    let go_home_btn = primary_button_tip(
-        "Switch to Custom & edit",
-        Some("Switches Power mode to Custom (unlocks the watt sliders on Home) and jumps there"),
+    let go_custom_btn = primary_button_tip(
+        "Switch to Custom",
+        Some("Switches Power mode to Custom and unlocks the sliders"),
     );
-    go_home_btn.connect_clicked(move |_| {
-        // One click instead of three: apply the Custom profile here, then
-        // jump Home where the sliders are unlocked. The Home mode picker
-        // syncs itself from firmware on its next poll.
-        go_home("overview", "Home");
+    go_custom_btn.set_visible(!custom_active);
+    lock_row.add_suffix(&go_custom_btn);
+    preview.add(&lock_row);
+    let sliders_box = gtk::Box::new(Orientation::Vertical, 0);
+    preview.add(&sliders_box);
+    {
         let overlay = overlay.clone();
-        run_daemon_command_async(DaemonCommand::SetProfile("custom".into()), move |result| {
-            match result {
-                Ok(DaemonResponse::Ok) => {
-                    legion_core::config::remember_platform_profile("custom");
-                    toast_ok(&overlay, "Power mode → Custom — sliders unlocked");
+        go_custom_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            let btn = btn.clone();
+            let overlay = overlay.clone();
+            run_daemon_command_async(DaemonCommand::SetProfile("custom".into()), move |result| {
+                btn.set_sensitive(true);
+                match result {
+                    Ok(DaemonResponse::Ok) => {
+                        legion_core::config::remember_platform_profile("custom");
+                        toast_ok(&overlay, "Power mode set to Custom");
+                    }
+                    Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
+                    Err(e) => toast_error(&overlay, &e),
+                    _ => {}
                 }
-                Ok(DaemonResponse::Error(e)) => toast_error(&overlay, &e),
-                Err(e) => toast_error(&overlay, &e),
-                _ => {}
-            }
+            });
         });
-    });
-    lock_row.add_suffix(&go_home_btn);
-    guide.add(&lock_row);
-    page.append(&guide);
-
-    // Same sliders Home shows — live here while Custom is active, greyed out
-    // otherwise. Values mirror the firmware read.
-    let preview = pref_group("Custom watts", None);
-    tip(
-        &preview,
-        if custom_active {
-            "Custom-mode limits — drag a slider to apply (writes go through the daemon)"
-        } else {
-            "Read-only mirror of the Custom-mode limits — switch to Custom to edit here or on Home"
-        },
-    );
+    }
     let suppress = Rc::new(Cell::new(false));
     for lim in legion_core::profile::all_ppt_limits() {
-        let row = adw::ActionRow::builder()
-            .title(lim.label)
-            .activatable(false)
-            .build();
-        tip(&row, &format!("{} · {}", lim.label, lim.range_label()));
+        let range = format!("{}, {}", lim.label, lim.range_label());
+        // Fixed-width title column so every track starts at the same x.
+        let row = gtk::Box::new(Orientation::Horizontal, 12);
+        row.add_css_class("slider-row");
+        let titles = gtk::Box::new(Orientation::Vertical, 0);
+        titles.set_size_request(210, -1);
+        titles.set_valign(Align::Center);
+        let title = gtk::Label::new(Some(lim.label));
+        title.set_xalign(0.0);
+        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        titles.append(&title);
+        if let Some(sub) = limit_subtitle(lim.id) {
+            let sub = gtk::Label::new(Some(sub));
+            sub.set_xalign(0.0);
+            sub.add_css_class("dim-label");
+            sub.add_css_class("caption");
+            sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            titles.append(&sub);
+        }
+        tip(&row, &range);
         let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
@@ -577,11 +578,12 @@ pub(crate) fn build_cpu_power_page(
         let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adj));
         scale.set_draw_value(false);
         scale.set_hexpand(true);
-        scale.set_width_request(160);
-        tip(&scale, &format!("{} · {}", lim.label, lim.range_label()));
-        row.add_suffix(&scale);
-        row.add_suffix(&val);
-        preview.add(&row);
+        scale.set_valign(Align::Center);
+        tip(&scale, &range);
+        row.append(&titles);
+        row.append(&scale);
+        row.append(&val);
+        sliders_box.append(&row);
         // Wire edits through the same Custom-gate Home uses: auto-switch to
         // Custom on first drag, then queue the firmware-attribute write.
         let overlay = toast_overlay.clone();
@@ -613,9 +615,42 @@ pub(crate) fn build_cpu_power_page(
             }
         });
     }
-    preview.set_sensitive(custom_active);
+    sliders_box.set_sensitive(custom_active);
     page.append(&preview);
+    // Follow the firmware mode (it can change from Home, the tray or a profile).
+    {
+        let lock_row = lock_row.downgrade();
+        let sliders = sliders_box.downgrade();
+        let btn = go_custom_btn.downgrade();
+        glib::timeout_add_seconds_local(2, move || {
+            let (Some(lock_row), Some(sliders), Some(btn)) =
+                (lock_row.upgrade(), sliders.upgrade(), btn.upgrade())
+            else {
+                return glib::ControlFlow::Break;
+            };
+            let on = legion_core::profile::current() == "custom";
+            if sliders.is_sensitive() != on {
+                sliders.set_sensitive(on);
+                btn.set_visible(!on);
+                lock_row.set_title(lock_title(on));
+                tip(&lock_row, lock_tip(on));
+            }
+            glib::ControlFlow::Continue
+        });
+    }
     page
+}
+
+/// One short plain subtitle per power slider.
+fn limit_subtitle(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "ppt_pl1_spl" => "Sustained CPU power",
+        "ppt_pl2_sppt" => "A few seconds",
+        "ppt_pl3_fppt" => "Under a second",
+        "cpu_temp" => "Firmware cutoff, not Thermal throttle",
+        "gpu_temp" => "Firmware cutoff for the GPU",
+        _ => return None,
+    })
 }
 
 pub(crate) fn autostart_enabled() -> bool {
@@ -689,7 +724,7 @@ pub(crate) fn build_cpu_tuning_page(
     let autostart_row = adw::SwitchRow::builder()
         .title("Launch at login")
         .subtitle(if autostart_enabled() {
-            "On · opens on login"
+            "On, opens on login"
         } else {
             "Off"
         })
@@ -697,14 +732,14 @@ pub(crate) fn build_cpu_tuning_page(
         .build();
     tip(
         &autostart_row,
-        "Adds Legion Control to Desktop autostart (~/.config/autostart) so tuning controls are available after login. System daemon (fans/profile) starts separately via systemd.",
+        "Adds Legion Control to your desktop autostart (~/.config/autostart). The background service starts on its own.",
     );
     let autostart_toast = toast_overlay.clone();
     autostart_row.connect_active_notify(move |row| {
         let on = row.is_active();
         match set_autostart(on) {
             Ok(()) => {
-                row.set_subtitle(if on { "On · opens on login" } else { "Off" });
+                row.set_subtitle(if on { "On, opens on login" } else { "Off" });
                 toast_ok(
                     &autostart_toast,
                     if on {
@@ -723,7 +758,7 @@ pub(crate) fn build_cpu_tuning_page(
     let autostart_group = pref_group("Startup", None);
     tip(
         &autostart_group,
-        "Login autostart for the Settings app (user session). The root daemon autostarts via systemd regardless.",
+        "Opens this app when you log in. The background service starts on its own.",
     );
     autostart_group.add(&autostart_row);
     // Order: chips-first tuning (thermal) already has its own chips on top internally;
@@ -763,6 +798,15 @@ pub(crate) fn build_stability_group(toast_overlay: &adw::ToastOverlay) -> adw::P
 }
 
 pub(crate) const STABILITY_TEST_SECS: u64 = 300;
+
+fn minutes_text(secs: u64) -> String {
+    let m = secs / 60;
+    if m == 1 {
+        "1 minute".into()
+    } else {
+        format!("{m} minutes")
+    }
+}
 
 pub(crate) enum StabilityEvent {
     Progress(u64),
@@ -870,12 +914,14 @@ pub(crate) fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk
         Rc::new(move |on: bool| {
             if on {
                 run_button.set_label("Stop");
-                run_button.add_css_class("destructive-action");
                 status.set_title("Testing…");
-                status.set_subtitle("5:00 remaining");
+                status.set_subtitle(&format!(
+                    "{}:{:02} remaining",
+                    STABILITY_TEST_SECS / 60,
+                    STABILITY_TEST_SECS % 60
+                ));
             } else {
                 run_button.set_label("Start test");
-                run_button.remove_css_class("destructive-action");
             }
         })
     };
@@ -917,12 +963,15 @@ pub(crate) fn build_cpu_stability_page(toast_overlay: &adw::ToastOverlay) -> gtk
                             status.set_title("Stopped");
                             status.set_subtitle("No result");
                         } else if errors == 0 {
-                            status.set_title("Quick test passed");
-                            status.set_subtitle("No errors found in this 5-minute run");
+                            status.set_title("Test passed");
+                            status.set_subtitle(&format!(
+                                "No errors in {}",
+                                minutes_text(STABILITY_TEST_SECS)
+                            ));
                             toast_ok(&overlay, "CPU stability test passed");
                         } else {
                             status.set_title("Errors detected");
-                            status.set_subtitle("Reset the undervolt and test again");
+                            status.set_subtitle("Reset the offset and test again");
                             toast_error(&overlay, "CPU stability errors detected");
                         }
                         return glib::ControlFlow::Break;
@@ -944,8 +993,8 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
     if legion_core::cpu::smt_available() {
         let active = legion_core::cpu::smt_active().unwrap_or(true);
         let smt = adw::SwitchRow::builder()
-            .title("Hyperthreading (SMT)")
-            .subtitle(legion_core::cpu::smt_summary())
+            .title("Hyperthreading")
+            .subtitle(smt_text(active, legion_core::cpu::logical_cpus()))
             .active(active)
             .build();
         tip(&smt, "On = all logical CPUs. Off = one thread per core.");
@@ -967,7 +1016,7 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
                     row,
                     "Turn off hyperthreading?",
                     &format!(
-                        "Disabling SMT halves logical CPUs (about {n} → {half} on this laptop).\n\n\
+                        "Disabling SMT halves logical CPUs (about {n} to {half} on this laptop).\n\n\
                          A few games gain 1% lows; most workloads get slower. Changes apply immediately."
                     ),
                     "Disable SMT",
@@ -995,7 +1044,7 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
     if legion_core::cpu::boost_available() {
         let on = legion_core::cpu::boost_enabled().unwrap_or(true);
         let boost = adw::SwitchRow::builder()
-            .title("CPU boost (turbo)")
+            .title("CPU boost")
             .subtitle(if on {
                 "Frequency boost allowed"
             } else {
@@ -1005,7 +1054,7 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
             .build();
         tip(
             &boost,
-            "Off caps turbo for cooler/quieter running. On allows boost under load — runs hotter.",
+            "Off caps turbo for cooler/quieter running. On allows boost under load, runs hotter.",
         );
         let overlay = toast_overlay.clone();
         let guard = Rc::new(Cell::new(false));
@@ -1022,8 +1071,8 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
                 let guard = guard_n.clone();
                 confirm_risk(
                     row,
-                    "Boost + Max Power",
-                    "CPU boost with Max Power / Extreme pushes the highest clocks and heat. \
+                    "Boost with Max power",
+                    "CPU boost with Max power pushes the highest clocks and heat. \
                      Only continue with strong cooling.",
                     "Enable",
                     move |ok| {
@@ -1047,6 +1096,10 @@ pub(crate) fn build_cpu_features(toast_overlay: &adw::ToastOverlay) -> adw::Pref
     }
 
     group
+}
+
+fn smt_text(active: bool, threads: usize) -> String {
+    format!("{}, {threads} threads", if active { "On" } else { "Off" })
 }
 
 pub(crate) fn apply_smt(
@@ -1081,10 +1134,7 @@ pub(crate) fn apply_smt(
                 {
                     guard_c.set(true);
                     row_c.set_active(active);
-                    row_c.set_subtitle(&format!(
-                        "{} · {logical_cpus} logical CPUs",
-                        if active { "On" } else { "Off" }
-                    ));
+                    row_c.set_subtitle(&smt_text(active, logical_cpus as usize));
                     guard_c.set(false);
                 }
             });
@@ -1101,7 +1151,7 @@ pub(crate) fn apply_smt(
         Err(e) if is_version_skew_error(&e) => {
             revert(
                 &overlay,
-                "Update the control service for SMT (reinstall daemon)",
+                "Update the background service to use this (reinstall)",
             );
         }
         Err(e) => revert(&overlay, &e),
@@ -1141,7 +1191,7 @@ pub(crate) fn apply_boost(
         Err(e) if is_version_skew_error(&e) => {
             revert(
                 &overlay,
-                "Update the control service for boost (reinstall daemon)",
+                "Update the background service to use this (reinstall)",
             );
         }
         Err(e) => revert(&overlay, &e),
@@ -1152,7 +1202,7 @@ pub(crate) fn apply_boost(
 // ─── Cooling ────────────────────────────────────────────────────────────────
 
 pub(crate) const THERMAL_TJMAX_WARNING: &str = "\
-96–98 °C is above the 9955HX3D TjMax (95 °C). Sustained use above TjMax can \
-degrade the CPU or reduce its lifespan.
+96 to 98 °C is above this CPU's 95 °C safety limit. Running that hot for long \
+can damage the CPU or shorten its life.
 
 Only continue if you accept this risk.";

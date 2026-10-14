@@ -98,11 +98,11 @@ pub(crate) fn remove_kde_widget() -> Result<(), String> {
 }
 
 pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("Updates &amp; Releases", None);
+    let group = pref_group("Updates", None);
     let row = adw::ActionRow::builder()
-        .title("Version &amp; Updates")
+        .title("Version")
         .subtitle(format!(
-            "Installed: v{} · Checking…",
+            "Installed: v{}, Checking…",
             legion_core::update::CURRENT_VERSION
         ))
         .activatable(false)
@@ -118,18 +118,15 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
         .valign(Align::Center)
         .build();
     check_btn.add_css_class("pill-btn");
-    check_btn.set_size_request(156, -1);
     check_btn.set_halign(Align::Fill);
     check_btn.set_hexpand(true);
     let update_btn = primary_button_tip(
         "Update now",
         Some("Download and install the matching release without opening a browser"),
     );
-    update_btn.set_size_request(156, -1);
     update_btn.set_halign(Align::Fill);
     update_btn.set_hexpand(true);
-    update_btn.set_sensitive(false);
-    update_btn.remove_css_class("suggested-action");
+    update_btn.set_visible(false);
 
     actions.append(&check_btn);
     actions.append(&update_btn);
@@ -174,12 +171,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                             *latest.borrow_mut() = Some(info.clone());
                             if info.is_newer {
                                 let can_apply = legion_core::update::can_apply(&info);
-                                update_btn.set_sensitive(can_apply);
-                                if can_apply {
-                                    update_btn.add_css_class("suggested-action");
-                                } else {
-                                    update_btn.remove_css_class("suggested-action");
-                                }
+                                update_btn.set_visible(can_apply);
                                 row.set_subtitle(&format!(
                                     "New version available: v{} (installed: v{})",
                                     info.version,
@@ -193,8 +185,7 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                                     prompt_update_dialog(&info);
                                 }
                             } else {
-                                update_btn.set_sensitive(false);
-                                update_btn.remove_css_class("suggested-action");
+                                update_btn.set_visible(false);
                                 row.set_subtitle(&format!(
                                     "Up to date (v{} is the latest release)",
                                     legion_core::update::CURRENT_VERSION
@@ -205,9 +196,9 @@ pub(crate) fn build_updates_section(toast_overlay: &adw::ToastOverlay) -> adw::P
                             }
                         }
                         Err(e) => {
-                            update_btn.set_sensitive(false);
+                            update_btn.set_visible(false);
                             row.set_subtitle(&format!(
-                                "Installed: v{} · Update check failed: {e}",
+                                "Installed: v{}, Update check failed: {e}",
                                 legion_core::update::CURRENT_VERSION
                             ));
                             if interactive {
@@ -276,7 +267,7 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     release.set_vexpand(true);
 
     let version = gtk::Label::new(Some(&format!(
-        "v{}  →  v{}",
+        "v{} to v{}",
         legion_core::update::CURRENT_VERSION,
         info.version
     )));
@@ -354,7 +345,7 @@ pub(crate) fn prompt_update_dialog(info: &legion_core::update::ReleaseInfo) {
     let is_source_with_appimage =
         kind == legion_core::update::InstallKind::Source && info.appimage.is_some();
     let (action, appimage_btn) = if is_source_with_appimage {
-        let a = primary_button_tip("Build from source", Some("Rebuilds locally — 2-4 min"));
+        let a = primary_button_tip("Build from source", Some("Rebuilds locally, 2-4 min"));
         let b = gtk::Button::with_label("Use AppImage");
         b.set_tooltip_text(Some("Download AppImage (10s) instead of building"));
         b.add_css_class("pill-btn");
@@ -541,7 +532,7 @@ fn begin_in_app_update_with_kind(
                         .building_tail()
                         .map(|s| s.to_string())
                         .or_else(|| tail_c.borrow().clone())
-                        .unwrap_or_else(|| "cargo — 2-4 min on first build".into());
+                        .unwrap_or_else(|| "cargo, 2-4 min on first build".into());
                     bar.set_text(Some(&display));
                 }
                 legion_core::update::UpdatePhase::Installing => {
@@ -645,7 +636,7 @@ pub(crate) fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw
         } else {
             "Install widget"
         },
-        Some("Installs the bundled widget with kpackagetool6 — no root password needed"),
+        Some("Installs the bundled widget with kpackagetool6, no root password needed"),
     );
     actions.append(&preview);
     actions.append(&remove);
@@ -752,7 +743,7 @@ pub(crate) fn build_diagnostics_section(
 ) -> (adw::PreferencesGroup, Rc<Cell<bool>>, adw::SwitchRow) {
     // No long disclosure paragraph here — the switch subtitle and hover tips
     // carry what matters, and the boxed list holds only actionable rows.
-    let group = pref_group("Alpha diagnostics (anonymous)", None);
+    let group = pref_group("Diagnostics (anonymous)", None);
 
     // Live consent mirror — updated by the switch handler below, read by the
     // Send-now gating, and handed to show_welcome_if_needed by the caller.
@@ -764,7 +755,7 @@ pub(crate) fn build_diagnostics_section(
         .build();
     tip(
         &share_row,
-        "Opt-out switch — telemetry is on by default · turn off to stop automatic sending · Send now requires this to be ON",
+        "On by default. Turn off to stop automatic sending. Send now needs this on.",
     );
     group.add(&share_row);
 
@@ -777,7 +768,6 @@ pub(crate) fn build_diagnostics_section(
     let send_btn = gtk::Button::with_label("Send now");
     send_btn.set_valign(Align::Center);
     send_btn.add_css_class("pill-btn");
-    send_btn.set_size_request(110, -1);
     send_btn.set_halign(Align::Center);
     tip(
         &send_btn,
@@ -852,7 +842,7 @@ pub(crate) fn build_diagnostics_section(
                     btn_inner.set_sensitive(consent_done.get());
                     btn_inner.set_label("Send now");
                     match result {
-                        Ok(_) => toast_info(&overlay, "Diagnostics sent — thank you!"),
+                        Ok(_) => toast_info(&overlay, "Diagnostics sent. Thank you!"),
                         Err(error) => toast_error(&overlay, &error),
                     }
                 },
@@ -864,23 +854,23 @@ pub(crate) fn build_diagnostics_section(
 }
 
 pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
-    let group = pref_group("First-time setup", None);
+    let group = pref_group("Components", None);
 
     let daemon_active = std::path::Path::new(legion_core::comms::SYSTEM_SOCKET).exists();
     let current_ver = legion_core::update::CURRENT_VERSION;
     let daemon_ver_opt = legion_core::comms::query_daemon_version().ok();
     let (subtitle, is_mismatch, is_up_to_date) = if !daemon_active {
-        ("Inactive".to_string(), false, false)
+        ("Not running".to_string(), false, false)
     } else {
         match &daemon_ver_opt {
-            Some(v) if v == current_ver => (format!("Active (v{v})"), false, true),
+            Some(v) if v == current_ver => (format!("Running, v{v}"), false, true),
             Some(v) => (
-                format!("Active (v{v} — outdated; restart to update to v{current_ver})"),
+                format!("Running, v{v}, outdated. Restart to get v{current_ver}"),
                 true,
                 false,
             ),
             None => (
-                format!("Active (legacy pre-v0.2.11 — restart to update to v{current_ver})"),
+                format!("Running, old version. Restart to get v{current_ver}"),
                 true,
                 false,
             ),
@@ -888,7 +878,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     };
 
     let daemon_row = adw::ActionRow::builder()
-        .title("Hardware control daemon")
+        .title("Background service")
         .subtitle(&subtitle)
         .activatable(false)
         .build();
@@ -896,7 +886,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     let daemon_suffix = gtk::Box::new(Orientation::Horizontal, 8);
     daemon_suffix.set_valign(Align::Center);
     let daemon_button = secondary_button_tip(
-        if is_mismatch { "Restart daemon" } else { "Enable" },
+        if is_mismatch { "Restart service" } else { "Enable" },
         Some("Uses a narrowly scoped PolicyKit helper; no shell command is accepted"),
     );
     let daemon_pill = status_pill_tip("Enabled", "ok", Some("legion-control.service is active and up to date"));
@@ -923,11 +913,11 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
         let pill = pill.clone();
         run_setup_helper("enable-daemon", move |result| match result {
             Ok(_) => {
-                row.set_subtitle(&format!("Active (v{})", legion_core::update::CURRENT_VERSION));
+                row.set_subtitle(&format!("Running, v{}", legion_core::update::CURRENT_VERSION));
                 suffix.remove(&button);
                 pill.set_text("Enabled");
                 suffix.append(&pill);
-                toast_ok(&overlay, "Hardware daemon updated and restarted");
+                toast_ok(&overlay, "Service updated and restarted");
             }
             Err(error) => {
                 button.set_label("Retry");
@@ -939,8 +929,8 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
 
     let smu_installed = std::path::Path::new("/sys/kernel/ryzen_smu_drv").is_dir();
     let smu_row = adw::ActionRow::builder()
-        .title("AMD tuning backend")
-        .subtitle("Checking backend…")
+        .title("AMD tuning driver")
+        .subtitle("Checking…")
         .activatable(false)
         .build();
     {
@@ -951,7 +941,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
                     "Installed".to_string()
                 }
                 Ok(DaemonResponse::CurveOptimizer(status)) => status.reason,
-                _ if smu_installed => "Driver loaded".into(),
+                _ if smu_installed => "Installed".into(),
                 _ => "Optional".into(),
             };
             smu_row_c.set_subtitle(&smu_status);
@@ -971,7 +961,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
     let smu_pill = status_pill_tip(
         "Installed",
         "ok",
-        Some("ryzen_smu driver is loaded — Curve Optimizer is available on the CPU page"),
+        Some("The ryzen_smu driver is loaded, so Curve Optimizer is available on the Performance page"),
     );
     smu_actions.append(&remove_smu);
     if smu_installed {
@@ -1005,7 +995,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
                 remove.set_sensitive(true);
                 toast_ok(
                     &overlay,
-                    "AMD tuning backend installed — open CPU to review it",
+                    "AMD tuning driver installed",
                 );
             }
             Err(error) => {
@@ -1031,7 +1021,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
                 row.set_subtitle("Optional");
                 install.set_label("Install");
                 install.set_sensitive(true);
-                toast_ok(&overlay, "AMD tuning backend removed");
+                toast_ok(&overlay, "AMD tuning driver removed");
             }
             Err(error) => {
                 remove.set_sensitive(true);
@@ -1065,7 +1055,7 @@ pub(crate) fn build_about_pages(
     let startup = pref_group("Startup", None);
     let restore_sw = adw::SwitchRow::builder()
         .title("Restore last session on launch")
-        .subtitle("Re-apply power mode, fans, charge limit and lighting when the app opens")
+        .subtitle("Re-applies power mode, fans, charge limit and lighting")
         .active(legion_core::config::get().restore_on_launch)
         .build();
     tip(
@@ -1096,7 +1086,7 @@ pub(crate) fn build_about_pages(
         .build();
     tip(
         &report_row,
-        "Opens https://github.com/encomjp/Lenovo-Legion-Control/issues/new — report bugs or request features",
+        "Opens https://github.com/encomjp/Lenovo-Legion-Control/issues/new, report bugs or request features",
     );
     report_row.connect_activated(|_| {
         open_uri("https://github.com/encomjp/Lenovo-Legion-Control/issues/new");
@@ -1112,13 +1102,9 @@ pub(crate) fn build_about_pages(
         .title("Donate")
         .activatable(true)
         .build();
-    donate_row.add_prefix(&mono_icon(
-        include_bytes!("../../data/icons/donate.svg"),
-        20,
-    ));
     tip(
         &donate_row,
-        "Opens the PayPal donate page — optional support for continued development",
+        "Opens the PayPal donate page, optional support for continued development",
     );
     donate_row.connect_activated(|_| {
         open_uri("https://www.paypal.com/donate/?hosted_button_id=H4SCC24R8KS4A");
@@ -1132,9 +1118,9 @@ pub(crate) fn build_about_pages(
 
     help_page.append(&help);
 
-    let legal = pref_group("Legal notice", None);
+    let legal = pref_group("Affiliation", None);
     legal.add(&property_row(
-        "Not Lenovo",
+        "Not affiliated with Lenovo",
         "Unofficial community tool",
         Some("Not affiliated with, endorsed by, or recommended by Lenovo. Use at your own risk."),
     ));
@@ -1157,7 +1143,7 @@ pub(crate) fn build_about_pages(
         "Unknown".into()
     };
     let match_s = if info.profile_matched {
-        format!("Yes · {}", info.profile_source)
+        format!("Yes, {}", info.profile_source)
     } else {
         info.profile_source.clone()
     };
@@ -1173,7 +1159,7 @@ pub(crate) fn build_about_pages(
             .iter()
             .map(|f| format!("{} {}–{} RPM", f.title, f.min_rpm, f.max_rpm))
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(", ")
     };
     let ppt_s = if info.capabilities.ppt_attrs.is_empty() {
         "None writable".into()
@@ -1195,7 +1181,7 @@ pub(crate) fn build_about_pages(
         (
             "Machine type",
             info.machine_type.as_str(),
-            "Lenovo MT code (e.g. 83RU) — used for profile matching",
+            "Lenovo MT code (e.g. 83RU), used for profile matching",
         ),
         (
             "Series",
@@ -1210,7 +1196,7 @@ pub(crate) fn build_about_pages(
         (
             "BIOS",
             info.bios_version.as_str(),
-            "UEFI version — first four letters are the LenovoLegionLinux BIOS family key",
+            "UEFI version, first four letters are the LenovoLegionLinux BIOS family key",
         ),
         (
             "BIOS family",
@@ -1245,7 +1231,7 @@ pub(crate) fn build_about_pages(
         (
             "Peak GPU TGP",
             peak_s.as_str(),
-            "Maximum GPU board power — nvidia-smi when available, else PSREF heuristic",
+            "Maximum GPU board power, nvidia-smi when available, else PSREF heuristic",
         ),
         (
             "Custom PPT attrs",
@@ -1294,11 +1280,11 @@ pub(crate) fn build_about_pages(
     lighting.add(&property_row(
         "Saved in",
         &format!("{saved}/settings.json"),
-        Some("Effects, colours, charge limit, fans, and named profiles — restored on launch when enabled"),
+        Some("Effects, colours, charge limit, fans, and named profiles, restored on launch when enabled"),
     ));
     lighting.add(&property_row(
         "Tray",
-        "Close hides to tray · Quit from tray menu",
+        "Close hides to tray, Quit from tray menu",
         Some("Left-click the tray icon to show the window again"),
     ));
     // Storage was a redundant duplicate of Hardware — merged here so the
@@ -1330,7 +1316,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
         .build();
     tip(
         &status_row,
-        "Plain-language summary — expand details for raw checks",
+        "Plain-language summary, expand details for raw checks",
     );
     status_row.add_suffix(&pill);
     group.add(&status_row);
@@ -1354,7 +1340,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     details.set_margin_bottom(8);
     tip(
         &details,
-        "Raw speaker diagnostic lines — selectable for copying into a bug report",
+        "Raw speaker diagnostic lines, selectable for copying into a bug report",
     );
     expander.add_row(&details);
     group.add(&expander);
@@ -1375,7 +1361,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     if diag0.health == Health::NotApplicable {
         btn.set_sensitive(false);
         btn.set_tooltip_text(Some(
-            "No AW88399 smart-amp on this model — speaker fix is Gen10 Pro 7 only and will be removed once kernel 7.3 ships",
+            "No AW88399 smart-amp on this model, speaker fix is Gen10 Pro 7 only and will be removed once kernel 7.3 ships",
         ));
     }
     status_row.add_suffix(&btn);
@@ -1422,12 +1408,12 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                 if !report.steps.is_empty() {
                     body.push(String::new());
                     body.push("What we did:".into());
-                    body.extend(report.steps.iter().map(|s| format!("· {s}")));
+                    body.extend(report.steps.iter().map(|s| format!(", {s}")));
                 }
                 if !report.errors.is_empty() {
                     body.push(String::new());
                     body.push("Problems:".into());
-                    body.extend(report.errors.iter().map(|s| format!("· {s}")));
+                    body.extend(report.errors.iter().map(|s| format!(", {s}")));
                 }
                 details_c2.set_text(&body.join("\n"));
                 expander_c.set_expanded(true);
@@ -1435,15 +1421,15 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                 match report.after.health {
                     Health::Ok => toast_ok(&overlay, "Speakers look good"),
                     Health::SoftIssue => {
-                        toast_error(&overlay, "Still needs attention — check sound settings")
+                        toast_error(&overlay, "Still needs attention, check sound settings")
                     }
                     Health::HardwareBroken => toast_error(
                         &overlay,
-                        "Amp driver still missing — soft fix can’t finish this",
+                        "Amp driver still missing, soft fix can’t finish this",
                     ),
                     Health::DriverMissing => toast_error(
                         &overlay,
-                        "Amp firmware/driver missing — reboot or reload snd_hda_scodec_aw88399_i2c after install (see details)",
+                        "Amp firmware/driver missing, reboot or reload snd_hda_scodec_aw88399_i2c after install (see details)",
                     ),
                     Health::NotApplicable => toast_ok(&overlay, &report.after.summary),
                 }
@@ -1486,15 +1472,15 @@ pub(crate) fn amp_pill(health: legion_core::audio::Health) -> (&'static str, &'s
 pub(crate) fn amp_pill_tooltip(health: legion_core::audio::Health) -> &'static str {
     use legion_core::audio::Health;
     match health {
-        Health::Ok => "Smart amp connected and unmuted — speakers should have full bass",
+        Health::Ok => "Smart amp connected and unmuted, speakers should have full bass",
         Health::SoftIssue => {
-            "Hardware amp is up — mute, volume, or wrong output needs a soft reset"
+            "Hardware amp is up, mute, volume, or wrong output needs a soft reset"
         }
         Health::HardwareBroken => {
-            "Amp ACPI/driver/firmware incomplete — soft fix cannot invent a missing kernel driver"
+            "Amp ACPI/driver/firmware incomplete, soft fix cannot invent a missing kernel driver"
         }
         Health::DriverMissing => {
-            "Amp is present but its firmware (aw88399_acf.bin) or kernel codec is missing — not a hardware fault"
+            "Amp is present but its firmware (aw88399_acf.bin) or kernel codec is missing, not a hardware fault"
         }
         Health::NotApplicable => "This machine does not expose an AW88399 smart amp",
     }
@@ -1508,13 +1494,13 @@ pub(crate) fn amp_action_tooltip(health: legion_core::audio::Health) -> &'static
             "Unmutes Speaker/Master, restarts PipeWire, and switches to onboard speakers"
         }
         Health::HardwareBroken => {
-            "Still tries unmute/PipeWire — will not pretend the amp driver is fixed if it is missing"
+            "Still tries unmute/PipeWire, will not pretend the amp driver is fixed if it is missing"
         }
         Health::DriverMissing => {
             "Downloads and installs aw88399_acf.bin (checksum-verified, never overwrites existing firmware), then re-checks; reboot afterwards"
         }
         Health::NotApplicable => {
-            "Gen10 Pro 7 only (AW88399) — no action on this hardware; will be removed once kernel 7.3 ships"
+            "Gen10 Pro 7 only (AW88399), no action on this hardware; will be removed once kernel 7.3 ships"
         }
     }
 }
@@ -1524,16 +1510,16 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
     match health {
         Health::Ok => "Smart amp is connected. You can still refresh if sound feels off.",
         Health::SoftIssue => {
-            "Amp is fine — volume, mute, or the wrong output is likely the issue."
+            "Amp is fine, volume, mute, or the wrong output is likely the issue."
         }
         Health::HardwareBroken => {
-            "The woofer amp isn’t loaded. Soft fixes help mute/sink issues only — you may need a patched kernel."
+            "The woofer amp isn’t loaded. Soft fixes help mute/sink issues only, you may need a patched kernel."
         }
         Health::DriverMissing => {
             "The woofer amp has no firmware or kernel codec yet. Press the button to download and install the verified aw88399_acf.bin (not shipped by linux-firmware), then reboot."
         }
         Health::NotApplicable => {
-            "No AW88399 smart amp on this model — Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."
+            "No AW88399 smart amp on this model, Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."
         }
     }
 }
