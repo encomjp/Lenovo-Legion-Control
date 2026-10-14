@@ -224,7 +224,11 @@ enum Commands {
 #[derive(Debug, Clone, Subcommand)]
 enum DiagAction {
     /// Print the full ANONYMOUS diagnostics JSON (no upload)
-    Dump,
+    Dump {
+        /// Include the deep block (hourly-report content, e.g. fan_evidence)
+        #[arg(long)]
+        deep: bool,
+    },
     /// Run read-only self-health checks and print a pass/fail table
     Selfcheck,
     /// Scan for active machine anomalies (fan stalls, hot NVMe, limiter
@@ -923,8 +927,13 @@ fn main() {
                     _ => fail("daemon not updated: unexpected response"),
                 }
             }
-            DiagAction::Dump => {
-                let json = serde_json::to_string_pretty(&diagnostics::collect())
+            DiagAction::Dump { deep } => {
+                let report = if deep {
+                    diagnostics::collect_with_deep("dump")
+                } else {
+                    diagnostics::collect()
+                };
+                let json = serde_json::to_string_pretty(&report)
                     .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
                 log::debug!("diagnose dump: {} bytes", json.len());
                 println!("{json}");
@@ -1421,7 +1430,7 @@ fn thermal_cmd_label(cmd: &ThermalCmd) -> String {
 /// Dispatch descriptor for `diagnose` subactions.
 fn diag_action_label(action: &DiagAction) -> String {
     match action {
-        DiagAction::Dump => "dump".into(),
+        DiagAction::Dump { .. } => "dump".into(),
         DiagAction::Selfcheck => "selfcheck".into(),
         DiagAction::Faults => "faults".into(),
         DiagAction::Enable => "enable".into(),
