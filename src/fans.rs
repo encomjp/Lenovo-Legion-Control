@@ -365,6 +365,12 @@ pub fn clamp_target(fan: u8, rpm: u32) -> u32 {
 /// Set fan target RPM. 0 = auto mode. Values outside the channel's window
 /// are clamped before they reach sysfs.
 pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
+    if !device::vendor_supported() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "unsupported vendor: fan control is Lenovo-only",
+        ));
+    }
     let requested = rpm;
     let rpm = clamp_target(fan, rpm);
     if rpm != requested {
