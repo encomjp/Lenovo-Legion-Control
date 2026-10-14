@@ -821,6 +821,14 @@ pub fn set_auto() -> std::io::Result<()> {
     let mut last_err = None;
     let mut errors = 0usize;
     for id in all_ids {
+        // Never re-write 0 to a fan that is already on auto: on Gen 10 EC
+        // firmware each write can restart the fan-stop hold, so the old
+        // unconditional write on every daemon start/stop kept fans at 0 rpm
+        // well past their normal spin-up temperature.
+        if read_target(id) == Some(0) {
+            log::debug!("fans::set_auto: fan{id} already auto — no write");
+            continue;
+        }
         match set_target(id, 0) {
             Ok(()) => log::debug!("fans::set_auto: fan{id} → auto ok"),
             Err(e) => {

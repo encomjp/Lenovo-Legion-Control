@@ -212,7 +212,7 @@ pub fn build_menu(s: &TrayState) -> Vec<Entry> {
                 "Manual"
             };
             out.push(Entry::Sub {
-                label: format!("Fans · {value}"),
+                label: format!("Fans: {value}"),
                 entries: vec![Entry::Radio {
                     options: vec![
                         (
@@ -252,13 +252,16 @@ pub fn build_menu(s: &TrayState) -> Vec<Entry> {
                 .enumerate()
                 .min_by_key(|(_, l)| (i16::from(**l) - i16::from(level)).abs())
                 .map(|(i, _)| i);
+            // Name the level instead of the raw firmware step ("On · 9").
             let summary = if level == 0 {
                 "Off".to_string()
+            } else if spectrum {
+                ["Off", "Low", "Medium", "High"][selected.unwrap_or(3).min(3)].to_string()
             } else {
-                format!("On · {level}")
+                format!("Level {level}")
             };
             out.push(Entry::Sub {
-                label: format!("Keyboard light · {summary}"),
+                label: format!("Keyboard light: {summary}"),
                 entries: vec![Entry::Radio {
                     options: levels
                         .iter()
@@ -275,7 +278,7 @@ pub fn build_menu(s: &TrayState) -> Vec<Entry> {
         }
         if let Some(limit) = s.charge_limit {
             out.push(Entry::Sub {
-                label: format!("Charge limit · {limit} %"),
+                label: format!("Charge limit: {limit} %"),
                 entries: vec![Entry::Radio {
                     options: CHARGE_LIMITS
                         .iter()
@@ -771,9 +774,9 @@ mod tests {
         assert_eq!(
             labels,
             [
-                "Fans · Automatic",
-                "Keyboard light · On · 9",
-                "Charge limit · 100 %"
+                "Fans: Automatic",
+                "Keyboard light: High",
+                "Charge limit: 100 %"
             ]
         );
         assert!(m.contains(&Entry::Check {
@@ -869,7 +872,7 @@ mod tests {
         s.kbd = Kbd::Spectrum { level: 0 };
         assert!(build_menu(&s)
             .iter()
-            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Keyboard light · Off")));
+            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Keyboard light: Off")));
     }
 
     #[test]
@@ -892,11 +895,11 @@ mod tests {
         s.fans_auto = false;
         assert!(build_menu(&s)
             .iter()
-            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Fans · Manual")));
+            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Fans: Manual")));
         s.fans_full = true;
         assert!(build_menu(&s)
             .iter()
-            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Fans · Full speed")));
+            .any(|e| matches!(e, Entry::Sub { label, .. } if label == "Fans: Full speed")));
     }
 
     #[test]
