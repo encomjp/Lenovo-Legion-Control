@@ -221,8 +221,9 @@ pub(crate) fn build_battery_pages(
             power_v.set_text(&format!("{p:.1} W"));
         }
         if let Some(h) = legion_core::battery::health_pct() {
-            health_v.set_text(&format!("{h:.0}%"));
-            health_d.set_text(if h < 80.0 { "worn" } else { "good" });
+            let (text, label) = legion_core::battery::health_display(h);
+            health_v.set_text(&text);
+            health_d.set_text(label);
         }
         if let Some(c) = legion_core::battery::cycles() {
             cycles_v.set_text(&format!("{c}"));
@@ -355,9 +356,14 @@ pub(crate) fn build_battery_pages(
                     en_l.set_subtitle(&format!("{n:.1} / {f:.1} Wh"))
                 }
                 if let Some(h) = s.health {
-                    health_l.set_subtitle(&format!("{h:.0}%"));
-                    health_v_c.set_text(&format!("{h:.0}%"));
-                    health_d_c.set_text(if h < 80.0 { "worn" } else { "good" });
+                    let (text, label) = legion_core::battery::health_display(h);
+                    health_l.set_subtitle(&if h > 100.0 {
+                        format!("{text} · {label} (raw {h:.1}%)")
+                    } else {
+                        text.clone()
+                    });
+                    health_v_c.set_text(&text);
+                    health_d_c.set_text(label);
                     health_chip_c.remove_css_class("hot");
                     health_chip_c.remove_css_class("warm");
                     if h < 70.0 {
