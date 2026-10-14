@@ -30,12 +30,17 @@ pub fn profile_blurb(name: &str) -> &'static str {
     }
 }
 
-/// Page width variant for the clamp.
+/// Page width variant for the clamp. Both share one content width so every
+/// page lines up on wide screens.
 #[allow(dead_code)]
 pub enum PageWidth {
-    Standard, // ~760 px for settings forms
-    Wide,     // 1120 px for dashboards and lighting
+    Standard,
+    Wide,
 }
+
+/// Widest the page content grows, and where it starts to tighten.
+const PAGE_MAX_WIDTH: i32 = 1100;
+const PAGE_TIGHTEN_AT: i32 = 900;
 
 pub fn page_shell(body: &impl glib::object::IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     page_shell_width(body, PageWidth::Standard)
@@ -46,13 +51,10 @@ pub fn page_shell_width(
     width: PageWidth,
 ) -> gtk::ScrolledWindow {
     use gtk::PolicyType;
-    let max = match width {
-        PageWidth::Standard => 820,
-        PageWidth::Wide => 1120,
-    };
+    let _ = width;
     let clamp = libadwaita::Clamp::builder()
-        .maximum_size(max)
-        .tightening_threshold((max as f64 * 0.7) as i32)
+        .maximum_size(PAGE_MAX_WIDTH)
+        .tightening_threshold(PAGE_TIGHTEN_AT)
         .build();
     clamp.set_child(Some(body));
 

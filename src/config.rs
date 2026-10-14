@@ -218,6 +218,14 @@ pub struct AppConfig {
     /// Legacy 4-zone RGB keyboard state (experimental write path).
     #[serde(default)]
     pub four_zone: FourZoneConfig,
+    /// Last window size and maximized state of the settings app (0 = unset,
+    /// pick a size from the monitor).
+    #[serde(default)]
+    pub window_width: i32,
+    #[serde(default)]
+    pub window_height: i32,
+    #[serde(default)]
+    pub window_maximized: bool,
 }
 
 /// Persisted 4-zone keyboard state (`crate::fourzone`). Names, not codes,
@@ -398,6 +406,9 @@ impl Default for AppConfig {
             fan_curves: Default::default(),
             diagnostics: DiagnosticsConfig::default(),
             four_zone: FourZoneConfig::default(),
+            window_width: 0,
+            window_height: 0,
+            window_maximized: false,
         }
     }
 }

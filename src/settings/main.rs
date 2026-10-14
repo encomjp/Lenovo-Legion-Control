@@ -7,6 +7,7 @@ mod queue;
 mod tray;
 
 mod about;
+mod activity;
 mod battery;
 mod cooling;
 mod curve_editor;
@@ -21,6 +22,7 @@ mod widgets;
 // Page builders live in the sibling modules above; re-exported here so
 // every module (and the tests below) sees one flat namespace.
 pub(crate) use about::*;
+pub(crate) use activity::*;
 pub(crate) use battery::*;
 pub(crate) use cooling::*;
 pub(crate) use cpu::*;
@@ -47,6 +49,11 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 type PptScales = Rc<RefCell<Vec<(String, gtk::Scale, gtk::Label)>>>;
+/// A stack page that is built on first navigation: the empty slot plus the
+/// one-shot builder.
+type LazySlot = (gtk::Box, Option<Box<dyn FnOnce() -> gtk::Widget>>);
+/// Diagnostics consent cell and share switch of the Settings page, once built.
+type AboutParts = Rc<RefCell<Option<(Rc<Cell<bool>>, adw::SwitchRow)>>>;
 type PendingUpdate = Rc<RefCell<Option<legion_core::update::ReleaseInfo>>>;
 
 fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
@@ -64,7 +71,52 @@ fn color_icon(svg: &'static [u8], size: i32) -> gtk::Image {
     }
 }
 
+/// Process start, for the first-frame timing log.
+fn startup_instant() -> Instant {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
+/// Window size from the saved state, else from the monitor: about 55% of its
+/// width (1000 to 1400) and 70% of its height (680 to 960), never bigger than
+/// the monitor itself.
+fn initial_window_size() -> (i32, i32, bool) {
+    let cfg = legion_core::config::get();
+    let (mon_w, mon_h) = gtk::gdk::Display::default()
+        .and_then(|d| {
+            d.monitors()
+                .item(0)
+                .and_then(|m| m.downcast::<gtk::gdk::Monitor>().ok())
+        })
+        .map(|m| (m.geometry().width(), m.geometry().height()))
+        .unwrap_or((1920, 1080));
+    let fit = |w: i32, h: i32| (w.min(mon_w).max(360), h.min(mon_h - 60).max(400));
+    if cfg.window_width >= 360 && cfg.window_height >= 400 {
+        let (w, h) = fit(cfg.window_width, cfg.window_height);
+        return (w, h, cfg.window_maximized);
+    }
+    let w = ((mon_w as f64 * 0.55) as i32).clamp(1000, 1400);
+    let h = ((mon_h as f64 * 0.70) as i32).clamp(680, 960);
+    let (w, h) = fit(w, h);
+    (w, h, cfg.window_maximized)
+}
+
+/// Remember size and maximized state for the next launch.
+fn save_window_state(window: &adw::ApplicationWindow) {
+    let maximized = window.is_maximized();
+    let (w, h) = (window.width(), window.height());
+    legion_core::config::update(|c| {
+        c.window_maximized = maximized;
+        // Keep the last normal size while maximized.
+        if !maximized && w >= 360 && h >= 400 {
+            c.window_width = w;
+            c.window_height = h;
+        }
+    });
+}
+
 fn main() {
+    startup_instant();
     legion_core::logging::init("legion-settings");
     let hidden = std::env::args().any(|a| a == "--hidden" || a == "--tray" || a == "--autostart");
     if hidden {
@@ -478,12 +530,26 @@ fn build_ui(app: &adw::Application) {
     // opt-out made before the daemon learned SetTelemetry never reached it.
     welcome::push_telemetry_to_daemon(legion_core::config::get().diagnostics.enabled);
 
+    let (win_w, win_h, win_max) = initial_window_size();
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Legion Control")
-        .default_width(1000)
-        .default_height(680)
+        .default_width(win_w)
+        .default_height(win_h)
+        .maximized(win_max)
         .build();
+    activity::follow_window(&window);
+    {
+        let first = Cell::new(true);
+        window.connect_map(move |_| {
+            if first.replace(false) {
+                log::info!(
+                    "first frame mapped {} ms after start",
+                    startup_instant().elapsed().as_millis()
+                );
+            }
+        });
+    }
 
     let toast_overlay = adw::ToastOverlay::new();
     let apply_queue = ApplyQueue::new(&toast_overlay);
@@ -507,70 +573,134 @@ fn build_ui(app: &adw::Application) {
 
     // LEGION_PAGE can name a hub tab (e.g. cpu-tuning) — resolve before hubs.
     let legion_page_req = std::env::var("LEGION_PAGE").ok();
+    let hub_tab_req: Option<&'static str> = legion_page_req.as_deref().and_then(hub_initial_tab);
 
-    let (lighting_page, lighting_tabs) = lighting::build_lighting(&toast_overlay, app);
-    let battery_page = build_battery_pages(&toast_overlay, &daemon_gate);
-    // Health is its own rail page (speakers, RGB repair, logs, self-checks).
-    let fix_compact = build_fix_compact(&toast_overlay, &daemon_gate);
+    // Pages are built on first navigation: each stack page starts as an empty
+    // slot, and `ensure_built` fills it the first time the page is shown.
+    let lazy: Rc<RefCell<std::collections::HashMap<&'static str, LazySlot>>> =
+        Rc::new(RefCell::new(std::collections::HashMap::new()));
+    let add_lazy = {
+        let stack = stack.clone();
+        let lazy = lazy.clone();
+        move |id: &'static str, title: &'static str, build: Box<dyn FnOnce() -> gtk::Widget>| {
+            let slot = gtk::Box::new(Orientation::Vertical, 0);
+            slot.set_vexpand(true);
+            slot.set_hexpand(true);
+            stack.add_titled(&slot, Some(id), title);
+            lazy.borrow_mut().insert(id, (slot, Some(build)));
+        }
+    };
+    let ensure_built: Rc<dyn Fn(&str)> = {
+        let lazy = lazy.clone();
+        Rc::new(move |id: &str| {
+            let job = {
+                let mut map = lazy.borrow_mut();
+                map.get_mut(id)
+                    .and_then(|(slot, build)| build.take().map(|b| (slot.clone(), b)))
+            };
+            if let Some((slot, build)) = job {
+                let t0 = Instant::now();
+                let page = activity::with_page(id, build);
+                slot.append(&page);
+                log::debug!("built page {id} in {} ms", t0.elapsed().as_millis());
+            }
+        })
+    };
+
     // Shared suppress flag: programmatic telemetry switches (welcome window,
     // guided setup) must not re-trigger the Settings page's opt-out nudge.
     let telemetry_sync: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let (
-        about_setup_page,
-        about_help_page,
-        about_hardware_page,
-        welcome_consent,
-        welcome_share_switch,
-    ) = build_about_pages(&toast_overlay, &telemetry_sync);
+    // Filled when the Settings page is built; the welcome window needs it.
+    let about_parts: AboutParts = Rc::new(RefCell::new(None));
 
-    // Lighting hub: the zone ViewStack existed but had no visible switcher —
-    // the sidebar used to reset it to "keyboard", leaving zones unreachable.
-    let lighting_hub = {
-        let switcher = adw::ViewSwitcher::new();
-        switcher.set_stack(Some(&lighting_tabs));
-        switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
-        switcher.set_halign(Align::Center);
-        let bar = gtk::Box::new(Orientation::Vertical, 0);
-        bar.add_css_class("hub-bar");
-        bar.append(&switcher);
-        let hub = gtk::Box::new(Orientation::Vertical, 0);
-        hub.set_vexpand(true);
-        hub.append(&bar);
-        hub.append(&page_shell_width(&lighting_page, PageWidth::Wide));
-        hub
-    };
-    if let Some(tab) = legion_page_req.as_deref().and_then(hub_initial_tab) {
-        if lighting_tabs.child_by_name(tab).is_some() {
-            lighting_tabs.set_visible_child_name(tab);
-        }
+    {
+        let overlay = toast_overlay.clone();
+        let queue = apply_queue.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "cooling-fans",
+            "Cooling",
+            Box::new(move || {
+                page_shell_width(
+                    &build_cooling_overview_page(&overlay, &queue, &gate),
+                    PageWidth::Wide,
+                )
+                .upcast()
+            }),
+        );
     }
-
-    let about_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let (about_hub, about_tabs) = hub_page(
-        vec![
-            (about_setup_page, "setup", "Setup"),
-            (about_hardware_page, "hardware", "Hardware"),
-            (about_help_page, "help", "Help"),
-        ],
-        about_initial,
-    );
-
-    stack.add_titled(
-        &page_shell_width(
-            &build_cooling_overview_page(&toast_overlay, &apply_queue, &daemon_gate),
-            PageWidth::Wide,
-        ),
-        Some("cooling-fans"),
-        "Cooling",
-    );
-    stack.add_titled(&lighting_hub, Some("lighting"), "Lighting");
-    stack.add_titled(
-        &page_shell(&battery_page),
-        Some("battery-status"),
-        "Power",
-    );
-    stack.add_titled(&page_shell(&fix_compact), Some("health"), "Health");
-    stack.add_titled(&about_hub, Some("about"), "Settings");
+    {
+        let overlay = toast_overlay.clone();
+        let app = app.clone();
+        add_lazy(
+            "lighting",
+            "Lighting",
+            Box::new(move || {
+                let (lighting_page, lighting_tabs) = lighting::build_lighting(&overlay, &app);
+                // The zone ViewStack needs a visible switcher, or zones are
+                // unreachable from the rail.
+                let switcher = adw::ViewSwitcher::new();
+                switcher.set_stack(Some(&lighting_tabs));
+                switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
+                switcher.set_halign(Align::Center);
+                let bar = gtk::Box::new(Orientation::Vertical, 0);
+                bar.add_css_class("hub-bar");
+                bar.append(&switcher);
+                let hub = gtk::Box::new(Orientation::Vertical, 0);
+                hub.set_vexpand(true);
+                hub.append(&bar);
+                hub.append(&page_shell_width(&lighting_page, PageWidth::Wide));
+                if let Some(tab) = hub_tab_req {
+                    if lighting_tabs.child_by_name(tab).is_some() {
+                        lighting_tabs.set_visible_child_name(tab);
+                    }
+                }
+                hub.upcast()
+            }),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "battery-status",
+            "Power",
+            Box::new(move || page_shell(&build_battery_pages(&overlay, &gate)).upcast()),
+        );
+    }
+    {
+        // Health is its own rail page (speakers, RGB repair, logs, self-checks).
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        add_lazy(
+            "health",
+            "Health",
+            Box::new(move || page_shell(&build_fix_compact(&overlay, &gate)).upcast()),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let sync = telemetry_sync.clone();
+        let parts = about_parts.clone();
+        add_lazy(
+            "about",
+            "Settings",
+            Box::new(move || {
+                let (setup, help, hardware, consent, share_switch) =
+                    build_about_pages(&overlay, &sync);
+                *parts.borrow_mut() = Some((consent, share_switch));
+                let (hub, _tabs) = hub_page(
+                    vec![
+                        (setup, "setup", "Setup"),
+                        (hardware, "hardware", "Hardware"),
+                        (help, "help", "Help"),
+                    ],
+                    hub_tab_req,
+                );
+                hub.upcast()
+            }),
+        );
+    }
 
     let sidebar_box = gtk::Box::new(Orientation::Vertical, 0);
     let brand = gtk::Box::new(Orientation::Horizontal, 12);
@@ -707,7 +837,7 @@ fn build_ui(app: &adw::Application) {
             );
         });
         refresh();
-        glib::timeout_add_seconds_local(90, move || {
+        ticker_local(Duration::from_secs(90), move || {
             refresh();
             glib::ControlFlow::Continue
         });
@@ -998,63 +1128,76 @@ fn build_ui(app: &adw::Application) {
     };
     // The CPU hub is registered here because its Power tab needs show_page
     // to jump back to the Custom-watts controls on Home.
-    let cpu_initial = legion_page_req.as_deref().and_then(hub_initial_tab);
-    let (cpu_hub, _cpu_tabs) = hub_page(
-        vec![
-            (
-                build_cpu_features_page(&toast_overlay, &daemon_gate),
-                "features",
-                "Features",
-            ),
-            (
-                build_cpu_tuning_page(&toast_overlay, &daemon_gate),
-                "tuning",
-                "Tuning",
-            ),
-            (
-                build_cpu_power_page(
-                    &toast_overlay,
-                    &show_page,
-                    &apply_queue,
-                    &mode_drop_slot,
-                    &profile_choices_slot,
-                ),
-                "power",
-                "Power",
-            ),
-            (
-                build_profiles_page(
-                    &toast_overlay,
-                    &daemon_gate,
-                    &mode_drop_slot,
-                    &profile_choices_slot,
-                ),
-                "profiles",
-                "Profiles",
-            ),
-        ],
-        cpu_initial,
-    );
-    stack.add_titled(
-        &page_shell_width(
-            &build_overview(
-                &toast_overlay,
-                &apply_queue,
-                &daemon_gate,
-                &show_page,
-                &mode_drop_slot,
-                &profile_choices_slot,
-                &ppt_group_slot,
-                &ppt_scales_slot,
-                &ppt_suppress_slot,
-                &trend_feed_slot,
-            ),
-            PageWidth::Wide,
-        ),
-        Some("overview"),
-        "Control center",
-    );
-    stack.add_titled(&cpu_hub, Some("cpu"), "Performance");
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        let queue = apply_queue.clone();
+        let show = show_page.clone();
+        let mode_drop = mode_drop_slot.clone();
+        let choices = profile_choices_slot.clone();
+        add_lazy(
+            "cpu",
+            "Performance",
+            Box::new(move || {
+                let (cpu_hub, _cpu_tabs) = hub_page(
+                    vec![
+                        (
+                            build_cpu_features_page(&overlay, &gate),
+                            "features",
+                            "Features",
+                        ),
+                        (build_cpu_tuning_page(&overlay, &gate), "tuning", "Tuning"),
+                        (
+                            build_cpu_power_page(&overlay, &show, &queue, &mode_drop, &choices),
+                            "power",
+                            "Power",
+                        ),
+                        (
+                            build_profiles_page(&overlay, &gate, &mode_drop, &choices),
+                            "profiles",
+                            "Profiles",
+                        ),
+                    ],
+                    hub_tab_req,
+                );
+                cpu_hub.upcast()
+            }),
+        );
+    }
+    {
+        let overlay = toast_overlay.clone();
+        let gate = daemon_gate.clone();
+        let queue = apply_queue.clone();
+        let show = show_page.clone();
+        let mode_drop = mode_drop_slot.clone();
+        let choices = profile_choices_slot.clone();
+        let ppt_group = ppt_group_slot.clone();
+        let ppt_scales = ppt_scales_slot.clone();
+        let ppt_suppress = ppt_suppress_slot.clone();
+        let trend = trend_feed_slot.clone();
+        add_lazy(
+            "overview",
+            "Control center",
+            Box::new(move || {
+                page_shell_width(
+                    &build_overview(
+                        &overlay,
+                        &queue,
+                        &gate,
+                        &show,
+                        &mode_drop,
+                        &choices,
+                        &ppt_group,
+                        &ppt_scales,
+                        &ppt_suppress,
+                        &trend,
+                    ),
+                    PageWidth::Wide,
+                )
+                .upcast()
+            }),
+        );
+    }
 
     // One flat list: row order mirrors the rail above. Fix lives inside
     // Settings — keep the rail short.
@@ -1115,23 +1258,30 @@ fn build_ui(app: &adw::Application) {
 
     split.set_sidebar(Some(&sidebar_page));
     split.set_content(Some(&content_page));
+    // When narrow, open on the page itself; the header back button shows the rail.
+    split.set_show_content(true);
 
     // Dev/screenshots: LEGION_PAGE=<name> opens a specific page at startup
     // (e.g. LEGION_PAGE=cpu-tuning legion-settings). Legacy ids resolve to
     // their hub + tab. Harmless if unset.
-    if let Some(page) = legion_page_req {
-        let top = top_level_page(&page);
-        if stack.child_by_name(top).is_some() {
-            stack.set_visible_child_name(top);
-            // Keep header in sync — the stack override bypasses nav_to().
-            if let Some(title) = page_title(top) {
-                content_page.set_title(title);
-                window_title.set_title(title);
-            }
-            // Mirror the rail selection so screenshots show the highlight.
-            if top == "overview" {
+    let initial_top = legion_page_req
+        .as_deref()
+        .map(top_level_page)
+        .unwrap_or("overview");
+    if stack.child_by_name(initial_top).is_some() {
+        stack.set_visible_child_name(initial_top);
+        activity::set_visible_page(initial_top);
+        ensure_built(initial_top);
+        // Keep header in sync — the stack override bypasses nav_to().
+        if let Some(title) = page_title(initial_top) {
+            content_page.set_title(title);
+            window_title.set_title(title);
+        }
+        // Mirror the rail selection so screenshots show the highlight.
+        if legion_page_req.is_some() {
+            if initial_top == "overview" {
                 nav_list.unselect_all();
-            } else if let Some(idx) = FLAT_IDS.iter().position(|id| *id == top) {
+            } else if let Some(idx) = FLAT_IDS.iter().position(|id| *id == initial_top) {
                 if let Some(row) = nav_list.row_at_index(idx as i32) {
                     nav_list.select_row(Some(&row));
                 }
@@ -1199,6 +1349,7 @@ fn build_ui(app: &adw::Application) {
     {
         let page = content_page.clone();
         let title_widget = window_title.clone();
+        let ensure = ensure_built.clone();
         stack.connect_visible_child_notify(move |stk| {
             let Some(child) = stk.visible_child() else {
                 return;
@@ -1207,6 +1358,8 @@ fn build_ui(app: &adw::Application) {
                 Some(n) => n,
                 None => return,
             };
+            activity::set_visible_page(&name);
+            ensure(&name);
             let Some(title) = page_title(&name) else {
                 return;
             };
@@ -1221,6 +1374,7 @@ fn build_ui(app: &adw::Application) {
     // Close hides to tray (Quit from tray exits).
     let win_hide = window.clone();
     window.connect_close_request(move |_| {
+        save_window_state(&win_hide);
         win_hide.set_visible(false);
         glib::Propagation::Stop
     });
@@ -1237,6 +1391,7 @@ fn build_ui(app: &adw::Application) {
                     win_tray.present();
                 }
                 tray::TrayCmd::Quit => {
+                    save_window_state(&win_tray);
                     app_tray.quit();
                 }
             }
@@ -1260,14 +1415,14 @@ fn build_ui(app: &adw::Application) {
         legion_core::fourzone::restore_async();
     }
 
-    show_welcome_if_needed(
-        &window,
-        &stack,
-        Some(&about_tabs),
-        &welcome_consent,
-        Some(&welcome_share_switch),
-        &telemetry_sync,
-    );
+    if !legion_core::config::welcome_seen() {
+        // The welcome window drives the diagnostics switch that lives on the
+        // Settings page, so that page is built first (first launch only).
+        ensure_built("about");
+        if let Some((consent, share_switch)) = about_parts.borrow().as_ref() {
+            show_welcome_if_needed(&window, consent, Some(share_switch), &telemetry_sync);
+        }
+    }
 
     // Click the connection strip to re-check the daemon.
     let foot_click = gtk::GestureClick::new();
@@ -1325,7 +1480,7 @@ fn build_ui(app: &adw::Application) {
     let banner_p = banner.clone();
     let gate_p = daemon_gate.clone();
     let pending_p = pending_update.clone();
-    glib::timeout_add_local(Duration::from_secs(5), move || {
+    ticker_local(Duration::from_secs(5), move || {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(daemon_ok());
@@ -2179,7 +2334,7 @@ fn build_thermal_card(toast: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box 
     let last_on_p = last_on.clone();
     let acked_p = acked.clone();
     let apply_mute_p = apply_mute.clone();
-    glib::timeout_add_local(Duration::from_secs(2), move || {
+    ticker_local(Duration::from_secs(2), move || {
         let cpu_temp_v_c = cpu_temp_v_p.clone();
         let cpu_temp_d_c = cpu_temp_d_p.clone();
         let cpu_temp_2_v_c = cpu_temp_2_v_p.clone();
