@@ -454,6 +454,86 @@ fn install_yogafan() -> Result<(), String> {
     )
 }
 
+/// Download, verify and install the AW88399 amp firmware. Only on machines
+/// whose ACPI shows the AWDZ8399 amp, and never over an existing firmware.
+fn install_amp_firmware() -> Result<(), String> {
+    use legion_core::amp_firmware as fw;
+    let target = match fw::plan(
+        legion_core::audio::aw88399_acpi_present(),
+        legion_core::audio::aw88399_firmware_present(),
+    ) {
+        fw::Plan::NotApplicable => {
+            println!("no AWDZ8399 amp in ACPI; nothing to do");
+            return Ok(());
+        }
+        fw::Plan::AlreadyPresent => {
+            println!("AW88399 firmware already present; not overwriting");
+            return Ok(());
+        }
+        fw::Plan::Install(path) => path,
+    };
+    let curl = executable(&["/usr/bin/curl", "/bin/curl"])?;
+    let sha256sum = executable(&["/usr/bin/sha256sum", "/bin/sha256sum"])?;
+    let dir = target.parent().ok_or("bad firmware destination")?;
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    // Same directory as the destination so the final rename is atomic.
+    let part = dir.join(".aw88399_acf.bin.legion-part");
+    let _ = fs::remove_file(&part);
+    let part_str = part.to_string_lossy().into_owned();
+    let result = (|| -> Result<(), String> {
+        let max = (fw::SOURCE_SIZE * 2).to_string();
+        run(
+            curl,
+            &[
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--tlsv1.2",
+                "--max-filesize",
+                &max,
+                "--max-time",
+                "120",
+                "--output",
+                &part_str,
+                fw::SOURCE_URL,
+            ],
+        )?;
+        let out = Command::new(sha256sum)
+            .arg(&part)
+            .output()
+            .map_err(|e| format!("cannot run sha256sum: {e}"))?;
+        let digest = fw::parse_sha256sum_output(&String::from_utf8_lossy(&out.stdout))
+            .ok_or("could not compute SHA-256 of the download")?;
+        if !fw::digest_matches(&digest) {
+            return Err(format!(
+                "checksum mismatch (got {digest}, expected {}); refusing to install",
+                fw::SOURCE_SHA256
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&part, fs::Permissions::from_mode(0o644))
+                .map_err(|e| format!("cannot chmod firmware: {e}"))?;
+        }
+        // Re-check right before placing: never clobber a file that appeared meanwhile.
+        if legion_core::audio::aw88399_firmware_present() {
+            println!("AW88399 firmware appeared meanwhile; not overwriting");
+            return Ok(());
+        }
+        fs::rename(&part, &target).map_err(|e| format!("cannot install firmware: {e}"))?;
+        println!("{}", fw::REBOOT_HINT);
+        Ok(())
+    })();
+    let _ = fs::remove_file(&part);
+    result
+}
+
 fn real_main() -> Result<(), String> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("this helper must be authorized through PolicyKit".into());
@@ -465,8 +545,9 @@ fn real_main() -> Result<(), String> {
         Some("restart-daemon") => restart_daemon(),
         Some("install-udev") => install_udev_rule(),
         Some("install-yogafan") => install_yogafan(),
+        Some("install-amp-firmware") => install_amp_firmware(),
         _ => Err(
-            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, restart-daemon, install-udev, install-yogafan"
+            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, restart-daemon, install-udev, install-yogafan, install-amp-firmware"
                 .into(),
         ),
     }

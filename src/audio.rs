@@ -559,7 +559,7 @@ pub fn troubleshoot() -> FixReport {
         Health::DriverMissing => {
             log::warn!("audio: re-check: amp driver/firmware still missing");
             steps.push(
-                "Re-check: amp driver/firmware still missing — install aw88399_acf.bin (linux-firmware) / a kernel with the AW88399 codec"
+                "Re-check: amp driver/firmware still missing — install aw88399_acf.bin (run: legion-cli audio-fix, or Settings > Speakers > Install speaker firmware) / a kernel with the AW88399 codec"
                     .into(),
             );
         }
@@ -577,7 +577,7 @@ pub fn troubleshoot() -> FixReport {
     }
 }
 
-fn aw88399_acpi_present() -> bool {
+pub fn aw88399_acpi_present() -> bool {
     let Ok(entries) = std::fs::read_dir("/sys/bus/i2c/devices") else {
         return false;
     };
@@ -623,7 +623,7 @@ const FIRMWARE_NAMES: &[&str] = &[
     "aw88399_acf.bin.xz",
 ];
 
-fn aw88399_firmware_present() -> bool {
+pub fn aw88399_firmware_present() -> bool {
     firmware_present_in(FIRMWARE_DIRS, |p| p.is_file())
 }
 

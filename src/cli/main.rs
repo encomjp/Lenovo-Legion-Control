@@ -628,6 +628,19 @@ fn main() {
             }
         }
         Commands::AudioFix => {
+            {
+                let pre = legion_core::audio::diagnose();
+                if pre.health == legion_core::audio::Health::DriverMissing
+                    && pre.amp_acpi
+                    && !pre.firmware_ok
+                {
+                    println!("AW88399 firmware missing; installing via PolicyKit helper...");
+                    match legion_core::amp_firmware::install_via_helper() {
+                        Ok(msg) => println!("ok  {msg}"),
+                        Err(e) => eprintln!("err firmware install: {e}"),
+                    }
+                }
+            }
             let report = legion_core::audio::troubleshoot();
             for s in &report.steps {
                 println!("ok  {s}");

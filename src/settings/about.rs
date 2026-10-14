@@ -1418,7 +1418,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             Health::Ok => "Refresh and re-check",
             Health::SoftIssue => "Repair speakers",
             Health::HardwareBroken => "Try soft fix anyway",
-            Health::DriverMissing => "Try soft fix anyway",
+            Health::DriverMissing => "Install speaker firmware",
             Health::NotApplicable => "Not applicable",
         },
         Some(amp_action_tooltip(diag0.health)),
@@ -1457,7 +1457,18 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
 
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(audio::troubleshoot());
+            let mut fw_note: Option<Result<String, String>> = None;
+            let pre = audio::diagnose();
+            if pre.health == Health::DriverMissing && pre.amp_acpi && !pre.firmware_ok {
+                fw_note = Some(super::run_setup_helper_blocking("install-amp-firmware"));
+            }
+            let mut report = audio::troubleshoot();
+            match fw_note {
+                Some(Ok(msg)) => report.steps.insert(0, msg),
+                Some(Err(e)) => report.errors.insert(0, format!("Firmware install: {e}")),
+                None => {}
+            }
+            let _ = tx.send(report);
         });
 
         let overlay = overlay.clone();
@@ -1498,7 +1509,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                     ),
                     Health::DriverMissing => toast_error(
                         &overlay,
-                        "Amp firmware/driver missing — install linux-firmware (see details)",
+                        "Amp firmware/driver missing — reboot or reload snd_hda_scodec_aw88399_i2c after install (see details)",
                     ),
                     Health::NotApplicable => toast_ok(&overlay, &report.after.summary),
                 }
@@ -1507,7 +1518,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                     Health::Ok => "Refresh and re-check",
                     Health::SoftIssue => "Repair speakers",
                     Health::HardwareBroken => "Try soft fix anyway",
-                    Health::DriverMissing => "Try soft fix anyway",
+                    Health::DriverMissing => "Install speaker firmware",
                     Health::NotApplicable => "Check speakers",
                 };
                 set_busy(&btn_c, false, idle);
@@ -1566,7 +1577,7 @@ pub(crate) fn amp_action_tooltip(health: legion_core::audio::Health) -> &'static
             "Still tries unmute/PipeWire — will not pretend the amp driver is fixed if it is missing"
         }
         Health::DriverMissing => {
-            "Still tries unmute/PipeWire — the amp itself needs the firmware/kernel codec installed first"
+            "Downloads and installs aw88399_acf.bin (checksum-verified, never overwrites existing firmware), then re-checks; reboot afterwards"
         }
         Health::NotApplicable => {
             "Gen10 Pro 7 only (AW88399) — no action on this hardware; will be removed once kernel 7.3 ships"
@@ -1585,7 +1596,7 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
             "The woofer amp isn’t loaded. Soft fixes help mute/sink issues only — you may need a patched kernel."
         }
         Health::DriverMissing => {
-            "The woofer amp has no firmware or kernel codec yet. Install the linux-firmware package providing aw88399_acf.bin (and a kernel with the AW88399 codec), then reboot."
+            "The woofer amp has no firmware or kernel codec yet. Press the button to download and install the verified aw88399_acf.bin (not shipped by linux-firmware), then reboot."
         }
         Health::NotApplicable => {
             "No AW88399 smart amp on this model — Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."

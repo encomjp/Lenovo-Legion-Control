@@ -4,6 +4,7 @@
 //! keyboard RGB via USB HID. Designed for the Legion Pro 7 Gen 10 (83RU)
 //! and compatible with all 2020-2026 Legion models.
 
+pub mod amp_firmware;
 pub mod audio;
 pub mod battery;
 pub mod comms;
