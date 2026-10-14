@@ -36,6 +36,7 @@ signal-hook = "0.3"
 libc = "0.2"
 
 flate2 = "1"
+sha2 = "0.10"
 
 # ─── Async utilities ───
 
