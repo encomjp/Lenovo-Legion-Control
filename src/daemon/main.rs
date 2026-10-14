@@ -497,6 +497,8 @@ fn main() {
     for (name, worker) in [
         ("auto-mode", services::auto_mode_worker as fn(Arc<AtomicBool>)),
         ("temp-history", services::temp_history_worker),
+        // Re-apply saved Custom power limits when the mode becomes Custom.
+        ("power-limits", services::power_limits_worker),
     ] {
         let sd = shutdown.clone();
         match std::thread::Builder::new()
@@ -1049,8 +1051,9 @@ fn process_command(
             // discovery (profile::all_ppt_limits) gates writes here.
             if profile::is_known_fw_attr(&name) {
                 log::debug!("SetFwAttr '{name}' passed allow-list check");
+                // Custom mode only, read back, saved for re-apply.
                 match value.trim().parse::<u32>() {
-                    Ok(v) => match profile::set_ppt(&name, v) {
+                    Ok(v) => match legion_core::power_limits::set_custom_limit(&name, v) {
                         Ok(()) => DaemonResponse::Ok,
                         Err(e) => DaemonResponse::Error(e),
                     },

@@ -25,6 +25,7 @@ pub mod intel_msr;
 pub mod keyboard;
 pub mod logging;
 pub mod models;
+pub mod power_limits;
 pub mod profile;
 pub mod rgb_panic;
 pub mod selftest;

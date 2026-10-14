@@ -475,6 +475,24 @@ pub fn limit_unit(attr: &str) -> LimitUnit {
     }
 }
 
+/// Plain label for a firmware attribute ("Everyday power"); the id itself
+/// for unknown ones.
+pub fn limit_label(attr: &str) -> &str {
+    PPT_IDS
+        .iter()
+        .chain(GPU_PPT_IDS.iter())
+        .find(|(id, _, _)| *id == attr)
+        .map_or(attr, |(_, label, _)| label)
+}
+
+/// Current `current_value` of an allow-listed firmware attribute.
+pub fn read_ppt(attr: &str) -> Option<u32> {
+    if !is_known_fw_attr(attr) {
+        return None;
+    }
+    read_u32_file(&fw_attr_dir(attr)?.join("current_value"))
+}
+
 pub fn set_ppt(attr: &str, value: u32) -> Result<(), String> {
     if !is_known_fw_attr(attr) {
         return Err(format!("Unknown PPT attribute '{attr}'"));

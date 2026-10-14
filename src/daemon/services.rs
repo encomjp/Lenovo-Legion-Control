@@ -3,7 +3,7 @@
 
 use legion_core::comms::{mode_code, TempHistory, TempSample};
 use legion_core::profile::auto::{self, AutoModeStatus, Switcher};
-use legion_core::{config, fan_curve, profile, thermal};
+use legion_core::{config, fan_curve, power_limits, profile, thermal};
 
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
@@ -146,6 +146,11 @@ pub fn auto_mode_worker(shutdown: Arc<AtomicBool>) {
         }
     }
     log::info!("auto-mode thread stopped");
+}
+
+/// Keeps Custom-mode power limits applied (see `legion_core::power_limits`).
+pub fn power_limits_worker(shutdown: Arc<AtomicBool>) {
+    power_limits::run(&shutdown);
 }
 
 #[cfg(test)]

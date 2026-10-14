@@ -225,6 +225,11 @@ pub struct AppConfig {
     /// Show a small on-screen popup when the power mode changes (tray).
     #[serde(default = "default_true")]
     pub osd_mode_change: bool,
+    /// Custom-mode power limits the service last wrote and verified, by
+    /// firmware attribute. The root service re-applies them whenever the
+    /// mode becomes Custom and after resume (`power_limits`).
+    #[serde(default)]
+    pub custom_power_limits: std::collections::BTreeMap<String, u32>,
     /// Last window size and maximized state of the settings app (0 = unset,
     /// pick a size from the monitor).
     #[serde(default)]
@@ -453,6 +458,7 @@ impl Default for AppConfig {
             four_zone: FourZoneConfig::default(),
             auto_mode: AutoModeConfig::default(),
             osd_mode_change: true,
+            custom_power_limits: Default::default(),
             window_width: 0,
             window_height: 0,
             window_maximized: false,

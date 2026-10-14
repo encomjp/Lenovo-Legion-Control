@@ -333,6 +333,13 @@ enum Commands {
         #[command(subcommand)]
         action: Option<AutoModeCmd>,
     },
+    /// Custom-mode power limits: list them, or set one (Custom mode only)
+    PowerLimit {
+        /// Attribute name, e.g. ppt_pl1_spl (omit to list)
+        name: Option<String>,
+        /// New value in W or °C
+        value: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1217,6 +1224,7 @@ fn main() {
             yes_i_understand,
         } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
         Commands::AutoMode { action } => auto_mode_cmd(action.unwrap_or(AutoModeCmd::Status)),
+        Commands::PowerLimit { name, value } => power_limit_cmd(name, value),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
@@ -1664,6 +1672,55 @@ fn cmd_label(cmd: &Commands) -> String {
             Some(AutoModeCmd::Ac { mode }) => format!("auto-mode ac {mode}"),
             Some(AutoModeCmd::Battery { mode }) => format!("auto-mode battery {mode}"),
         },
+        Commands::PowerLimit { name, value } => format!("power-limit {name:?} {value:?}"),
+    }
+}
+
+/// `power-limit` (list) and `power-limit <name> <value>` (set).
+fn power_limit_cmd(name: Option<String>, value: Option<u32>) {
+    use legion_core::{power_limits, profile};
+    let limits = profile::all_ppt_limits();
+    let custom = profile::current() == "custom";
+    match (name, value) {
+        (None, _) => {
+            if limits.is_empty() {
+                fail("this laptop's firmware does not expose power limits");
+            }
+            for l in &limits {
+                println!(
+                    "{:<18} {:>4} {:<3} range {}  ({})",
+                    l.id,
+                    l.current,
+                    l.unit.symbol(),
+                    l.range_label(),
+                    l.label
+                );
+            }
+            if !custom {
+                println!("{}", power_limits::SWITCH_FIRST);
+            }
+        }
+        (Some(_), None) => usage_fail("give a value, e.g. legion-cli power-limit ppt_pl1_spl 80"),
+        (Some(name), Some(v)) => {
+            if !profile::is_known_fw_attr(&name) {
+                usage_fail(format!("unknown power limit '{name}'"));
+            }
+            if let Some(l) = limits.iter().find(|l| l.id == name) {
+                if !(l.min..=l.max).contains(&v) {
+                    usage_fail(format!("{name}: {v} is outside {}", l.range_label()));
+                }
+            }
+            // Same message the service answers with, without a round trip.
+            if !custom {
+                fail(power_limits::SWITCH_FIRST);
+            }
+            send_ok(DaemonCommand::SetFwAttr {
+                name: name.clone(),
+                value: v.to_string(),
+            })
+            .ok();
+            println!("{name} → {v} {}", profile::limit_unit(&name).symbol());
+        }
     }
 }
 
