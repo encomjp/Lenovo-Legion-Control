@@ -11,7 +11,10 @@ const DKMS_VERSION: &str = "0.1.7";
 
 const UDEV_RULE: &str = "# Lenovo Legion — allow userspace access to ec_sys and keyboard HID\n\
 SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c193\", MODE=\"0660\", TAG+=\"uaccess\"\n\
-SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c197\", MODE=\"0660\", TAG+=\"uaccess\"\n";
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c197\", MODE=\"0660\", TAG+=\"uaccess\"\n\
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c1??\", MODE=\"0660\", TAG+=\"uaccess\"\n\
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c6??\", MODE=\"0660\", TAG+=\"uaccess\"\n\
+SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"048d\", ATTRS{idProduct}==\"c9??\", MODE=\"0660\", TAG+=\"uaccess\"\n";
 
 fn executable(candidates: &[&'static str]) -> Result<&'static str, String> {
     for path in candidates {
