@@ -15,6 +15,12 @@ pub(crate) fn build_overview(
     trend_feed_slot: &Rc<RefCell<Option<Rc<dyn Fn(f64, f64)>>>>,
 ) -> gtk::Box {
     let page = page_lede("");
+    if !legion_core::device::vendor_supported() {
+        let info = legion_core::device::detect();
+        let banner = adw::Banner::new(&info.profile_notes);
+        banner.set_revealed(true);
+        page.append(&banner);
+    }
 
     let metrics = gtk::FlowBox::builder()
         .selection_mode(gtk::SelectionMode::None)
@@ -60,13 +66,19 @@ pub(crate) fn build_overview(
     }
     page.append(&metrics);
 
-    let power = pref_group("Power mode", None);
+    let blocked = legion_core::profile::blocked_choices();
+    let blocked_note = blocked
+        .iter()
+        .map(|(c, why)| format!("{} is hidden: {why}", friendly_profile(c)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let power = pref_group("Power mode", Some(blocked_note.as_str()));
     tip(
         &power,
         "Quiet / Balanced / Performance / Max / Custom — Custom unlocks CPU PPT and GPU AC power sliders below",
     );
 
-    let choices = legion_core::profile::choices();
+    let choices = legion_core::profile::safe_choices();
     *profile_choices_slot.borrow_mut() = choices.clone();
     let labels: Vec<String> = choices.iter().map(|c| friendly_profile(c)).collect();
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();

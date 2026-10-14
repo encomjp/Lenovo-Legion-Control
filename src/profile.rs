@@ -103,6 +103,62 @@ pub fn choices() -> Vec<String> {
     }
 }
 
+/// Known-dangerous platform profile writes, keyed by BIOS version prefix.
+/// `(bios match, profile, reason)`. A match is a prefix of the DMI BIOS
+/// version, so `"Q7CN"` covers every Q7CN build and `"LPCN65WW"` one build.
+const DANGEROUS_PROFILES: &[(&str, &str, &str)] = &[
+    (
+        "Q7CN",
+        "custom",
+        "writing 'custom' hard-shuts-down the Legion Pro 7 16IAX10H (BIOS Q7CN)",
+    ),
+    (
+        "LPCN65WW",
+        "max-power",
+        "'max-power' cuts power instantly on the Legion Pro 5 16ARX8 (BIOS LPCN65WW)",
+    ),
+];
+
+/// Why writing `profile` is blocked on a machine with this BIOS version.
+/// Pure so the deny-list is unit-testable without sysfs.
+pub fn blocked_reason_for(bios_version: &str, profile: &str) -> Option<&'static str> {
+    let bios = bios_version.trim().to_ascii_uppercase();
+    DANGEROUS_PROFILES
+        .iter()
+        .find(|(b, p, _)| bios.starts_with(b) && *p == profile.trim())
+        .map(|(_, _, why)| *why)
+}
+
+fn dmi_bios_version() -> String {
+    fs::read_to_string("/sys/class/dmi/id/bios_version")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Why `profile` must not be written on this machine, if it is on the deny-list.
+pub fn blocked_reason(profile: &str) -> Option<&'static str> {
+    blocked_reason_for(&dmi_bios_version(), profile)
+}
+
+/// Platform profile choices minus the ones known to be dangerous here.
+/// GUI and CLI present this list; `set` enforces it.
+pub fn safe_choices() -> Vec<String> {
+    let bios = dmi_bios_version();
+    choices()
+        .into_iter()
+        .filter(|c| blocked_reason_for(&bios, c).is_none())
+        .collect()
+}
+
+/// `(profile, reason)` for every advertised choice that is blocked here.
+pub fn blocked_choices() -> Vec<(String, &'static str)> {
+    let bios = dmi_bios_version();
+    choices()
+        .into_iter()
+        .filter_map(|c| blocked_reason_for(&bios, &c).map(|why| (c, why)))
+        .collect()
+}
+
 /// Set the platform profile. Writes the class handler when available so
 /// `custom` works (legacy aggregate sysfs hard-rejects it).
 pub fn set(profile: &str) -> Result<(), String> {
@@ -110,6 +166,12 @@ pub fn set(profile: &str) -> Result<(), String> {
     if name.is_empty() {
         log::debug!("profile: set rejected — empty profile name");
         return Err("empty profile name".into());
+    }
+    if let Some(why) = blocked_reason(name) {
+        log::warn!("profile: set '{name}' refused — {why}");
+        return Err(format!(
+            "Refusing to set '{name}': {why}. Choose another power mode."
+        ));
     }
     let allowed = choices();
     if !allowed.is_empty() && !allowed.iter().any(|c| c == name) {
@@ -405,6 +467,21 @@ mod tests {
         for (id, _, _) in PPT_IDS.iter().chain(GPU_PPT_IDS.iter()) {
             assert!(is_known_fw_attr(id));
         }
+    }
+
+    #[test]
+    fn deny_list_blocks_known_dangerous_profiles() {
+        assert!(blocked_reason_for("Q7CN34WW", "custom").is_some());
+        assert!(blocked_reason_for("q7cn34ww", " custom\n").is_some());
+        assert!(blocked_reason_for("Q7CN34WW", "performance").is_none());
+        assert!(blocked_reason_for("Q7CN34WW", "max-power").is_none());
+        assert!(blocked_reason_for("LPCN65WW", "max-power").is_some());
+        // Only the reported LPCN build is blocked, and only max-power.
+        assert!(blocked_reason_for("LPCN65WW", "custom").is_none());
+        assert!(blocked_reason_for("LPCN66WW", "max-power").is_none());
+        // Unrelated machines and unreadable DMI are never blocked.
+        assert!(blocked_reason_for("SMCN20WW", "custom").is_none());
+        assert!(blocked_reason_for("", "custom").is_none());
     }
 
     #[test]
