@@ -124,6 +124,9 @@ pub(crate) fn build_udev_permanent_section(
 /// the diagnostics as stacked cards, no extra ViewSwitcher.
 pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &DaemonGate) -> gtk::Box {
     let page = page_lede("");
+    if let Some(group) = build_recommended_section(toast_overlay) {
+        page.append(&group);
+    }
     page.append(&build_selfcheck_section(toast_overlay));
     page.append(&build_speakers_section(toast_overlay));
     page.append(&build_lighting_reset_section(toast_overlay, gate));
@@ -138,6 +141,131 @@ pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &Daemon
     advanced_group.add(&advanced);
     page.append(&advanced_group);
     page
+}
+
+/// One optional component this laptop would benefit from.
+struct Recommendation {
+    title: &'static str,
+    subtitle: String,
+    tooltip: String,
+    /// Fixed PolicyKit setup operation behind the Install button.
+    operation: &'static str,
+    done_toast: &'static str,
+    /// Install is not possible yet (missing build tools); the subtitle says why.
+    blocked: bool,
+}
+
+/// Optional components that make sense for this machine and are missing.
+fn missing_components() -> Vec<Recommendation> {
+    let mut out = Vec::new();
+    let caps = legion_core::device::detect().capabilities;
+
+    // AMD tuning driver: only on the machine Curve Optimizer is validated on.
+    if legion_core::undervolt::machine_validated()
+        && !std::path::Path::new("/sys/kernel/ryzen_smu_drv").is_dir()
+    {
+        let missing = dkms_prereqs_missing();
+        out.push(Recommendation {
+            title: "AMD tuning driver",
+            subtitle: match &missing {
+                None => "Unlocks undervolting on the Performance page".to_string(),
+                Some(cmd) => format!("Needs build tools first: {cmd}"),
+            },
+            tooltip: "Builds the bundled, pinned ryzen_smu driver through DKMS using PolicyKit"
+                .into(),
+            operation: "install-ryzen-smu",
+            done_toast: "AMD tuning driver installed",
+            blocked: missing.is_some(),
+        });
+    }
+
+    // Speaker firmware: the woofer amp is present but has no firmware file.
+    if legion_core::audio::aw88399_acpi_present() && !legion_core::audio::aw88399_firmware_present()
+    {
+        out.push(Recommendation {
+            title: "Speaker firmware",
+            subtitle: "Full bass from the built-in speakers. Restart afterwards".into(),
+            tooltip: "Downloads and installs aw88399_acf.bin (checksum-verified, never \
+                      overwrites existing firmware)"
+                .into(),
+            operation: "install-amp-firmware",
+            done_toast: "Speaker firmware installed, restart to use it",
+            blocked: false,
+        });
+    }
+
+    // Keyboard access rule: lets the app drive the RGB keyboard after a reboot.
+    if caps.lighting_kind == legion_core::device::LightingKind::Spectrum && !udev_rule_installed() {
+        out.push(Recommendation {
+            title: "Keyboard access rule",
+            subtitle: "Keeps keyboard lighting working after a restart".into(),
+            tooltip: "Writes /etc/udev/rules.d/99-legion.rules and reloads udev (admin password \
+                      via PolicyKit)"
+                .into(),
+            operation: "install-udev",
+            done_toast: "Keyboard access rule installed",
+            blocked: false,
+        });
+    }
+    out
+}
+
+/// "Recommended for this laptop": shown only while an optional component that
+/// fits this machine is missing. Each row reuses the setup helper operation
+/// behind the matching button elsewhere in the app.
+pub(crate) fn build_recommended_section(
+    toast_overlay: &adw::ToastOverlay,
+) -> Option<adw::PreferencesGroup> {
+    let items = missing_components();
+    if items.is_empty() {
+        return None;
+    }
+    let group = pref_group("Recommended for this laptop", None);
+    let remaining = Rc::new(Cell::new(items.len()));
+    for item in items {
+        let row = adw::ActionRow::builder()
+            .title(item.title)
+            .subtitle(item.subtitle.as_str())
+            .activatable(false)
+            .build();
+        tip(&row, &item.tooltip);
+        let btn = secondary_button_tip("Install", Some(&item.tooltip));
+        btn.set_valign(Align::Center);
+        btn.set_sensitive(!item.blocked);
+        row.add_suffix(&btn);
+        group.add(&row);
+
+        let overlay = toast_overlay.clone();
+        let group_c = group.clone();
+        let row_c = row.clone();
+        let remaining = remaining.clone();
+        let (operation, done_toast) = (item.operation, item.done_toast);
+        btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            btn.set_label("Installing…");
+            let overlay = overlay.clone();
+            let group = group_c.clone();
+            let row = row_c.clone();
+            let btn = btn.clone();
+            let remaining = remaining.clone();
+            run_setup_helper(operation, move |result| match result {
+                Ok(_) => {
+                    group.remove(&row);
+                    remaining.set(remaining.get().saturating_sub(1));
+                    if remaining.get() == 0 {
+                        group.set_visible(false);
+                    }
+                    toast_ok(&overlay, done_toast);
+                }
+                Err(error) => {
+                    btn.set_label("Install");
+                    btn.set_sensitive(true);
+                    toast_error(&overlay, &error);
+                }
+            });
+        });
+    }
+    Some(group)
 }
 
 pub(crate) fn build_lighting_reset_section(

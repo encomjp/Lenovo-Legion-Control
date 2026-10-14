@@ -36,13 +36,12 @@ pub(crate) fn push_telemetry_to_daemon(enabled: bool) {
     });
 }
 
-/// First-launch welcome — a real window (not a cramped alert): brand header,
-/// short intro, one compact telemetry opt-out switch, and horizontal actions.
-/// Any close path marks the welcome seen, so it shows exactly once.
+/// First-launch welcome: one compact window with the app mark, a single
+/// sentence, the diagnostics switch and Start. Optional components are
+/// offered later on the Health page. Any close path marks the welcome seen,
+/// so it shows exactly once.
 pub(crate) fn show_welcome_if_needed(
     parent: &impl glib::object::IsA<gtk::Widget>,
-    stack: &adw::ViewStack,
-    about_tabs: Option<&adw::ViewStack>,
     consent: &Rc<Cell<bool>>,
     share_switch: Option<&adw::SwitchRow>,
     sync: &Rc<Cell<bool>>,
@@ -52,10 +51,10 @@ pub(crate) fn show_welcome_if_needed(
     }
 
     let win = adw::Window::builder()
-        .title("Welcome to Legion Control")
+        .title("Legion Control")
         .modal(true)
-        .default_width(600)
-        .default_height(440)
+        .default_width(440)
+        .resizable(false)
         .build();
     let root = parent.as_ref().root();
     if let Some(host) = root.and_then(|r| r.downcast::<gtk::Window>().ok()) {
@@ -63,37 +62,19 @@ pub(crate) fn show_welcome_if_needed(
     }
 
     // ── brand ──
-    let brand = gtk::Box::new(Orientation::Horizontal, 16);
-    brand.set_valign(Align::Center);
-    brand.append(&color_icon(
-        include_bytes!("../../data/icons/app-mark.svg"),
-        48,
-    ));
-    let brand_text = gtk::Box::new(Orientation::Vertical, 2);
-    let title = gtk::Label::new(Some("Welcome to Legion Control"));
-    title.add_css_class("title-2");
-    title.set_halign(Align::Start);
-    title.set_wrap(true);
-    title.set_xalign(0.0);
+    let mark = color_icon(include_bytes!("../../data/icons/app-mark.svg"), 64);
+    mark.set_halign(Align::Center);
+    let title = gtk::Label::new(Some("Legion Control"));
+    title.add_css_class("title-1");
+    title.set_halign(Align::Center);
     let tagline = gtk::Label::new(Some(
-        "Unofficial community tool for Lenovo Legion laptops. Not affiliated with Lenovo. Use at your own risk.",
+        "Unofficial tool for Lenovo Legion laptops. Not affiliated with Lenovo.",
     ));
-    tagline.add_css_class("page-sub");
-    tagline.set_halign(Align::Start);
     tagline.set_wrap(true);
-    tagline.set_xalign(0.0);
-    brand_text.append(&title);
-    brand_text.append(&tagline);
-    brand.append(&brand_text);
+    tagline.set_justify(gtk::Justification::Center);
+    tagline.set_halign(Align::Center);
 
-    let intro = gtk::Label::new(Some(
-        "Choose optional components now, or change everything later under Settings, Setup.",
-    ));
-    intro.set_halign(Align::Start);
-    intro.set_wrap(true);
-    intro.set_xalign(0.0);
-
-    // ── telemetry — one compact switch instead of a wall of buttons ──
+    // ── diagnostics ──
     let telemetry_row = adw::SwitchRow::builder()
         .title("Share anonymous diagnostics")
         .subtitle("Anonymous hardware stats. Opt out any time.")
@@ -106,18 +87,8 @@ pub(crate) fn show_welcome_if_needed(
          serials, MACs, IPs, key colors, custom profile names. \
          Change any time under Settings, Setup.",
     );
-    let telemetry_group = pref_group("Diagnostics", None);
+    let telemetry_group = pref_group("", None);
     telemetry_group.add(&telemetry_row);
-    let privacy_link = gtk::Button::with_label("Privacy policy");
-    privacy_link.add_css_class("pill-btn");
-    tip(
-        &privacy_link,
-        "What is sent and what is never collected. Opens GitHub in your browser.",
-    );
-    privacy_link.set_halign(Align::Start);
-    privacy_link.connect_clicked(|_| {
-        open_uri("https://github.com/encomjp/Lenovo-Legion-Control#alpha-telemetry-opt-out");
-    });
 
     let consent_c0 = consent.clone();
     let share_c0 = share_switch.cloned();
@@ -146,103 +117,49 @@ pub(crate) fn show_welcome_if_needed(
     });
 
     // ── actions ──
-    let actions = gtk::Box::new(Orientation::Horizontal, 12);
-    actions.set_halign(Align::End);
-    let later_btn = gtk::Button::with_label("Not now");
-    later_btn.add_css_class("pill-btn");
-    tip(&later_btn, "Skip for now, nothing else changes");
-    let setup_btn = primary_button_tip(
-        "Set up now",
-        Some("Guided walkthrough: service, startup and tuning, hardware, self-check"),
+    let privacy_btn = gtk::Button::with_label("Privacy policy");
+    privacy_btn.add_css_class("pill-btn");
+    tip(
+        &privacy_btn,
+        "What is sent and what is never collected. Opens GitHub in your browser.",
     );
-    actions.append(&later_btn);
-    actions.append(&setup_btn);
+    privacy_btn.connect_clicked(|_| {
+        open_uri("https://github.com/encomjp/Lenovo-Legion-Control#alpha-telemetry-opt-out");
+    });
+    let start_btn = primary_button_tip("Start", Some("Open Legion Control"));
+    let actions = gtk::Box::new(Orientation::Horizontal, 12);
+    let spacer = gtk::Box::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    actions.append(&privacy_btn);
+    actions.append(&spacer);
+    actions.append(&start_btn);
 
     // ── layout ──
-    let page = gtk::Box::new(Orientation::Vertical, 22);
-    page.set_margin_top(24);
+    let page = gtk::Box::new(Orientation::Vertical, 16);
+    page.set_margin_top(12);
     page.set_margin_bottom(24);
     page.set_margin_start(28);
     page.set_margin_end(28);
-    page.append(&brand);
-    page.append(&intro);
-
-    // ── what's new — fetched from the GitHub release (silent on failure) ──
-    // First-launch context: users see the latest changes without hunting
-    // through the releases page.
-    let page_whats_new = page.clone();
-    {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(legion_core::update::check_latest_release());
-        });
-        glib::timeout_add_local(Duration::from_millis(300), move || match rx.try_recv() {
-            Ok(Ok(info)) => {
-                let highlights = legion_core::update::release_highlights(&info.body, 4);
-                if !highlights.is_empty() {
-                    let title = gtk::Label::new(Some(&format!("New in version {}", info.version)));
-                    title.set_halign(Align::Start);
-                    title.add_css_class("heading");
-                    page_whats_new.append(&title);
-                    for h in highlights {
-                        let label = gtk::Label::new(Some(&h));
-                        label.set_halign(Align::Start);
-                        label.set_wrap(true);
-                        label.set_xalign(0.0);
-                        label.add_css_class("page-sub");
-                        page_whats_new.append(&label);
-                    }
-                }
-                glib::ControlFlow::Break
-            }
-            Ok(Err(_)) | Err(_) => glib::ControlFlow::Break,
-        });
-    }
+    page.append(&mark);
+    page.append(&title);
+    page.append(&tagline);
     page.append(&telemetry_group);
-    page.append(&privacy_link);
     page.append(&actions);
 
-    let clamp = libadwaita::Clamp::builder().maximum_size(560).build();
-    clamp.set_child(Some(&page));
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
-        .child(&clamp)
-        .build();
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-    toolbar.set_content(Some(&scroll));
+    let header = adw::HeaderBar::new();
+    header.set_show_title(false);
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&page));
     win.set_content(Some(&toolbar));
 
-    // Any close path records the welcome as seen — it shows exactly once.
+    // Any close path records the welcome as seen: it shows exactly once.
     win.connect_close_request(|_| {
         legion_core::config::mark_welcome_seen();
         glib::Propagation::Proceed
     });
-
-    let win_later = win.clone();
-    later_btn.connect_clicked(move |_| {
-        legion_core::config::mark_welcome_seen();
-        win_later.close();
-    });
-    let win_setup = win.clone();
-    let stack_c = stack.clone();
-    let about_tabs_c = about_tabs.cloned();
-    let consent_c = consent.clone();
-    let share_c = share_switch.cloned();
-    let sync_c = sync.clone();
-    setup_btn.connect_clicked(move |_| {
-        legion_core::config::mark_welcome_seen();
-        win_setup.close();
-        run_guided_setup(
-            &stack_c,
-            about_tabs_c.as_ref(),
-            &consent_c,
-            share_c.as_ref(),
-            &sync_c,
-        );
-    });
+    let win_start = win.clone();
+    start_btn.connect_clicked(move |_| win_start.close());
 
     win.present();
 }
@@ -310,6 +227,8 @@ pub(crate) struct SetupCtx {
 /// startup & tuning, hardware identity, self-check, summary). Every probe
 /// runs on a `dispatch_async` worker thread; each dialog appears once its
 /// result is in.
+/// Kept for a future entry point (the welcome window no longer starts it).
+#[allow(dead_code)]
 pub(crate) fn run_guided_setup(
     stack: &adw::ViewStack,
     about_tabs: Option<&adw::ViewStack>,
@@ -824,7 +743,7 @@ pub(crate) fn status_step_dialog(
 /// `Some(install command)` when the ryzen_smu DKMS build cannot work yet
 /// because `dkms` or the running kernel's headers are missing; `None` when
 /// both are present. The command matches the distro and kernel flavour.
-fn dkms_prereqs_missing() -> Option<String> {
+pub(crate) fn dkms_prereqs_missing() -> Option<String> {
     let release = std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
