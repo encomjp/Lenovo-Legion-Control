@@ -723,6 +723,8 @@ fn hid_rebind_spectrum() -> Result<String, String> {
         "Spectrum USB path gone".to_string()
     })?;
     let mut hid_iface: Option<(String, PathBuf, String)> = None;
+    // First non-hid-generic binding seen — reported if nothing better exists.
+    let mut foreign: Option<(String, PathBuf, String)> = None;
     if let Ok(rd) = fs::read_dir(&usb) {
         for e in rd.flatten() {
             let n = e.file_name();
@@ -731,8 +733,13 @@ fn hid_rebind_spectrum() -> Result<String, String> {
             if n.contains(':') {
                 if let Some((link, drv)) = iface_driver(&e.path()) {
                     log::debug!("rgb-panic: hid_rebind: interface {n} bound to driver {drv}");
-                    hid_iface = Some((n.into_owned(), link, drv));
-                    break;
+                    // The USB interface (e.g. 3-2.4:1.0) is usbhid-owned; the
+                    // hid-generic node sits one level below — keep looking.
+                    if drv == "hid-generic" {
+                        hid_iface = Some((n.into_owned(), link, drv));
+                        break;
+                    }
+                    foreign.get_or_insert((n.into_owned(), link, drv));
                 }
             }
         }
@@ -750,8 +757,11 @@ fn hid_rebind_spectrum() -> Result<String, String> {
                                 log::debug!(
                                     "rgb-panic: hid_rebind: interface {n} bound to driver {drv} (one level down)"
                                 );
-                                hid_iface = Some((n.into_owned(), link, drv));
-                                break;
+                                if drv == "hid-generic" {
+                                    hid_iface = Some((n.into_owned(), link, drv));
+                                    break;
+                                }
+                                foreign.get_or_insert((n.into_owned(), link, drv));
                             }
                         }
                     }
@@ -762,7 +772,7 @@ fn hid_rebind_spectrum() -> Result<String, String> {
             }
         }
     }
-    let Some((id, driver_link, driver)) = hid_iface else {
+    let Some((id, driver_link, driver)) = hid_iface.or(foreign) else {
         log::warn!(
             "rgb-panic: hid_rebind: no HID interface id found under {}",
             usb.display()

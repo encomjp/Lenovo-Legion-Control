@@ -492,9 +492,16 @@ fn store() -> &'static Mutex<CachedConfig> {
 }
 
 fn load_from_disk() -> AppConfig {
+    try_load_from_disk().unwrap_or_default()
+}
+
+/// Like [`load_from_disk`], but a read failure other than "file missing"
+/// (EACCES, EIO, …) is an `Err` — the file may hold real settings, so
+/// callers that write back must not replace it with defaults.
+fn try_load_from_disk() -> std::io::Result<AppConfig> {
     let path = config_path();
     log::trace!("config::load_from_disk — reading {}", path.display());
-    match fs::read_to_string(&path) {
+    Ok(match fs::read_to_string(&path) {
         Ok(s) => match serde_json::from_str::<AppConfig>(&s) {
             Ok(mut parsed) => {
                 log::debug!(
@@ -546,9 +553,9 @@ fn load_from_disk() -> AppConfig {
         }
         Err(e) => {
             log::warn!("config read failed ({}): {e}", path.display());
-            AppConfig::default()
+            return Err(e);
         }
-    }
+    })
 }
 
 fn write_disk(cfg: &AppConfig) {
@@ -648,7 +655,15 @@ pub fn update(f: impl FnOnce(&mut AppConfig)) {
         // Re-read the on-disk state first: another process (daemon/GUI) may
         // have written since our cache was last updated. We are already
         // holding the config lock, so this read is serialized too.
-        let mut cfg = load_from_disk();
+        let mut cfg = match try_load_from_disk() {
+            Ok(c) => c,
+            Err(e) => {
+                // Unreadable but present: never overwrite it with defaults.
+                log::error!("config::update — settings unreadable ({e}); change kept in memory only");
+                f(&mut g.config);
+                return;
+            }
+        };
         log::trace!("config::update — invoking caller closure");
         f(&mut cfg);
         cfg.version = VERSION;
