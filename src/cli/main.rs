@@ -33,6 +33,35 @@ fn send_ok(cmd: DaemonCommand) -> Result<(), String> {
     expect_ok(send_command(cmd))
 }
 
+/// Show (no state) or set (on|off via the daemon) an ideapad_acpi toggle.
+fn ideapad_toggle(
+    name: &str,
+    toggle: legion_core::ideapad::Toggle,
+    state: Option<&str>,
+    make_cmd: fn(bool) -> DaemonCommand,
+) {
+    if !legion_core::ideapad::supported(toggle) {
+        fail(format!("{name} is not supported on this laptop"));
+    }
+    match state {
+        None => match legion_core::ideapad::get(toggle) {
+            Some(on) => println!("{name:<12} {}", if on { "on" } else { "off" }),
+            None => fail(format!("cannot read {name}")),
+        },
+        Some(s) => {
+            let on = match s.to_lowercase().as_str() {
+                "on" | "true" | "1" => true,
+                "off" | "false" | "0" => false,
+                _ => usage_fail(format!("unknown state '{s}' (use on|off)")),
+            };
+            if let Err(e) = send_ok(make_cmd(on)) {
+                fail(e);
+            }
+            println!("{name} → {}", if on { "on" } else { "off" });
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "legion-cli",
@@ -135,6 +164,16 @@ enum Commands {
     SetLogo {
         /// on or off
         state: String,
+    },
+    /// Show or set Fn Lock (ideapad_acpi): no argument shows, on|off sets
+    FnLock {
+        /// on or off
+        state: Option<String>,
+    },
+    /// Show or set always-on USB charging (ideapad_acpi): no argument shows, on|off sets
+    UsbCharging {
+        /// on or off
+        state: Option<String>,
     },
     /// Show recent daemon log lines
     Logs {
@@ -744,6 +783,18 @@ fn main() {
             send_ok(DaemonCommand::SetLogo(on)).ok();
             println!("logo → {}", if on { "on" } else { "off" });
         }
+        Commands::FnLock { state } => ideapad_toggle(
+            "fn-lock",
+            legion_core::ideapad::Toggle::FnLock,
+            state.as_deref(),
+            DaemonCommand::SetFnLock,
+        ),
+        Commands::UsbCharging { state } => ideapad_toggle(
+            "usb-charging",
+            legion_core::ideapad::Toggle::UsbCharging,
+            state.as_deref(),
+            DaemonCommand::SetUsbCharging,
+        ),
         Commands::Logs { n } => match send_command(DaemonCommand::GetRecentLogs(n)) {
             Ok(DaemonResponse::RecentLogs(text)) => {
                 if text.is_empty() {
@@ -1321,6 +1372,8 @@ fn cmd_label(cmd: &Commands) -> String {
         Commands::RgbFix => "rgb-fix".into(),
         Commands::Logo => "logo".into(),
         Commands::SetLogo { state } => format!("set-logo state={state}"),
+        Commands::FnLock { state } => format!("fn-lock state={state:?}"),
+        Commands::UsbCharging { state } => format!("usb-charging state={state:?}"),
         Commands::Logs { n } => format!("logs n={n}"),
         Commands::SetLogLevel { level } => format!("set-log-level level={level}"),
         Commands::Undervolt => "undervolt".into(),

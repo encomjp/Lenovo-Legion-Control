@@ -136,6 +136,10 @@ pub enum DaemonCommand {
     /// config, so without this an opt-out in Settings never reached it.
     /// Appended last: bincode encodes variants by index.
     SetTelemetry(bool),
+    /// ideapad_acpi Fn Lock on/off (read-back verified by the daemon).
+    SetFnLock(bool),
+    /// ideapad_acpi always-on USB charging on/off (read-back verified).
+    SetUsbCharging(bool),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -446,6 +450,8 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         } => format!("SetThermal({enabled},{max_temp})"),
         DaemonCommand::GetThermalStatus => "GetThermalStatus".into(),
         DaemonCommand::GetDaemonVersion => "GetDaemonVersion".into(),
+        DaemonCommand::SetFnLock(on) => format!("SetFnLock({on})"),
+        DaemonCommand::SetUsbCharging(on) => format!("SetUsbCharging({on})"),
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_label: {label}");
@@ -495,6 +501,8 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::SetThermal { .. } => "SetThermal",
         DaemonCommand::GetThermalStatus => "GetThermalStatus",
         DaemonCommand::GetDaemonVersion => "GetDaemonVersion",
+        DaemonCommand::SetFnLock(_) => "SetFnLock",
+        DaemonCommand::SetUsbCharging(_) => "SetUsbCharging",
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_kind: {kind}");
@@ -553,6 +561,8 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::SetCurveOptimizerPersistence { .. }
             | DaemonCommand::SetThermal { .. }
             | DaemonCommand::FixRgbPanic
+            | DaemonCommand::SetFnLock(_)
+            | DaemonCommand::SetUsbCharging(_)
     );
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_is_write: {is_write}");
@@ -703,6 +713,8 @@ mod tests {
                 acknowledge: true,
             },
             DaemonCommand::GetRecentLogs(100),
+            DaemonCommand::SetFnLock(true),
+            DaemonCommand::SetUsbCharging(false),
             DaemonCommand::SetLogLevel("debug".into()),
         ];
         for cmd in &cmds {

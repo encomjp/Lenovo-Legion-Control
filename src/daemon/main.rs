@@ -10,8 +10,8 @@ use legion_core::comms::{
 };
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
-    battery, config, cpu, device, fans, keyboard, logging, profile, rgb_panic, sensors, thermal,
-    undervolt,
+    battery, config, cpu, device, fans, ideapad, keyboard, logging, profile, rgb_panic, sensors,
+    thermal, undervolt,
 };
 
 use std::collections::HashMap;
@@ -962,6 +962,14 @@ fn process_command(
             None => DaemonResponse::Error("Cannot read Spectrum brightness".into()),
         },
         DaemonCommand::SetLogo(on) => match keyboard::set_logo(on) {
+            Ok(()) => DaemonResponse::Ok,
+            Err(e) => DaemonResponse::Error(e),
+        },
+        DaemonCommand::SetFnLock(on) => match ideapad::set(ideapad::Toggle::FnLock, on) {
+            Ok(()) => DaemonResponse::Ok,
+            Err(e) => DaemonResponse::Error(e),
+        },
+        DaemonCommand::SetUsbCharging(on) => match ideapad::set(ideapad::Toggle::UsbCharging, on) {
             Ok(()) => DaemonResponse::Ok,
             Err(e) => DaemonResponse::Error(e),
         },
