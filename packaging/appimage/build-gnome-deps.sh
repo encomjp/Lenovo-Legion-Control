@@ -57,7 +57,19 @@ build "gtk-$GTK_VERSION" -Dintrospection=disabled -Ddocumentation=false -Dman-pa
 # incompatible appstream main, so build a pinned release (+ libxmlb) first.
 curl -fsSL "https://github.com/hughsie/libxmlb/releases/download/$XMLB_VERSION/libxmlb-$XMLB_VERSION.tar.xz" | tar -xJ -C "$SRC"
 build "libxmlb-$XMLB_VERSION" -Dgtkdoc=false -Dintrospection=false -Dtests=false -Dcli=false     -Dlzma=disabled -Dzstd=disabled
-curl -fsSL "https://www.freedesktop.org/software/appstream/releases/AppStream-$APPSTREAM_VERSION.tar.xz" | tar -xJ -C "$SRC"
+# freedesktop.org is a single point of failure (outage broke the v0.2.16
+# release build); fall back to the identical upstream tag on GitHub.
+if ! curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 20 --max-time 180 \
+    "https://www.freedesktop.org/software/appstream/releases/AppStream-$APPSTREAM_VERSION.tar.xz" \
+    -o "$SRC/appstream.tar.xz"; then
+  echo "freedesktop.org unreachable — using github.com/ximion/appstream v$APPSTREAM_VERSION"
+  mkdir -p "$SRC/AppStream-$APPSTREAM_VERSION"
+  curl -fsSL --retry 3 --retry-delay 5 \
+    "https://github.com/ximion/appstream/archive/refs/tags/v$APPSTREAM_VERSION.tar.gz" |
+    tar -xz -C "$SRC/AppStream-$APPSTREAM_VERSION" --strip-components=1
+else
+  tar -xJ -C "$SRC" -f "$SRC/appstream.tar.xz"
+fi
 build "AppStream-$APPSTREAM_VERSION" -Dsystemd=false -Dstemming=false -Dsvg-support=false     -Dgir=false -Ddocs=false -Dapidocs=false -Dinstall-docs=false -Dcompose=false -Dqt=false     -Dvapi=false -Dzstd-support=false
 
 fetch libadwaita "$ADW_VERSION"
