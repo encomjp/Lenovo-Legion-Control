@@ -377,7 +377,8 @@ fn f24_sensors_profile_agrees_with_profile_module() {
 fn f25_sensors_fan_rpms_match_direct_reads_within_tolerance() {
     skip_unless_hw!();
     let s = sensors::read_all();
-    let pairs = [(1u8, s.fan1_rpm), (2, s.fan2_rpm), (4, s.fan4_rpm)];
+    let [f1, f2, aux] = fans::slot_ids();
+    let pairs = [(f1, s.fan1_rpm), (f2, s.fan2_rpm), (aux, s.fan4_rpm)];
     for (id, snapshot_rpm) in pairs.into_iter().filter(|(_, r)| *r > 0) {
         let direct = fans::read_rpm(id).unwrap_or(0);
         let diff = (i64::from(snapshot_rpm) - i64::from(direct)).abs();

@@ -49,9 +49,12 @@ pub struct SensorReadings {
     pub ethernet_temp: f64,
     pub fan1_rpm: u32,
     pub fan2_rpm: u32,
+    /// Third ("aux") fan — hardware fan3 on legion_hwmon, fan4 on
+    /// lenovo_wmi_other (`fans::slot_ids`). Name kept for IPC/telemetry.
     pub fan4_rpm: u32,
     pub fan1_target: u32,
     pub fan2_target: u32,
+    /// Target of the third fan; same slot mapping as `fan4_rpm`.
     pub fan4_target: u32,
     pub profile: String,
     pub battery_pct: u32,
@@ -602,11 +605,13 @@ pub fn read_all() -> SensorReadings {
     );
 
     // Fans -- via fans:: backend so 83JG yogafan is honored (reconciles flattened fields with FanLive)
+    // The third slot follows the real aux id (fan3 on legion_hwmon, fan4 on WMI).
     let active_fan_ids = crate::fans::ids();
+    let aux_id = crate::fans::aux_id_from(&active_fan_ids).unwrap_or(4);
     for (fan_num, dst_rpm, dst_target) in [
         (1u8, &mut s.fan1_rpm, &mut s.fan1_target),
         (2u8, &mut s.fan2_rpm, &mut s.fan2_target),
-        (4u8, &mut s.fan4_rpm, &mut s.fan4_target),
+        (aux_id, &mut s.fan4_rpm, &mut s.fan4_target),
     ] {
         if !active_fan_ids.contains(&fan_num) {
             continue;
@@ -619,7 +624,7 @@ pub fn read_all() -> SensorReadings {
         }
     }
     log::debug!(
-        "sensors::read_all: fans via fans:: backend {} (rpm {} {} {})",
+        "sensors::read_all: fans via fans:: backend {} (rpm {} {} {}, aux=fan{aux_id})",
         crate::fans::backend_name(),
         s.fan1_rpm,
         s.fan2_rpm,

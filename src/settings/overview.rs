@@ -40,18 +40,21 @@ pub(crate) fn build_overview(
     metrics.append(&bat_chip);
 
     let fan_channels = legion_core::fans::channels();
+    let aux_fan = legion_core::fans::aux_id_from(
+        &fan_channels.iter().map(|c| c.id).collect::<Vec<_>>(),
+    );
     let mut fan_metric_labels: Vec<(u8, gtk::Label, gtk::Label)> = Vec::new();
     for ch in &fan_channels {
         let tip_txt = match ch.id {
             1 => "CPU fan speed in RPM (Auto = firmware curve)",
             2 => "GPU fan speed in RPM (Auto = firmware curve)",
-            4 => "Auxiliary chassis fan speed in RPM",
+            id if Some(id) == aux_fan => "Auxiliary chassis fan speed in RPM",
             _ => "Fan speed in RPM (Auto = firmware curve)",
         };
         let short = match ch.id {
             1 => "Fan · CPU".to_string(),
             2 => "Fan · GPU".to_string(),
-            4 => "Fan · Aux".to_string(),
+            id if Some(id) == aux_fan => "Fan · Aux".to_string(),
             _ => format!("Fan · {}", ch.id),
         };
         let (chip, v, d) = metric_chip_tip(&short, Some(tip_txt));
@@ -713,11 +716,13 @@ pub(crate) fn set_fan_metrics_from_sensors(
     labels: &[(u8, gtk::Label, gtk::Label)],
     s: &legion_core::sensors::SensorReadings,
 ) {
+    let ids: Vec<u8> = labels.iter().map(|(id, _, _)| *id).collect();
+    let aux = legion_core::fans::aux_id_from(&ids);
     for (id, value, detail) in labels {
         let (rpm, target) = match id {
             1 => (s.fan1_rpm, s.fan1_target),
             2 => (s.fan2_rpm, s.fan2_target),
-            4 => (s.fan4_rpm, s.fan4_target),
+            id if Some(*id) == aux => (s.fan4_rpm, s.fan4_target),
             _ => (
                 legion_core::fans::read_rpm(*id).unwrap_or(0),
                 legion_core::fans::read_target(*id).unwrap_or(0),

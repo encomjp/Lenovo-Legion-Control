@@ -150,7 +150,7 @@ pub(crate) fn fan_card(
     let sec_tip = match fan {
         1 => "CPU cooling fan",
         2 => "Discrete GPU cooling fan",
-        4 => "Auxiliary chassis fan",
+        3 | 4 => "Auxiliary chassis fan",
         _ => "Fan control for this channel",
     };
     let group = pref_group(title, None);
