@@ -1,17 +1,18 @@
-//! Battery page — live stats, charge limit, EC advisory.
+//! Power page — Fn Lock / USB, live battery stats, charge limit, EC advisory.
 
 use super::*;
 
 pub(crate) const OFF_CHARGE_HINT: &str = "Battery charged past the limit while the laptop was off — EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.";
 
-/// Single source of truth for top-level page ids → header titles. nav_to callers,
-/// the LEGION_PAGE override, and the visible-child sync all read this so the
-/// maps can never disagree.
 pub(crate) fn build_battery_pages(
     toast_overlay: &adw::ToastOverlay,
     gate: &DaemonGate,
 ) -> gtk::Box {
     let status_page = page_lede("");
+
+    // Fn Lock / always-on USB first — they are the only controls here that
+    // are not already shown as live readouts below.
+    status_page.append(&build_ideapad_switches(toast_overlay, gate));
 
     // Chips on top — 3×2: Capacity · Voltage · Power · Health · Cycles · Limit
     let chips = gtk::FlowBox::builder()
@@ -61,33 +62,6 @@ pub(crate) fn build_battery_pages(
     chips.append(&cycles_chip);
     chips.append(&limit_chip);
     status_page.append(&chips);
-
-    let hero = pref_group("Battery", None);
-    tip(
-        &hero,
-        "Live charge and status from the laptop's battery gauge — updates every few seconds from sysfs, no daemon needed for readouts",
-    );
-
-    let pct_row = adw::ActionRow::builder()
-        .title("Charge")
-        .subtitle("—%")
-        .activatable(false)
-        .build();
-    tip(&pct_row, "How full the battery is right now (0–100%)");
-    pct_row.add_css_class("property");
-    let st_row = adw::ActionRow::builder()
-        .title("Status")
-        .subtitle("Reading…")
-        .activatable(false)
-        .build();
-    tip(
-        &st_row,
-        "Charging = plugged in · Discharging = on battery · Full = topped up · Not charging = holding at limit",
-    );
-    st_row.add_css_class("property");
-    hero.add(&pct_row);
-    hero.add(&st_row);
-    status_page.append(&hero);
 
     let stats = pref_group("Details", None);
     tip(
@@ -198,8 +172,6 @@ pub(crate) fn build_battery_pages(
     gate.track(&lim);
     status_page.append(&lim);
 
-    status_page.append(&build_ideapad_switches(toast_overlay, gate));
-
     let volt_l = detail_rows[0].clone();
     let pow_l = detail_rows[1].clone();
     let en_l = detail_rows[2].clone();
@@ -212,9 +184,6 @@ pub(crate) fn build_battery_pages(
         if let Some(pct) = legion_core::battery::capacity() {
             cap_v.set_text(&format!("{pct}%"));
             cap_d.set_text(&legion_core::battery::status().unwrap_or_default());
-            pct_row.set_subtitle(&format!("{pct}%"));
-            st_row
-                .set_subtitle(&legion_core::battery::status().unwrap_or_else(|| "Unknown".into()));
         }
         if let Some(v) = legion_core::battery::voltage() {
             volt_v.set_text(&format!("{v:.2} V"));
@@ -309,10 +278,8 @@ pub(crate) fn build_battery_pages(
                     off_charge_hint.set_visible(true);
                 }
                 if let Some(pct) = s.pct {
-                    pct_row.set_subtitle(&format!("{pct}%"));
                     cap_v_c.set_text(&format!("{pct}%"));
                     cap_d_c.set_text(s.status.as_deref().unwrap_or_default());
-                    st_row.set_subtitle(s.status.as_deref().unwrap_or("Unknown"));
                     // Tint capacity chip: warm when discharging low, hot when very low? Use level thresholds.
                     cap_chip_c.remove_css_class("hot");
                     cap_chip_c.remove_css_class("warm");

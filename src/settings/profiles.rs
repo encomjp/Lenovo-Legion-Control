@@ -125,98 +125,145 @@ pub(crate) fn build_profiles_page(
 ) -> gtk::Box {
     let page = page_lede("");
 
-    let group = pref_group("Named presets", None);
-
-    let names = legion_core::config::list_profile_names();
-    let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    let labels: Vec<&str> = if name_refs.is_empty() {
-        vec!["(none yet)"]
-    } else {
-        name_refs
-    };
-    let active = {
-        let cur = legion_core::config::get().active_profile;
-        names.iter().position(|n| n == &cur).unwrap_or(0) as u32
-    };
-    let picker = string_combo_row("Profile", "", &labels, active);
-    tip(&picker, "Presets are stored in ~/.config/legion-control/");
-    group.add(&picker);
-
-    // Preview what the selected preset will change before Load applies it.
-    {
-        let update_summary = move |p: &adw::ComboRow| {
-            let names = legion_core::config::list_profile_names();
-            let text = names
-                .get(p.selected() as usize)
-                .and_then(|n| legion_core::config::get_named_profile(n))
-                .map(|prof| profile_summary(&prof))
-                .unwrap_or_else(|| {
-                    "Nothing saved yet — snapshot your setup with Save current".into()
-                });
-            p.set_subtitle(&text);
-        };
-        update_summary(&picker);
-        picker.connect_selected_notify(update_summary);
-    }
-
+    // ── Save the current setup (the one primary action on this view) ────
+    let save_group = pref_group("Save current setup", None);
     let entry = gtk::Entry::builder()
-        .placeholder_text("Name for new profile")
+        .placeholder_text("Profile name")
         .hexpand(true)
+        .valign(Align::Center)
         .build();
     tip(&entry, "Type a name, then Save current");
     let entry_row = adw::ActionRow::builder()
-        .title("New name")
+        .title("Name")
+        .subtitle("Snapshots power mode, limits, fans, lighting and charge limit")
         .activatable(false)
         .build();
     tip(
         &entry_row,
-        "Type a short name for this preset, then press Save current",
+        "Presets are stored in ~/.config/legion-control/",
     );
     entry_row.add_suffix(&entry);
-    group.add(&entry_row);
-
-    let btns = gtk::Box::new(Orientation::Horizontal, 8);
     let save = primary_button_tip(
         "Save current",
         Some("Snapshot power mode, PPT, fans, lighting, and charge limit"),
     );
-    let load = gtk::Button::with_label("Load");
-    load.add_css_class("pill-btn");
-    tip(&load, "Apply the selected named profile now");
-    let del = gtk::Button::with_label("Delete");
-    del.add_css_class("flat");
-    del.add_css_class("pill-btn");
-    tip(&del, "Remove the selected named profile from disk");
-    // Buttons live in their own full-width row: a 3-button suffix inside an
-    // ActionRow overflows below ~900 px window width (NN/g: responsive).
-    btns.append(&save);
-    btns.append(&load);
-    btns.append(&del);
-    btns.set_margin_top(4);
-    btns.set_margin_bottom(4);
-    btns.set_halign(Align::End);
-    group.add(&btns);
+    save.set_valign(Align::Center);
+    entry_row.add_suffix(&save);
+    save_group.add(&entry_row);
+    gate.track(&save_group);
+    page.append(&save_group);
 
-    let restore_sw = adw::SwitchRow::builder()
-        .title("Restore last session on launch")
-        .active(legion_core::config::get().restore_on_launch)
-        .build();
-    tip(
-        &restore_sw,
-        "When on, Legion Control re-applies your last power mode, fans, charge limit, and lighting after launch",
-    );
-    restore_sw.connect_active_notify(|row| {
-        legion_core::config::update(|cfg| cfg.restore_on_launch = row.is_active());
-    });
-    group.add(&restore_sw);
+    // ── Saved profiles: one row each with Load / Delete ─────────────────
+    let list_group = pref_group("Saved profiles", None);
+    gate.track(&list_group);
+    page.append(&list_group);
+    let rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::new(RefCell::new(Vec::new()));
+    type Refresh = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+    let refresh: Refresh = Rc::new(RefCell::new(None));
 
-    gate.track(&group);
-    page.append(&group);
+    let rebuild = {
+        let list_group = list_group.clone();
+        let rows = rows.clone();
+        let refresh = refresh.clone();
+        let overlay = toast_overlay.clone();
+        let mode_slot = mode_drop_slot.clone();
+        let choices_slot = profile_choices_slot.clone();
+        Rc::new(move || {
+            for r in rows.borrow_mut().drain(..) {
+                list_group.remove(&r);
+            }
+            let names = legion_core::config::list_profile_names();
+            let active = legion_core::config::get().active_profile;
+            if names.is_empty() {
+                let empty = adw::ActionRow::builder()
+                    .title("Nothing saved yet")
+                    .subtitle("Name your current setup above and press Save current")
+                    .activatable(false)
+                    .build();
+                list_group.add(&empty);
+                rows.borrow_mut().push(empty);
+                return;
+            }
+            for name in names {
+                let summary = legion_core::config::get_named_profile(&name)
+                    .map(|p| profile_summary(&p))
+                    .unwrap_or_else(|| "Unreadable profile".into());
+                let row = adw::ActionRow::builder()
+                    .title(glib::markup_escape_text(&name))
+                    .subtitle(glib::markup_escape_text(&summary))
+                    .subtitle_lines(2)
+                    .activatable(false)
+                    .build();
+                if name == active {
+                    let badge = status_pill_tip("Active", "ok", Some("Last profile you loaded"));
+                    badge.set_valign(Align::Center);
+                    row.add_prefix(&badge);
+                }
+                let load = gtk::Button::with_label("Load");
+                load.add_css_class("pill-btn");
+                load.set_valign(Align::Center);
+                tip(&load, "Apply this profile now");
+                let del = gtk::Button::with_label("Delete");
+                del.add_css_class("flat");
+                del.add_css_class("pill-btn");
+                del.set_valign(Align::Center);
+                tip(&del, "Remove this profile from disk");
+                row.add_suffix(&load);
+                row.add_suffix(&del);
+
+                {
+                    let name = name.clone();
+                    let overlay = overlay.clone();
+                    let mode_slot = mode_slot.clone();
+                    let choices_slot = choices_slot.clone();
+                    let refresh = refresh.clone();
+                    load.connect_clicked(move |_| {
+                        let Some(p) = legion_core::config::get_named_profile(&name) else {
+                            toast_error(&overlay, "Profile missing");
+                            return;
+                        };
+                        apply_profile(&p, &overlay, true, true);
+                        legion_core::config::update(|cfg| cfg.active_profile = name.clone());
+                        let choices = choices_slot.borrow();
+                        if let Some(i) = choices.iter().position(|c| c == &p.platform_profile) {
+                            if let Some(drop) = mode_slot.borrow().as_ref() {
+                                drop.set_selected(i as u32);
+                            }
+                        }
+                        let again = refresh.borrow().clone();
+                        if let Some(f) = again {
+                            f();
+                        }
+                    });
+                }
+                {
+                    let name = name.clone();
+                    let overlay = overlay.clone();
+                    let refresh = refresh.clone();
+                    del.connect_clicked(move |_| {
+                        legion_core::config::delete_named_profile(&name);
+                        toast_ok(&overlay, &format!("Deleted “{name}”"));
+                        let again = refresh.borrow().clone();
+                        if let Some(f) = again {
+                            f();
+                        }
+                    });
+                }
+                list_group.add(&row);
+                rows.borrow_mut().push(row);
+            }
+        })
+    };
+    {
+        let r = rebuild.clone();
+        *refresh.borrow_mut() = Some(Rc::new(move || r()));
+    }
+    rebuild();
 
     let overlay = toast_overlay.clone();
     let entry_s = entry.clone();
-    let picker_s = picker.clone();
-    save.connect_clicked(move |_| {
+    let rebuild_s = rebuild.clone();
+    let save_action = move || {
         let name = entry_s.text().to_string();
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -236,59 +283,18 @@ pub(crate) fn build_profiles_page(
         }
         legion_core::config::save_named_profile(&name);
         toast_ok(&overlay, &format!("Saved profile “{name}”"));
-        let names = legion_core::config::list_profile_names();
-        let model = gtk::StringList::new(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        picker_s.set_model(Some(&model));
-        if let Some(i) = names.iter().position(|n| n == &name) {
-            picker_s.set_selected(i as u32);
-        }
         entry_s.set_text("");
-    });
-
-    let overlay = toast_overlay.clone();
-    let picker_l = picker.clone();
-    let mode_slot = mode_drop_slot.clone();
-    let choices_slot = profile_choices_slot.clone();
-    load.connect_clicked(move |_| {
-        let names = legion_core::config::list_profile_names();
-        let idx = picker_l.selected() as usize;
-        let Some(name) = names.get(idx) else {
-            toast_error(&overlay, "No profile selected");
-            return;
-        };
-        let Some(p) = legion_core::config::get_named_profile(name) else {
-            toast_error(&overlay, "Profile missing");
-            return;
-        };
-        apply_profile(&p, &overlay, true, true);
-        legion_core::config::update(|cfg| cfg.active_profile = name.clone());
-        let choices = choices_slot.borrow();
-        if let Some(i) = choices.iter().position(|c| c == &p.platform_profile) {
-            if let Some(drop) = mode_slot.borrow().as_ref() {
-                drop.set_selected(i as u32);
-            }
-        }
-    });
-
-    let overlay = toast_overlay.clone();
-    let picker_d = picker.clone();
-    del.connect_clicked(move |_| {
-        let names = legion_core::config::list_profile_names();
-        let idx = picker_d.selected() as usize;
-        let Some(name) = names.get(idx).cloned() else {
-            return;
-        };
-        legion_core::config::delete_named_profile(&name);
-        let names = legion_core::config::list_profile_names();
-        let model = if names.is_empty() {
-            gtk::StringList::new(&["(none yet)"])
-        } else {
-            gtk::StringList::new(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-        };
-        picker_d.set_model(Some(&model));
-        picker_d.set_selected(0);
-        toast_ok(&overlay, &format!("Deleted “{name}”"));
-    });
+        rebuild_s();
+    };
+    let save_action = Rc::new(save_action);
+    {
+        let a = save_action.clone();
+        save.connect_clicked(move |_| a());
+    }
+    {
+        let a = save_action;
+        entry.connect_activate(move |_| a());
+    }
 
     page
 }
