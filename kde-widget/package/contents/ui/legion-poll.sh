@@ -81,6 +81,10 @@ value FAN_AUX "$(printf '%s\n' "$fans_line" | grep -oP 'Aux\s+\K[0-9]+' | head -
 
 value PROFILE "$profile"
 
+# Keyboard backlight ("backlight: low (1)") -> numeric level for the popup.
+kbd_level="$(timeout 2 "$CLI" kbd 2>/dev/null | grep -oP '\(\K[0-9]+(?=\))' | head -1 || true)"
+value KBD_LEVEL "$kbd_level"
+
 # Battery basics from sysfs — works even when only the daemon-less parts do.
 for bat in /sys/class/power_supply/BAT*; do
   [[ -d "$bat" ]] || continue
