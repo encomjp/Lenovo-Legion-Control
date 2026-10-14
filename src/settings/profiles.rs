@@ -46,9 +46,11 @@ pub(crate) fn apply_profile_blocking(
         errors.push(format!("charge limit: {e}"));
     }
 
-    legion_core::keyboard::set_rgb_brightness_async(p.brightness);
-    legion_core::keyboard::set_logo_async(p.logo_on);
-    legion_core::keyboard::restore_lighting_async();
+    if legion_core::keyboard::spectrum_present() {
+        legion_core::keyboard::set_rgb_brightness_async(p.brightness);
+        legion_core::keyboard::set_logo_async(p.logo_on);
+        legion_core::keyboard::restore_lighting_async();
+    }
 
     errors
 }
