@@ -169,7 +169,7 @@ enum Commands {
         #[command(subcommand)]
         command: ThermalCmd,
     },
-    /// Anonymous diagnostics (alpha) — off unless enabled in Settings.
+    /// Anonymous diagnostics (alpha) — on by default; turn off in Settings → Setup.
     Diagnose {
         #[command(subcommand)]
         action: DiagAction,
@@ -197,6 +197,10 @@ enum DiagAction {
         #[arg(long)]
         endpoint: Option<String>,
     },
+    /// Turn anonymous telemetry on (for this user and the root daemon)
+    Enable,
+    /// Turn anonymous telemetry off (for this user and the root daemon)
+    Disable,
 }
 
 #[derive(Subcommand)]
@@ -838,6 +842,16 @@ fn main() {
             }
         },
         Commands::Diagnose { action } => match action {
+            DiagAction::Enable | DiagAction::Disable => {
+                let on = matches!(action, DiagAction::Enable);
+                legion_core::config::update(|c| c.diagnostics.enabled = on);
+                println!("telemetry {} for this user", if on { "enabled" } else { "disabled" });
+                match send_command(DaemonCommand::SetTelemetry(on)) {
+                    Ok(DaemonResponse::Ok) => println!("daemon: telemetry {}", if on { "enabled" } else { "disabled" }),
+                    Ok(DaemonResponse::Error(e)) | Err(e) => fail(format!("daemon not updated: {e}")),
+                    _ => fail("daemon not updated: unexpected response"),
+                }
+            }
             DiagAction::Dump => {
                 let json = serde_json::to_string_pretty(&diagnostics::collect())
                     .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
@@ -1334,6 +1348,8 @@ fn diag_action_label(action: &DiagAction) -> String {
         DiagAction::Dump => "dump".into(),
         DiagAction::Selfcheck => "selfcheck".into(),
         DiagAction::Faults => "faults".into(),
+        DiagAction::Enable => "enable".into(),
+        DiagAction::Disable => "disable".into(),
         DiagAction::Send { endpoint } => format!(
             "send override={}",
             if endpoint.is_some() { "set" } else { "unset" }

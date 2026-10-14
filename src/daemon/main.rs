@@ -625,7 +625,9 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
     let needs_auth = is_write
         || matches!(
             cmd,
-            DaemonCommand::SetLogLevel(_) | DaemonCommand::GetRecentLogs(_)
+            DaemonCommand::SetLogLevel(_)
+                | DaemonCommand::GetRecentLogs(_)
+                | DaemonCommand::SetTelemetry(_)
         );
     // A non-root daemon's socket lives in the owner's 0700 XDG_RUNTIME_DIR,
     // so only the root daemon needs the per-peer write check.
@@ -1046,6 +1048,13 @@ fn process_command(
         DaemonCommand::GetRecentLogs(n) => {
             let text = logging::recent_logs_text(n);
             DaemonResponse::RecentLogs(text)
+        }
+        DaemonCommand::SetTelemetry(enabled) => {
+            // The telemetry scheduler re-reads config every loop, so this
+            // takes effect before the next push.
+            legion_core::config::update(|c| c.diagnostics.enabled = enabled);
+            log::info!("telemetry {} by user request", if enabled { "enabled" } else { "disabled" });
+            DaemonResponse::Ok
         }
         DaemonCommand::SetLogLevel(level) => {
             let lvl = match level.to_ascii_lowercase().as_str() {
