@@ -79,7 +79,7 @@ pub fn smt_available() -> bool {
 /// Enable (`on`) or disable (`off`) SMT. Requires root (daemon).
 pub fn set_smt(on: bool) -> Result<(), String> {
     if !smt_available() {
-        log::warn!("cpu: set_smt({on}) refused — SMT control is not available on this kernel/CPU");
+        log::warn!("cpu: set_smt({on}) refused: SMT control is not available on this kernel/CPU");
         return Err("SMT control is not available on this kernel/CPU".into());
     }
     let value = if on { "on" } else { "off" };
@@ -106,7 +106,7 @@ pub fn boost_enabled() -> Option<bool> {
 /// Toggle CPU frequency boost (turbo). Requires root (daemon).
 pub fn set_boost(on: bool) -> Result<(), String> {
     if !boost_available() {
-        log::warn!("cpu: set_boost({on}) refused — CPU boost sysfs is not available");
+        log::warn!("cpu: set_boost({on}) refused: CPU boost sysfs is not available");
         return Err("CPU boost sysfs is not available".into());
     }
     let value = if on { "1" } else { "0" };
@@ -138,7 +138,7 @@ pub fn logical_cpus() -> usize {
                         Ok(v) => v.trim() == "1",
                         Err(e) => {
                             log::warn!(
-                                "cpu: logical_cpus: cannot read {}: {e} — treating as offline",
+                                "cpu: logical_cpus: cannot read {}: {e}: treating as offline",
                                 online.display()
                             );
                             false
@@ -158,9 +158,9 @@ pub fn logical_cpus() -> usize {
 pub fn smt_summary() -> String {
     let n = logical_cpus();
     match (smt_active(), smt_control()) {
-        (Some(true), _) => format!("On · {n} logical CPUs"),
-        (Some(false), _) => format!("Off · {n} logical CPUs"),
-        (_, Some(c)) => format!("{c} · {n} logical CPUs"),
+        (Some(true), _) => format!("On, {n} logical CPUs"),
+        (Some(false), _) => format!("Off, {n} logical CPUs"),
+        (_, Some(c)) => format!("{c}, {n} logical CPUs"),
         _ => format!("{n} logical CPUs"),
     }
 }

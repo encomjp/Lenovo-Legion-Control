@@ -208,9 +208,9 @@ fn ite_label(pid: &str, class: IteClass) -> String {
         IteClass::LenovoLighting => format!("Lenovo Lighting (048d:{pid})"),
         IteClass::FourZone => format!("4-zone RGB (048d:{pid})"),
         IteClass::SpectrumLegacy => {
-            format!("Legacy Spectrum 192 B (048d:{pid}) — detected, not supported")
+            format!("Legacy Spectrum 192 B (048d:{pid}): detected, not supported")
         }
-        IteClass::Loq24 => format!("LOQ 24-zone (048d:{pid}) — detected, not supported"),
+        IteClass::Loq24 => format!("LOQ 24-zone (048d:{pid}): detected, not supported"),
         IteClass::Unrecognised => format!("Unrecognised ITE 048d:{pid}"),
     }
 }
@@ -298,7 +298,7 @@ pub fn detect() -> DeviceInfo {
         return cached.clone();
     }
     let info = DETECTED.get_or_init(detect_uncached).clone();
-    log::debug!("device detect: cache miss — full detection ran, result now cached");
+    log::debug!("device detect: cache miss: full detection ran, result now cached");
     info
 }
 
@@ -387,7 +387,7 @@ fn detect_uncached() -> DeviceInfo {
     let dmi_family = read_dmi("product_family").unwrap_or_default();
     let dmi_sku = read_dmi("product_sku").unwrap_or_default();
     let bios = read_dmi("bios_version").unwrap_or_else(|| {
-        log::debug!("device detect: dmi bios_version unreadable — using \"Unknown\"");
+        log::debug!("device detect: dmi bios_version unreadable: using \"Unknown\"");
         "Unknown".into()
     });
     let bios_prefix = bios_prefix(&bios);
@@ -425,7 +425,7 @@ fn detect_uncached() -> DeviceInfo {
             c
         }
         None => {
-            log::debug!("device detect: cpu model unreadable — using \"Unknown\"");
+            log::debug!("device detect: cpu model unreadable: using \"Unknown\"");
             "Unknown".into()
         }
     };
@@ -445,7 +445,7 @@ fn detect_uncached() -> DeviceInfo {
                 // Row notes describe a different machine type.
                 if family_only { String::new() } else { p.notes.to_string() },
                 if family_only {
-                    format!("bios-prefix family ({}) · {}", p.bios_prefix, p.source)
+                    format!("bios-prefix family ({}), {}", p.bios_prefix, p.source)
                 } else {
                     p.source.to_string()
                 },
@@ -455,13 +455,13 @@ fn detect_uncached() -> DeviceInfo {
         None => {
             let guessed = guess_series(&marketing);
             log::debug!(
-                "device detect: gen assignment 0 (no profile) — series guessed {guessed:?}"
+                "device detect: gen assignment 0 (no profile): series guessed {guessed:?}"
             );
             (
                 guessed.to_string(),
                 0,
                 String::new(),
-                "unmatched — probed from sysfs only".into(),
+                "unmatched: probed from sysfs only".into(),
                 false,
             )
         }
@@ -474,7 +474,7 @@ fn detect_uncached() -> DeviceInfo {
         log::debug!("device detect: display name ← machine type ({machine_type})");
         machine_type.clone()
     } else {
-        log::debug!("device detect: display name — nothing usable, \"Unknown\"");
+        log::debug!("device detect: display name: nothing usable, \"Unknown\"");
         "Unknown".into()
     };
 
@@ -793,7 +793,7 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
                     let yfans = collect_fans_from_hwmon(&yw, profile);
                     if !yfans.is_empty() {
                         log::debug!(
-                            "fan probe: lenovo_wmi_other reads 0 RPM on quirk model — yogafan backend at {}",
+                            "fan probe: lenovo_wmi_other reads 0 RPM on quirk model: yogafan backend at {}",
                             yw.display()
                         );
                         return ("yogafan".into(), yfans);
@@ -855,7 +855,7 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
     // Profile fallbacks when no hwmon yet (daemon early boot, missing module).
     if let Some(p) = profile {
         log::debug!(
-            "fan probe: no hwmon fans — using profile fallback ranges ({}){}",
+            "fan probe: no hwmon fans: using profile fallback ranges ({}){}",
             p.bios_prefix,
             if ec_fallback.is_some() {
                 ", RPM via EC fallback"
@@ -879,7 +879,7 @@ fn probe_fans(profile: Option<&'static ModelProfile>) -> (String, Vec<FanCapabil
         return (backend, fans);
     }
 
-    log::warn!("fan probe: no hwmon and no profile — using static placeholder fan ranges");
+    log::warn!("fan probe: no hwmon and no profile: using static placeholder fan ranges");
     (
         ec_fallback.unwrap_or_else(|| "none".into()),
         vec![
@@ -928,7 +928,7 @@ fn collect_fans_from_hwmon(
             }
         }
         Err(e) => {
-            log::debug!("fan probe: {disp} readdir failed ({e}) — treating as no fan channels")
+            log::debug!("fan probe: {disp} readdir failed ({e}): treating as no fan channels")
         }
     }
     ids.sort_unstable();
@@ -941,11 +941,11 @@ fn collect_fans_from_hwmon(
             // when the first value read fails so diagnostics can report an
             // `unreadable` channel instead of silently dropping it.
             let input = read_u32(hw.join(format!("fan{id}_input"))).unwrap_or_else(|| {
-                log::trace!("fan probe: {disp} fan{id}_input unreadable — keeping channel");
+                log::trace!("fan probe: {disp} fan{id}_input unreadable: keeping channel");
                 0
             });
             let min = read_u32(hw.join(format!("fan{id}_min"))).unwrap_or_else(|| {
-                log::trace!("fan probe: {disp} fan{id}: no _min attr — profile/default fallback");
+                log::trace!("fan probe: {disp} fan{id}: no _min attr: profile/default fallback");
                 profile
                     .and_then(|p| {
                         p.fan_rpm_fallback
@@ -956,7 +956,7 @@ fn collect_fans_from_hwmon(
                     .unwrap_or(0)
             });
             let max = read_u32(hw.join(format!("fan{id}_max"))).unwrap_or_else(|| {
-                log::trace!("fan probe: {disp} fan{id}: no _max attr — profile/default fallback");
+                log::trace!("fan probe: {disp} fan{id}: no _max attr: profile/default fallback");
                 profile
                     .and_then(|p| {
                         p.fan_rpm_fallback
@@ -969,7 +969,7 @@ fn collect_fans_from_hwmon(
             let title = match read_file(hw.join(format!("fan{id}_label"))) {
                 Some(l) => pretty_fan_label(&l, id),
                 None => {
-                    log::trace!("fan probe: {disp} fan{id}: no label attr — generic title");
+                    log::trace!("fan probe: {disp} fan{id}: no label attr: generic title");
                     fan_title(id).into()
                 }
             };
@@ -1043,7 +1043,7 @@ fn probe_lighting() -> (LightingKind, String) {
                 format!("Override ({kind:?}) via LEGION_LIGHTING_OVERRIDE"),
             );
         }
-        log::debug!("lighting probe: LEGION_LIGHTING_OVERRIDE={ov:?} not recognized — ignored");
+        log::debug!("lighting probe: LEGION_LIGHTING_OVERRIDE={ov:?} not recognized: ignored");
     }
 
     let found = scan_ite_hidraw();
@@ -1059,7 +1059,7 @@ fn probe_lighting() -> (LightingKind, String) {
         if labels.is_empty() {
             "None detected".into()
         } else {
-            labels.join(" · ")
+            labels.join(", ")
         },
     )
 }
@@ -1106,7 +1106,7 @@ fn classify_dmi(
     } else {
         match &mt_from_sku {
             Some(mt) => log::debug!("classify_dmi: machine type ← product_sku ({mt})"),
-            None => log::debug!("classify_dmi: no machine-type source matched — leaving empty"),
+            None => log::debug!("classify_dmi: no machine-type source matched: leaving empty"),
         }
         mt_from_sku.unwrap_or_default()
     };
@@ -1130,7 +1130,7 @@ fn classify_dmi(
                 m
             }
             None => {
-                log::debug!("classify_dmi: no marketing source matched — leaving empty");
+                log::debug!("classify_dmi: no marketing source matched: leaving empty");
                 String::new()
             }
         }

@@ -164,11 +164,11 @@ pub fn blocked_choices() -> Vec<(String, &'static str)> {
 pub fn set(profile: &str) -> Result<(), String> {
     let name = profile.trim();
     if name.is_empty() {
-        log::debug!("profile: set rejected — empty profile name");
+        log::debug!("profile: set rejected: empty profile name");
         return Err("empty profile name".into());
     }
     if let Some(why) = blocked_reason(name) {
-        log::warn!("profile: set '{name}' refused — {why}");
+        log::warn!("profile: set '{name}' refused: {why}");
         return Err(format!(
             "Refusing to set '{name}': {why}. Choose another power mode."
         ));
@@ -176,7 +176,7 @@ pub fn set(profile: &str) -> Result<(), String> {
     let allowed = choices();
     if !allowed.is_empty() && !allowed.iter().any(|c| c == name) {
         log::debug!(
-            "profile: set '{name}' rejected — allowed: [{}]",
+            "profile: set '{name}' rejected: allowed: [{}]",
             allowed.join(", ")
         );
         return Err(format!(
@@ -193,7 +193,7 @@ pub fn set(profile: &str) -> Result<(), String> {
     // Legacy path cannot set custom (kernel returns -EINVAL).
     if name == "custom" {
         log::debug!(
-            "profile: set 'custom' rejected — no class handler and the legacy \
+            "profile: set 'custom' rejected: no class handler and the legacy \
              aggregate path hard-rejects custom"
         );
         return Err(
@@ -301,12 +301,12 @@ fn collect_limits(ids: &[(&'static str, &'static str, LimitUnit)]) -> Vec<PptLim
     let mut out = Vec::new();
     for (id, label, unit) in ids {
         let Some(dir) = fw_attr_dir(id) else {
-            log::debug!("profile: collect_limits '{id}' ({label}): attribute dir absent — skipped");
+            log::debug!("profile: collect_limits '{id}' ({label}): attribute dir absent: skipped");
             continue;
         };
         let Some(current) = read_u32_file(&dir.join("current_value")) else {
             log::debug!(
-                "profile: collect_limits '{id}' ({label}): current_value unreadable in {} — skipped",
+                "profile: collect_limits '{id}' ({label}): current_value unreadable in {}: skipped",
                 dir.display()
             );
             continue;
@@ -317,7 +317,7 @@ fn collect_limits(ids: &[(&'static str, &'static str, LimitUnit)]) -> Vec<PptLim
         // Skip knobs the firmware exposes but does not actually range/tune.
         if max <= min {
             log::debug!(
-                "profile: collect_limits '{id}' ({label}): degenerate range (min={min}, max={max}) — skipped"
+                "profile: collect_limits '{id}' ({label}): degenerate range (min={min}, max={max}): skipped"
             );
             continue;
         }

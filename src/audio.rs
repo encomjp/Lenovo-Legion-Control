@@ -81,7 +81,7 @@ pub fn diagnose() -> Diagnosis {
             s.starts_with("alsa_output.usb") || s.starts_with("bluez_") || s.contains("hdmi")
         });
         log::debug!(
-            "audio: external-sink gate: uses_external={uses_external} (default sink '{}') — {}",
+            "audio: external-sink gate: uses_external={uses_external} (default sink '{}'): {}",
             default_now.as_deref().unwrap_or("<none>"),
             if uses_external {
                 "onboard speakers not in play; skipping mute/bass/volume checks"
@@ -257,7 +257,7 @@ fn classify(
         if !amp_modules {
             why.push("kernel modules");
         }
-        let summary = format!("Smart amp driver incomplete — missing {}", why.join(" / "));
+        let summary = format!("Smart amp driver incomplete: missing {}", why.join(" / "));
         if !firmware_ok {
             details.push(
                 "Install the linux-firmware package that ships aw88399_acf.bin (a \
@@ -282,7 +282,7 @@ fn classify(
     // Modules + firmware are fine but the amp never bound: genuinely broken.
     if amp_acpi && !amp_bound {
         let summary =
-            "Smart amp not working — modules and firmware OK but HDA bind failed".to_string();
+            "Smart amp not working: modules and firmware OK but HDA bind failed".to_string();
         details.push(
             "Modules and firmware are present yet the amp did not bind. Check \
              `dmesg | grep -i aw88399` after a cold boot; this may be a hardware \
@@ -295,7 +295,7 @@ fn classify(
     // Known Gen10 smart-amp model with no ACPI — unusual; still report.
     if !amp_acpi && looks_like_smart_amp_machine() {
         details.push(
-            "This machine type usually has AW88399; ACPI device missing — \
+            "This machine type usually has AW88399; ACPI device missing: \
              check BIOS / kernel ACPI."
                 .into(),
         );
@@ -327,7 +327,7 @@ fn classify(
     if soft {
         return (
             Health::SoftIssue,
-            "Amp connected — mute, volume, or audio routing needs a reset".into(),
+            "Amp connected: mute, volume, or audio routing needs a reset".into(),
             details,
             true,
         );
@@ -348,7 +348,7 @@ pub fn troubleshoot() -> FixReport {
     let mut steps = Vec::new();
     let mut errors = Vec::new();
     log::info!(
-        "audio: troubleshoot entered — pre-health {:?} fixable={} muted={} bass_off={} volume_low={} wrong_default_sink={}",
+        "audio: troubleshoot entered: pre-health {:?} fixable={} muted={} bass_off={} volume_low={} wrong_default_sink={}",
         before.health,
         before.fixable,
         before.speakers_muted,
@@ -359,10 +359,10 @@ pub fn troubleshoot() -> FixReport {
 
     if before.health == Health::NotApplicable {
         log::info!(
-            "audio: troubleshoot: no AW88399 smart amp on this model (health NotApplicable) — speaker fix is Gen10-only, will be removed once kernel 7.3 ships"
+            "audio: troubleshoot: no AW88399 smart amp on this model (health NotApplicable): speaker fix is Gen10-only, will be removed once kernel 7.3 ships"
         );
         return FixReport {
-            steps: vec!["No AW88399 smart amp on this model — speaker fix is Gen10-only".into()],
+            steps: vec!["No AW88399 smart amp on this model: speaker fix is Gen10-only".into()],
             errors,
             after: before,
         };
@@ -370,9 +370,9 @@ pub fn troubleshoot() -> FixReport {
 
     if before.health == Health::HardwareBroken && !before.fixable {
         log::warn!(
-            "audio: troubleshoot: skipping soft reset — amp driver/firmware missing (would not help)"
+            "audio: troubleshoot: skipping soft reset: amp driver/firmware missing (would not help)"
         );
-        steps.push("Skipped soft reset — amp driver/firmware missing (would not help)".into());
+        steps.push("Skipped soft reset: amp driver/firmware missing (would not help)".into());
         return FixReport {
             steps,
             errors,
@@ -414,7 +414,7 @@ pub fn troubleshoot() -> FixReport {
                     || e.contains("No such device")
                     || e.contains("failed to import");
                 if soft {
-                    log::info!("audio: alsaucm skipped — no UCM profile for this card ({e})");
+                    log::info!("audio: alsaucm skipped: no UCM profile for this card ({e})");
                     steps.push("alsaucm skipped (no UCM profile for this card)".into());
                 } else {
                     log::warn!("audio: alsaucm reset failed: {e}");
@@ -452,10 +452,10 @@ pub fn troubleshoot() -> FixReport {
             }
         } else {
             log::info!(
-                "audio: gating amixer changes — mute/bass/volume looked fine pre-reset (external sink likely active); leaving user levels untouched"
+                "audio: gating amixer changes: mute/bass/volume looked fine pre-reset (external sink likely active); leaving user levels untouched"
             );
             steps.push(
-                "skipped amixer changes — mute/bass/volume looked fine before the reset \
+                "skipped amixer changes: mute/bass/volume looked fine before the reset \
                  (onboard speakers not in play; leaving user levels untouched)"
                     .into(),
             );
@@ -464,10 +464,10 @@ pub fn troubleshoot() -> FixReport {
 
     if before.health == Health::Ok {
         log::info!(
-            "audio: gating service restart — audio stack was healthy pre-reset; skipping pipewire/wireplumber restart"
+            "audio: gating service restart: audio stack was healthy pre-reset; skipping pipewire/wireplumber restart"
         );
         steps.push(
-            "skipped pipewire/wireplumber restart — audio stack was healthy before the reset"
+            "skipped pipewire/wireplumber restart: audio stack was healthy before the reset"
                 .into(),
         );
     } else {
@@ -497,12 +497,12 @@ pub fn troubleshoot() -> FixReport {
     // sink when diagnose() saw a wrong one to begin with.
     if before.wrong_default_sink {
         log::info!(
-            "audio: default sink '{}' was wrong pre-reset — waiting up to 5s for onboard analog sink",
+            "audio: default sink '{}' was wrong pre-reset: waiting up to 5s for onboard analog sink",
             before.default_sink.as_deref().unwrap_or("?")
         );
         let sink = wait_for_internal_sink(std::time::Duration::from_secs(5));
         if let Some(sink) = sink {
-            log::info!("audio: onboard analog sink appeared: {sink} — setting as default");
+            log::info!("audio: onboard analog sink appeared: {sink}: setting as default");
             match run_cmd("pactl", &["set-default-sink", &sink]) {
                 Ok(_) => {
                     log::info!("audio: default sink → {sink}");
@@ -524,11 +524,11 @@ pub fn troubleshoot() -> FixReport {
         }
     } else {
         log::info!(
-            "audio: gating set-default-sink — '{}' already a sane default pre-reset (external sink kept in charge)",
+            "audio: gating set-default-sink: '{}' already a sane default pre-reset (external sink kept in charge)",
             before.default_sink.as_deref().unwrap_or("current default")
         );
         steps.push(format!(
-            "skipped set-default-sink — {} was already a sane default before the reset",
+            "skipped set-default-sink: {} was already a sane default before the reset",
             before.default_sink.as_deref().unwrap_or("current default")
         ));
     }
@@ -541,32 +541,32 @@ pub fn troubleshoot() -> FixReport {
         }
         Health::SoftIssue => {
             log::warn!(
-                "audio: re-check: soft issues remain — unplug headsets or pick Speakers in sound settings"
+                "audio: re-check: soft issues remain: unplug headsets or pick Speakers in sound settings"
             );
             steps.push(
-                "Re-check: soft issues remain — unplug headsets or pick Speakers in sound settings"
+                "Re-check: soft issues remain: unplug headsets or pick Speakers in sound settings"
                     .into(),
             );
         }
         Health::HardwareBroken => {
             log::warn!(
-                "audio: re-check: amp still broken — soft reset cannot fix missing driver/firmware"
+                "audio: re-check: amp still broken: soft reset cannot fix missing driver/firmware"
             );
             steps.push(
-                "Re-check: amp still broken — soft reset cannot fix missing driver/firmware".into(),
+                "Re-check: amp still broken: soft reset cannot fix missing driver/firmware".into(),
             );
         }
         Health::DriverMissing => {
             log::warn!("audio: re-check: amp driver/firmware still missing");
             steps.push(
-                "Re-check: amp driver/firmware still missing — install aw88399_acf.bin (run: legion-cli audio-fix, or Settings > Speakers > Install speaker firmware) / a kernel with the AW88399 codec"
+                "Re-check: amp driver/firmware still missing: install aw88399_acf.bin (run: legion-cli audio-fix, or Settings > Speakers > Install speaker firmware) / a kernel with the AW88399 codec"
                     .into(),
             );
         }
         Health::NotApplicable => {}
     }
     log::info!(
-        "audio: troubleshoot finished — post-health {:?}",
+        "audio: troubleshoot finished: post-health {:?}",
         after.health
     );
 

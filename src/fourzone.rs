@@ -302,7 +302,7 @@ fn write_report(report: &[u8; REPORT_LEN]) -> Result<(), String> {
     }
     let _g = hid_lock().lock().unwrap_or_else(|p| p.into_inner());
     let path = find_hidraw().ok_or_else(|| {
-        "4-zone RGB controller not found (no 048d hidraw node with a 33-byte 0xCC feature report) — is the udev rule installed?".to_string()
+        "4-zone RGB controller not found (no 048d hidraw node with a 33-byte 0xCC feature report): is the udev rule installed?".to_string()
     })?;
     let file = OpenOptions::new()
         .read(true)
@@ -426,7 +426,7 @@ pub fn apply_async_then(
 /// Re-apply the saved state (launch restore). No-op without the hardware.
 pub fn restore_async() {
     if !present() {
-        log::debug!("fourzone: restore skipped — no 4-zone controller");
+        log::debug!("fourzone: restore skipped: no 4-zone controller");
         return;
     }
     apply_async(crate::config::get().four_zone.to_state(), false);

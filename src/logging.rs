@@ -335,7 +335,7 @@ pub fn init(component: &str) {
         Some(Ok(n)) => n.clamp(100, MAX_RING_SIZE),
         Some(Err(_)) => {
             eprintln!(
-                "legion-log: LEGION_LOG_RING={ring_raw:?} is not a number — using default {DEFAULT_RING_SIZE}"
+                "legion-log: LEGION_LOG_RING={ring_raw:?} is not a number: using default {DEFAULT_RING_SIZE}"
             );
             DEFAULT_RING_SIZE
         }
@@ -465,10 +465,10 @@ pub fn reload_from_env() {
             set_max_level(lvl);
         }
         Err(std::env::VarError::NotPresent) => {
-            log::debug!("reload_from_env: LEGION_LOG not set — keeping current level");
+            log::debug!("reload_from_env: LEGION_LOG not set: keeping current level");
         }
         Err(e) => {
-            log::warn!("reload_from_env: cannot read LEGION_LOG ({e}) — keeping current level");
+            log::warn!("reload_from_env: cannot read LEGION_LOG ({e}): keeping current level");
         }
     }
 }

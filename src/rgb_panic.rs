@@ -119,7 +119,7 @@ pub fn diagnose() -> Diagnosis {
         );
         if health == Health::HardwareBroken {
             log::warn!(
-                "rgb-panic: device gone but kernel saw USB/HID faults — first evidence: {:?}",
+                "rgb-panic: device gone but kernel saw USB/HID faults: first evidence: {:?}",
                 kernel_faults.first().map(|s| s.as_str())
             );
         }
@@ -132,7 +132,7 @@ pub fn diagnose() -> Diagnosis {
             summary: if kernel_faults.is_empty() {
                 "No Spectrum RGB controller detected".into()
             } else {
-                "Spectrum RGB missing after USB/HID fault — try USB reset / replug".into()
+                "Spectrum RGB missing after USB/HID fault: try USB reset / replug".into()
             },
             details,
             fixable: !kernel_faults.is_empty(),
@@ -162,10 +162,10 @@ pub fn diagnose() -> Diagnosis {
     );
     if !accessible {
         log::warn!(
-            "rgb-panic: cannot open {} RDWR — udev/uaccess missing?",
+            "rgb-panic: cannot open {} RDWR: udev/uaccess missing?",
             path.display()
         );
-        details.push("Cannot open hidraw RDWR — udev/uaccess missing?".into());
+        details.push("Cannot open hidraw RDWR: udev/uaccess missing?".into());
     }
 
     let (ioctl_ok, brightness, ioctl_err) = probe_ioctl();
@@ -173,7 +173,7 @@ pub fn diagnose() -> Diagnosis {
         "rgb-panic: probe ioctl: ok={ioctl_ok} brightness={brightness:?} err={ioctl_err:?}"
     );
     match (ioctl_ok, brightness, &ioctl_err) {
-        (true, Some(b), _) => details.push(format!("ioctl OK · brightness {b}/9")),
+        (true, Some(b), _) => details.push(format!("ioctl OK, brightness {b}/9")),
         (false, _, Some(e)) => details.push(format!("ioctl failed: {e}")),
         _ => details.push("ioctl failed".into()),
     }
@@ -190,15 +190,15 @@ pub fn diagnose() -> Diagnosis {
             || !cfg.per_key.is_empty());
     let dark_panic = ioctl_ok && brightness == Some(0) && expect_on;
     log::debug!(
-        "rgb-panic: brightness expectation: expect_on={expect_on} (cfg.brightness={} · zones/per-key evaluated), dark_panic={dark_panic}",
+        "rgb-panic: brightness expectation: expect_on={expect_on} (cfg.brightness={}, zones/per-key evaluated), dark_panic={dark_panic}",
         cfg.brightness
     );
     if dark_panic {
         log::warn!(
-            "rgb-panic: classify evidence: brightness 0 while saved lighting wants lights on — classic RGB panic / dark hang"
+            "rgb-panic: classify evidence: brightness 0 while saved lighting wants lights on: classic RGB panic / dark hang"
         );
         details.push(
-            "Brightness is 0 but saved lighting wants lights on — classic RGB panic / dark hang"
+            "Brightness is 0 but saved lighting wants lights on: classic RGB panic / dark hang"
                 .into(),
         );
     }
@@ -214,7 +214,7 @@ pub fn diagnose() -> Diagnosis {
                 .unwrap_or_else(|| "?".to_string())
         );
         details.push(
-            "hidraw lacks group rw (expected udev 0660 + uaccess) — userspace RGB blocked".into(),
+            "hidraw lacks group rw (expected udev 0660 + uaccess): userspace RGB blocked".into(),
         );
     }
 
@@ -233,7 +233,7 @@ pub fn diagnose() -> Diagnosis {
     } else if dark_panic {
         (
             Health::SoftIssue,
-            "Spectrum RGB panic — lights stuck off".into(),
+            "Spectrum RGB panic: lights stuck off".into(),
             true,
         )
     } else {
@@ -272,7 +272,7 @@ pub fn diagnose() -> Diagnosis {
     }
 }
 
-const NEEDS_ROOT_MSG: &str = "USB reset / permission repair needs root and was skipped — \
+const NEEDS_ROOT_MSG: &str = "USB reset / permission repair needs root and was skipped: \
 restart or update the legion-control daemon (sudo systemctl restart legion-control) and retry";
 
 fn is_root() -> bool {
@@ -286,15 +286,15 @@ pub fn troubleshoot() -> FixReport {
     let mut errors = Vec::new();
     let before = diagnose();
     log::info!(
-        "rgb-panic: troubleshoot entered — pre-health {:?} fixable={} kernel_faults={}",
+        "rgb-panic: troubleshoot entered: pre-health {:?} fixable={} kernel_faults={}",
         before.health,
         before.fixable,
         before.kernel_faults.len()
     );
 
     if before.health == Health::Ok && before.kernel_faults.is_empty() {
-        log::info!("rgb-panic: troubleshoot: already healthy — no fix needed");
-        steps.push("Already healthy — no fix needed".into());
+        log::info!("rgb-panic: troubleshoot: already healthy: no fix needed");
+        steps.push("Already healthy: no fix needed".into());
         return FixReport {
             steps,
             errors,
@@ -302,7 +302,7 @@ pub fn troubleshoot() -> FixReport {
         };
     }
     if before.health == Health::NotApplicable && before.device_path.is_none() {
-        log::warn!("rgb-panic: troubleshoot: no Spectrum device to repair — aborting ladder");
+        log::warn!("rgb-panic: troubleshoot: no Spectrum device to repair: aborting ladder");
         errors.push("No Spectrum device to repair".into());
         return FixReport {
             steps,
@@ -315,11 +315,11 @@ pub fn troubleshoot() -> FixReport {
     if let Some(path) = &before.device_path {
         if let Some(mode) = before.permission_mode {
             if mode & 0o060 != 0o060 && !is_root() {
-                log::info!("rgb-panic: ladder 1/5 permissions skipped — not root");
+                log::info!("rgb-panic: ladder 1/5 permissions skipped: not root");
                 errors.push(NEEDS_ROOT_MSG.into());
             } else if mode & 0o060 != 0o060 {
                 log::info!(
-                    "rgb-panic: ladder 1/5 permissions: mode {mode:04o} lacks group rw — fixing"
+                    "rgb-panic: ladder 1/5 permissions: mode {mode:04o} lacks group rw: fixing"
                 );
                 match fix_permissions(path) {
                     Ok(detail) => {
@@ -333,7 +333,7 @@ pub fn troubleshoot() -> FixReport {
                 }
             } else {
                 log::debug!(
-                    "rgb-panic: ladder 1/5 permissions: mode {mode:04o} already group-rw — skipping"
+                    "rgb-panic: ladder 1/5 permissions: mode {mode:04o} already group-rw: skipping"
                 );
             }
         }
@@ -351,7 +351,7 @@ pub fn troubleshoot() -> FixReport {
         }
         Err(e) => {
             log::warn!(
-                "rgb-panic: ladder 2/5 soft lighting reset failed: {e} — escalating to hardware kicks"
+                "rgb-panic: ladder 2/5 soft lighting reset failed: {e}: escalating to hardware kicks"
             );
             errors.push(format!("Soft lighting reset failed: {e}"));
             // 3) USB reset
@@ -366,10 +366,10 @@ pub fn troubleshoot() -> FixReport {
                 );
             } else {
                 log::warn!(
-                    "rgb-panic: no USB sysfs path for Spectrum — cannot escalate without root daemon"
+                    "rgb-panic: no USB sysfs path for Spectrum: cannot escalate without root daemon"
                 );
                 errors.push(
-                    "No USB sysfs path for Spectrum — cannot reset without root daemon".into(),
+                    "No USB sysfs path for Spectrum: cannot reset without root daemon".into(),
                 );
             }
         }
@@ -379,7 +379,7 @@ pub fn troubleshoot() -> FixReport {
     let mid = diagnose();
     if mid.health != Health::Ok {
         log::warn!(
-            "rgb-panic: mid-check health {:?} — considering escalated full reset",
+            "rgb-panic: mid-check health {:?}: considering escalated full reset",
             mid.health
         );
         if let Some(usb) = mid.usb_sysfs.or_else(find_spectrum_usb_sysfs) {
@@ -396,7 +396,7 @@ pub fn troubleshoot() -> FixReport {
                     Duration::from_millis(400),
                 );
             } else {
-                log::debug!("rgb-panic: escalation skipped — a USB reset already ran this pass");
+                log::debug!("rgb-panic: escalation skipped: a USB reset already ran this pass");
             }
         } else {
             log::warn!("rgb-panic: escalation wanted but no USB sysfs path available");
@@ -405,16 +405,16 @@ pub fn troubleshoot() -> FixReport {
 
     let after = diagnose();
     log::info!(
-        "rgb-panic: troubleshoot finished — post-health {:?}",
+        "rgb-panic: troubleshoot finished: post-health {:?}",
         after.health
     );
     if after.health == Health::Ok {
         steps.push("Verified: Spectrum HID healthy".into());
     } else if after.health == Health::SoftIssue {
-        errors.push("Still soft-broken — check Lighting tab / saved config".into());
+        errors.push("Still soft-broken: check Lighting tab / saved config".into());
     } else {
         errors.push(
-            "Still broken — replug USB path or reboot; kernel driver may need attention".into(),
+            "Still broken: replug USB path or reboot; kernel driver may need attention".into(),
         );
     }
 
@@ -436,7 +436,7 @@ fn hardware_kick(
     rebind_sleep: Duration,
 ) {
     if !is_root() {
-        log::info!("rgb-panic: USB reset skipped — not root");
+        log::info!("rgb-panic: USB reset skipped: not root");
         if !errors.iter().any(|e| e == NEEDS_ROOT_MSG) {
             errors.push(NEEDS_ROOT_MSG.into());
         }
@@ -605,7 +605,7 @@ fn fix_permissions(path: &Path) -> Result<String, String> {
         {
             Ok(out) if out.status.success() => {
                 log::debug!(
-                    "rgb-panic: fix_permissions: udevadm trigger exit 0 — re-stat after settle delay"
+                    "rgb-panic: fix_permissions: udevadm trigger exit 0: re-stat after settle delay"
                 );
                 // udev applies events asynchronously — give it a beat, then re-stat.
                 std::thread::sleep(Duration::from_millis(300));
@@ -620,7 +620,7 @@ fn fix_permissions(path: &Path) -> Result<String, String> {
                     }
                 }
                 log::debug!(
-                    "rgb-panic: fix_permissions: udevadm route ineffective — still not group-rw; falling back to chmod"
+                    "rgb-panic: fix_permissions: udevadm route ineffective: still not group-rw; falling back to chmod"
                 );
             }
             Ok(out) => log::debug!(
@@ -672,7 +672,7 @@ fn fix_permissions(path: &Path) -> Result<String, String> {
 
 fn usb_reset(usb: &Path) -> Result<(), String> {
     log::info!(
-        "rgb-panic: usb_reset: device {} — attempting port reset / re-authorization",
+        "rgb-panic: usb_reset: device {}: attempting port reset / re-authorization",
         usb.display()
     );
     let reset = usb.join("reset");
@@ -737,7 +737,7 @@ fn iface_driver(iface: &Path) -> Option<(PathBuf, String)> {
 fn hid_rebind_spectrum() -> Result<String, String> {
     // Find hid device symlink under the USB device and bounce hid-generic.
     let usb = find_spectrum_usb_sysfs().ok_or_else(|| {
-        log::warn!("rgb-panic: hid_rebind: Spectrum USB path gone — cannot locate interfaces");
+        log::warn!("rgb-panic: hid_rebind: Spectrum USB path gone: cannot locate interfaces");
         "Spectrum USB path gone".to_string()
     })?;
     let mut hid_iface: Option<(String, PathBuf, String)> = None;
@@ -802,7 +802,7 @@ fn hid_rebind_spectrum() -> Result<String, String> {
         // do not own (usbhid owns more than the lighting node) — refuse and
         // say what we saw instead of writing blindly.
         log::info!(
-            "rgb-panic: hid_rebind: skipping {id} — bound to {driver}, not hid-generic (refusing foreign-driver bounce)"
+            "rgb-panic: hid_rebind: skipping {id}: bound to {driver}, not hid-generic (refusing foreign-driver bounce)"
         );
         return Ok(format!(
             "Skipped HID rebind: {id} is bound to {driver}, not hid-generic"
@@ -916,7 +916,7 @@ fn capture_stdout(name: &str, cmd: &mut Command) -> Option<String> {
         Ok(o) if o.status.success() => {
             let blob = String::from_utf8_lossy(&o.stdout).into_owned();
             log::debug!(
-                "rgb-panic: {name} exit 0 · {} line(s) · {} bytes",
+                "rgb-panic: {name} exit 0, {} line(s), {} bytes",
                 blob.lines().count(),
                 blob.len()
             );
@@ -924,7 +924,7 @@ fn capture_stdout(name: &str, cmd: &mut Command) -> Option<String> {
         }
         Ok(o) => {
             log::warn!(
-                "rgb-panic: {name} exited {:?} — falling through",
+                "rgb-panic: {name} exited {:?}: falling through",
                 o.status.code()
             );
             None

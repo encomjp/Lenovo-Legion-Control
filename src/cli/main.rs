@@ -441,7 +441,7 @@ fn main() {
                 iteration += 1;
                 log::trace!("watch: iteration {iteration}");
                 print!("\x1B[2J\x1B[H");
-                println!("Legion Control — live sensors (Ctrl+C to quit)\n");
+                println!("Legion Control: live sensors (Ctrl+C to quit)\n");
                 let resp = send_command(DaemonCommand::GetSensors);
                 print_sensors(resp);
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -576,13 +576,13 @@ fn main() {
                     9,
                     z,
                 ) {
-                    Ok(()) => println!("effect → off · {}", z.name()),
+                    Ok(()) => println!("effect → off, {}", z.name()),
                     Err(e) => fail(e),
                 }
             } else if let Some(fx) = legion_core::keyboard::RgbEffect::from_name(&name) {
                 log::debug!("effect: '{name}' matched");
                 match legion_core::keyboard::set_rgb_effect_zone(fx, r, g, b, speed, 9, z) {
-                    Ok(()) => println!("effect → {name} · {}", z.name()),
+                    Ok(()) => println!("effect → {name}, {}", z.name()),
                     Err(e) => fail(e),
                 }
             } else {
@@ -668,7 +668,7 @@ fn main() {
                         println!("daemon      v{dver} (in sync with CLI v{cli_ver})");
                     }
                     Ok(dver) => {
-                        println!("daemon      v{dver} (MISMATCH: CLI is v{cli_ver} — restart daemon!)");
+                        println!("daemon      v{dver} (MISMATCH: CLI is v{cli_ver}: restart daemon!)");
                     }
                     Err(e) => {
                         println!("daemon      unknown / legacy ({e})");
@@ -709,7 +709,7 @@ fn main() {
                 }
                 for f in &info.capabilities.fans {
                     println!(
-                        "fan{:<8} {} · {}–{} RPM · now {}",
+                        "fan{:<8} {}, {}–{} RPM, now {}",
                         f.id, f.title, f.min_rpm, f.max_rpm, f.current_rpm
                     );
                 }
@@ -871,7 +871,7 @@ fn main() {
             }) = send_command(DaemonCommand::GetSmt)
             {
                 println!(
-                    "now         {} · {logical_cpus} logical CPUs",
+                    "now         {}, {logical_cpus} logical CPUs",
                     if active { "on" } else { "off" }
                 );
             }
@@ -916,7 +916,7 @@ fn main() {
             }
             other => {
                 if let Ok(DaemonResponse::Error(e)) | Err(e) = other {
-                    eprintln!("note: daemon probe unavailable ({e}) — local check");
+                    eprintln!("note: daemon probe unavailable ({e}): local check");
                 }
                 rgb_status_local();
             }
@@ -1117,7 +1117,7 @@ fn main() {
                 log::debug!("diagnose selfcheck: {passed}/{total} passed");
                 for c in &checks {
                     let mark = if c.ok { "✓" } else { "✗" };
-                    println!("{mark} {} — {}", c.name, c.detail);
+                    println!("{mark} {}: {}", c.name, c.detail);
                 }
                 println!("{passed}/{total} passed");
                 if passed != total {
@@ -1151,7 +1151,7 @@ fn main() {
                         legion_core::selftest::Severity::Warning => "WARN",
                         legion_core::selftest::Severity::Info => "INFO",
                     };
-                    println!("[{sev}] {} — {}", f.id, f.detail);
+                    println!("[{sev}] {}: {}", f.id, f.detail);
                 }
                 if criticals > 0 {
                     std::process::exit(1);
@@ -1251,7 +1251,7 @@ fn main() {
                         println!("{}", legion_core::update::manual_update_hint());
                     }
                 } else if apply {
-                    println!("\nAlready up to date — nothing to apply.");
+                    println!("\nAlready up to date: nothing to apply.");
                 } else {
                     println!("\nLegion Control is up to date.");
                 }
@@ -1332,7 +1332,7 @@ fn rgb_status_local() {
         legion_core::rgb_panic::Health::HardwareBroken => "broken",
         legion_core::rgb_panic::Health::NotApplicable => "n/a",
     };
-    println!("status      {tag} (local — restart legion-control for full USB autofix)");
+    println!("status      {tag} (local: restart legion-control for full USB autofix)");
     println!("summary     {}", d.summary);
     println!("fixable     {}", d.fixable);
     for line in d.details {
@@ -1358,7 +1358,7 @@ fn print_thermal_status(s: &legion_core::thermal::ThermalStatus) {
         .map(|v| format!("{:.1}°C", v as f64 / 1000.0))
         .unwrap_or_else(|| "n/a".into());
     println!(
-        "Thermal: {} · max {}°C (restore {}°C) · cur {} kHz · CPU {} / CPU CCD 2 {} · {}",
+        "Thermal: {}, max {}°C (restore {}°C), cur {} kHz, CPU {} / CPU CCD 2 {}, {}",
         on_off, s.config.max_temp, s.restore_temp, s.cur_max_freq, cpu_temp, cpu_temp_2, state
     );
 }
@@ -1501,7 +1501,7 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
             if fans::rpm_estimated() && s.fan1_rpm.max(s.fan2_rpm).max(s.fan4_rpm) > 0 {
-                println!("│  (estimated — unverified EC fallback layout)       │");
+                println!("│  (estimated: unverified EC fallback layout)       │");
             }
             log::trace!(
                 "sensors: fans cpu {} gpu {} aux {} rpm",
@@ -1636,11 +1636,11 @@ fn print_fan_curves(st: &legion_core::fan_curve::FanCurveStatus) {
         let temp = st.temp_c.map_or("?".into(), |t| format!("{t:.1} °C"));
         let pct = st.pct.map_or("?".into(), |p| format!("{p} %"));
         format!(
-            "curve active — {temp} → {pct}{}",
+            "curve active: {temp} → {pct}{}",
             if st.safety { " (SAFETY: all fans max)" } else { "" }
         )
     } else if let Some(f) = &st.fault {
-        format!("firmware control — fault: {f}")
+        format!("firmware control: fault: {f}")
     } else {
         "firmware control".into()
     };

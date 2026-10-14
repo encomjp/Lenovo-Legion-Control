@@ -402,7 +402,7 @@ fn parse_release_json(bytes: &[u8]) -> Result<ReleaseInfo, String> {
     if body_str.contains("Not Found")
         || body_str.contains("\"message\"") && !body_str.contains("\"tag_name\"")
     {
-        log::debug!("update: no formal releases found on GitHub repo — current version is latest");
+        log::debug!("update: no formal releases found on GitHub repo: current version is latest");
         return Ok(empty_release(CURRENT_VERSION));
     }
 
