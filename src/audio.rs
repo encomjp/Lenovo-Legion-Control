@@ -960,12 +960,20 @@ malformed-line-without-tabs\n\
             &None,
             &None,
         );
+        // Outcome depends on the host DMI: known smart-amp machine types
+        // report HardwareBroken, others NotApplicable, or SoftIssue when the
+        // soft flags (mute/sink) are set — never DriverMissing/Ok.
         assert!(
-            matches!(health, Health::NotApplicable | Health::HardwareBroken),
+            matches!(
+                health,
+                Health::NotApplicable | Health::HardwareBroken | Health::SoftIssue
+            ),
             "health={health:?}"
         );
         assert!(details.iter().any(|d| d.contains("No AWDZ8399")));
-        if health == Health::NotApplicable {
+        if health == Health::SoftIssue {
+            assert!(fixable, "soft reset must stay available without an amp");
+        } else if health == Health::NotApplicable {
             assert!(summary.contains("No AW88399"));
             // fixable mirrors soft even for N/A (UI shows N/A pill muted) — daemon
             // troubleshoot() must early-exit regardless.
