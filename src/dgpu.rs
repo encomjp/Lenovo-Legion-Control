@@ -47,6 +47,12 @@ fn find_nvidia_smi() -> Option<&'static PathBuf> {
 /// `SMI_TIMEOUT`, it is killed and `None` is returned.
 fn smi_run(args: &[&str]) -> Option<String> {
     let smi_bin = find_nvidia_smi()?;
+    // nvidia-smi resumes a runtime-suspended card; polling it every few
+    // seconds would keep the dGPU awake and drain the battery on hybrid.
+    if nvidia_runtime_suspended() {
+        log::trace!("nvidia-smi: dGPU runtime-suspended — not waking it");
+        return None;
+    }
     let started = Instant::now();
     log::debug!(
         "nvidia-smi: spawning {} {}",
@@ -158,7 +164,11 @@ pub fn detailed_query() -> Option<String> {
         .lines()
         .map(|line| {
             let lower = line.to_lowercase();
-            if lower.contains("gpu uuid")
+            // Process names under "Processes" are full binary paths
+            // (/home/<user>/…): the only key that is exactly "Name".
+            let is_process_name = line.split_once(':').map(|(k, _)| k.trim()) == Some("Name");
+            if is_process_name
+                || lower.contains("gpu uuid")
                 || lower.contains("serial number")
                 || lower.contains("gpu part number")
                 || lower.contains("gpu pdi")
@@ -199,6 +209,31 @@ pub fn read_metrics_batch() -> DgpuMetrics {
         None => return DgpuMetrics::default(),
     };
     parse_metrics_batch(&raw)
+}
+
+/// True when an NVIDIA display-class PCI device reports a runtime PM state
+/// other than "active" (suspended / suspending / resuming). Devices without
+/// the attribute count as awake so desktops keep their readings.
+fn nvidia_runtime_suspended() -> bool {
+    let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let dev = entry.path();
+        let read = |name: &str| {
+            std::fs::read_to_string(dev.join(name))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        };
+        if read("vendor") != "0x10de" || !read("class").starts_with("0x03") {
+            continue;
+        }
+        let status = read("power/runtime_status");
+        if !status.is_empty() && status != "active" {
+            return true;
+        }
+    }
+    false
 }
 
 pub(crate) fn parse_metrics_batch(raw: &str) -> DgpuMetrics {
