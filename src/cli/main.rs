@@ -218,6 +218,11 @@ enum Commands {
         /// Download and install the matching release (AppImage, deb, rpm, Arch, tarball)
         #[arg(long)]
         apply: bool,
+        /// With --apply: install the latest release even if it is not newer
+        /// than the running version (reinstall / roll back). Signatures are
+        /// still required.
+        #[arg(long, requires = "apply")]
+        allow_downgrade: bool,
     },
 }
 
@@ -994,7 +999,10 @@ fn main() {
                 }
             }
         },
-        Commands::CheckUpdate { apply } => match legion_core::update::check_latest_release() {
+        Commands::CheckUpdate {
+            apply,
+            allow_downgrade,
+        } => match legion_core::update::check_latest_release() {
             Ok(info) => {
                 println!("current version: {}", legion_core::update::CURRENT_VERSION);
                 println!("latest release:  {} ({})", info.version, info.name);
@@ -1003,27 +1011,44 @@ fn main() {
                 } else if let Some(asset) = &info.appimage {
                     println!("appimage:        {} ({} bytes)", asset.name, asset.size);
                 }
-                if info.is_newer {
-                    println!(
-                        "\nA new version of Legion Control is available: v{}",
-                        info.version
-                    );
+                if info.is_newer || (apply && allow_downgrade) {
+                    if info.is_newer {
+                        println!(
+                            "\nA new version of Legion Control is available: v{}",
+                            info.version
+                        );
+                    } else {
+                        println!(
+                            "\n--allow-downgrade: installing v{} over v{}",
+                            info.version,
+                            legion_core::update::CURRENT_VERSION
+                        );
+                    }
                     if apply {
-                        match legion_core::update::apply_update(&info, |phase, bytes, total| {
-                            let label = match phase {
-                                legion_core::update::UpdatePhase::Downloading => "downloading",
-                                legion_core::update::UpdatePhase::Verifying => "verifying",
-                                legion_core::update::UpdatePhase::Building
-                                | legion_core::update::UpdatePhase::BuildingLog(_) => "building",
-                                legion_core::update::UpdatePhase::Installing => "installing",
-                            };
-                            if let Some(t) = total.filter(|t| *t > 0) {
-                                eprint!("\r{label}: {bytes}/{t} bytes");
-                            } else {
-                                eprint!("\r{label}…");
-                            }
-                            let _ = std::io::Write::flush(&mut std::io::stderr());
-                        }) {
+                        let opts = legion_core::update::UpdateOptions { allow_downgrade };
+                        let kind = legion_core::update::detect_install_kind();
+                        match legion_core::update::apply_update_with_options(
+                            &info,
+                            kind,
+                            opts,
+                            |phase, bytes, total| {
+                                let label = match phase {
+                                    legion_core::update::UpdatePhase::Downloading => "downloading",
+                                    legion_core::update::UpdatePhase::Verifying => "verifying",
+                                    legion_core::update::UpdatePhase::Building
+                                    | legion_core::update::UpdatePhase::BuildingLog(_) => {
+                                        "building"
+                                    }
+                                    legion_core::update::UpdatePhase::Installing => "installing",
+                                };
+                                if let Some(t) = total.filter(|t| *t > 0) {
+                                    eprint!("\r{label}: {bytes}/{t} bytes");
+                                } else {
+                                    eprint!("\r{label}…");
+                                }
+                                let _ = std::io::Write::flush(&mut std::io::stderr());
+                            },
+                        ) {
                             Ok(outcome) => {
                                 eprintln!();
                                 println!("installed: {}", outcome.relaunch.display());
@@ -1399,7 +1424,10 @@ fn cmd_label(cmd: &Commands) -> String {
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
-        Commands::CheckUpdate { apply } => format!("check-update apply={apply}"),
+        Commands::CheckUpdate {
+            apply,
+            allow_downgrade,
+        } => format!("check-update apply={apply} allow_downgrade={allow_downgrade}"),
     }
 }
 

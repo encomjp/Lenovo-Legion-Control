@@ -36,6 +36,7 @@ signal-hook = "0.3"
 libc = "0.2"
 
 flate2 = "1"
+minisign-verify = "=0.3.0"
 
 # ─── Async utilities ───
 
