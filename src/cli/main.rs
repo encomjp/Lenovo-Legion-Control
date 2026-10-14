@@ -126,6 +126,11 @@ enum Commands {
     },
     /// Spectrum brightness 0-9
     Brightness { level: u8 },
+    /// 4-zone RGB keyboard (Legion 5 2020-2024, IdeaPad Gaming, LOQ) — experimental
+    Zones {
+        #[command(subcommand)]
+        action: ZonesCmd,
+    },
     /// Show battery info
     Battery,
     /// Set charge limit: 60, 80, or 100
@@ -219,6 +224,38 @@ enum Commands {
         #[arg(long)]
         apply: bool,
     },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+enum ZonesCmd {
+    /// Show the detected 4-zone controller and the saved state (no write)
+    Status,
+    /// Static colours, zones left → right (#RRGGBB or RRGGBB)
+    Static {
+        c1: String,
+        c2: String,
+        c3: String,
+        c4: String,
+        /// 1 = low, 2 = high
+        #[arg(long, default_value_t = 2)]
+        brightness: u8,
+    },
+    /// Animated effect: breath (uses saved zone colours), wave, smooth
+    Effect {
+        /// breath, wave, smooth
+        name: String,
+        /// 1 (slowest) - 4 (fastest)
+        #[arg(long, default_value_t = 2)]
+        speed: u8,
+        /// Wave direction: left or right
+        #[arg(long, default_value = "right")]
+        dir: String,
+        /// 1 = low, 2 = high
+        #[arg(long, default_value_t = 2)]
+        brightness: u8,
+    },
+    /// Turn the 4-zone backlight off
+    Off,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -442,6 +479,7 @@ fn main() {
                 Err(e) => fail(format!("{e}. Run as root or ensure udev rules are loaded.")),
             }
         }
+        Commands::Zones { action } => zones_cmd(action),
         Commands::Battery => match send_command(DaemonCommand::GetBattery) {
             Ok(DaemonResponse::Battery {
                 capacity,
@@ -1370,6 +1408,7 @@ fn cmd_label(cmd: &Commands) -> String {
             zone,
         } => format!("effect name={name} rgb=#{r:02X}{g:02X}{b:02X} speed={speed} zone={zone}"),
         Commands::Brightness { level } => format!("brightness level={level}"),
+        Commands::Zones { action } => format!("zones {action:?}"),
         Commands::Battery => "battery".into(),
         Commands::ChargeLimit { pct } => format!("charge-limit pct={pct}"),
         Commands::Conservation { state } => format!("conservation state={state}"),
@@ -1400,6 +1439,96 @@ fn cmd_label(cmd: &Commands) -> String {
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
         Commands::CheckUpdate { apply } => format!("check-update apply={apply}"),
+    }
+}
+
+/// `legion-cli zones …` — 4-zone RGB (experimental). Writes go straight to
+/// the hidraw node (udev uaccess), like the Spectrum commands.
+fn zones_cmd(action: ZonesCmd) {
+    use legion_core::fourzone::{self, FzEffect, WaveDir};
+    let check_bri = |b: u8| {
+        if !(1..=2).contains(&b) {
+            usage_fail(format!(
+                "brightness '{b}' out of range (1-2; use `zones off` for off)"
+            ));
+        }
+        b
+    };
+    let mut state = legion_core::config::get().four_zone.to_state();
+    let summary = match action {
+        ZonesCmd::Status => {
+            match fourzone::find_hidraw() {
+                Some(p) => println!("controller   {} (4-zone, 33-byte report 0xCC)", p.display()),
+                None => {
+                    println!("controller   not found (no 048d hidraw with a 4-zone descriptor)")
+                }
+            }
+            let c = legion_core::config::get().four_zone;
+            let cols: Vec<String> = c
+                .colors
+                .iter()
+                .map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
+                .collect();
+            println!(
+                "saved        effect={} speed={} brightness={} dir={} colours={}",
+                c.effect,
+                c.speed,
+                c.brightness,
+                c.direction,
+                cols.join(" ")
+            );
+            println!(
+                "report       {:02X?}",
+                fourzone::build_report(&c.to_state())
+            );
+            return;
+        }
+        ZonesCmd::Static {
+            c1,
+            c2,
+            c3,
+            c4,
+            brightness,
+        } => {
+            for (i, c) in [c1, c2, c3, c4].iter().enumerate() {
+                state.colors[i] = fourzone::parse_color(c).unwrap_or_else(|| {
+                    usage_fail(format!("zone {} colour '{c}' is not #RRGGBB", i + 1))
+                });
+            }
+            state.effect = FzEffect::Static;
+            state.brightness = check_bri(brightness);
+            "static".to_string()
+        }
+        ZonesCmd::Effect {
+            name,
+            speed,
+            dir,
+            brightness,
+        } => {
+            let fx = match FzEffect::from_name(&name) {
+                Some(fx) if fx != FzEffect::Static => fx,
+                _ => usage_fail(format!(
+                    "unknown effect '{name}'. Try: breath, wave, smooth (or `zones static …`)"
+                )),
+            };
+            if !(1..=4).contains(&speed) {
+                usage_fail(format!("speed '{speed}' out of range (1-4)"));
+            }
+            state.effect = fx;
+            state.speed = speed;
+            state.direction = WaveDir::from_name(&dir)
+                .unwrap_or_else(|| usage_fail(format!("unknown direction '{dir}' (left|right)")));
+            state.brightness = check_bri(brightness);
+            fx.name().to_string()
+        }
+        ZonesCmd::Off => {
+            state.brightness = 0;
+            "off".to_string()
+        }
+    };
+    match fourzone::apply_and_save(&state) {
+        Ok(()) => println!("zones → {summary} (experimental 4-zone)"),
+        Err(e) => fail(e),
     }
 }
 

@@ -353,7 +353,7 @@ fn hid_ioc(dir: u32, nr: u32, size: usize) -> libc::c_ulong {
     let req = (dir << 30) | ((size as u32) << 16) | (typ << 8) | nr;
     req as libc::c_ulong
 }
-fn hid_set_feature(size: usize) -> libc::c_ulong {
+pub(crate) fn hid_set_feature(size: usize) -> libc::c_ulong {
     hid_ioc(3, 0x06, size)
 }
 fn hid_get_feature(size: usize) -> libc::c_ulong {

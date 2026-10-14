@@ -56,23 +56,23 @@ pub fn build_lighting(
     let kind = lighting_kind();
     let page = page_lede("");
 
-    // Non-Spectrum boards: the Spectrum write path targets 048d:c197 only, so
-    // zone tabs would write to nothing (or nothing exists to write to) and
-    // trigger Fix-page scares ("RGB panic"). Collapse to a single notice +
-    // the brightness control the EC already owns.
+    // Legacy 4-zone boards get their own page (separate 33-byte protocol,
+    // `legion_core::fourzone`); never the Spectrum tabs.
+    if kind == legion_core::device::LightingKind::FourZone {
+        return build_fourzone_page(&cfg, page, toast_overlay);
+    }
+
+    // White-only boards: the Spectrum write path targets 048d:c197 only, so
+    // zone tabs would write to nothing and trigger Fix-page scares ("RGB
+    // panic"). Collapse to a single notice + the brightness control the EC owns.
     if kind != legion_core::device::LightingKind::Spectrum {
-        let (title, note) = match kind {
-            legion_core::device::LightingKind::White => (
-                "Keyboard backlight",
-                "This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off.",
-            ),
-            _ => (
-                "4-zone RGB keyboard",
-                "A 4-zone RGB keyboard was detected, but its controller isn't supported yet. \
-                 Brightness: fn+Q cycles 50% → 100% → Off.",
-            ),
-        };
-        return build_simple_backlight_page(&cfg, page, title, note, toast_overlay);
+        return build_simple_backlight_page(
+            &cfg,
+            page,
+            "Keyboard backlight",
+            "This model has a single-zone white backlight. Brightness: fn+Q cycles 50% → 100% → Off.",
+            toast_overlay,
+        );
     }
 
     let brush = Rc::new(Cell::new((cfg.ui_r, cfg.ui_g, cfg.ui_b)));
@@ -135,8 +135,207 @@ pub fn build_lighting(
     (page, tabs)
 }
 
-/// Fallback page for non-Spectrum lighting (white-only or unsupported
-/// 4-zone): a notice + the kbd_backlight brightness slider the EC owns.
+const FZ_SPEED_LABELS: &[&str] = &["Slowest", "Slow", "Fast", "Fastest"];
+const FZ_BRIGHTNESS_LABELS: &[&str] = &["Off", "Low", "High"];
+const FZ_DIR_LABELS: &[&str] = &["Left → right", "Right → left"];
+
+/// Which controls make sense for an effect: (colours, speed, direction).
+fn fz_sensitivity(fx: legion_core::fourzone::FzEffect) -> (bool, bool, bool) {
+    use legion_core::fourzone::FzEffect;
+    (
+        fx.uses_colors(),
+        fx != FzEffect::Static,
+        fx == FzEffect::Wave,
+    )
+}
+
+/// Legacy 4-zone RGB keyboard page (Legion 5 2020-2024, IdeaPad Gaming, LOQ):
+/// effect, speed, brightness, four zone colours, wave direction. Writes go
+/// straight to the hidraw node from this process (udev uaccess), exactly
+/// like Spectrum; `legion_core::fourzone` re-checks the descriptor each time.
+fn build_fourzone_page(
+    cfg: &legion_core::config::AppConfig,
+    page: gtk::Box,
+    toast_overlay: &adw::ToastOverlay,
+) -> (gtk::Box, adw::ViewStack) {
+    use legion_core::fourzone::{FzEffect, WaveDir};
+    let state = Rc::new(Cell::new(cfg.four_zone.to_state()));
+    let s0 = state.get();
+
+    let (sec, card) = section_tip(
+        "4-zone RGB keyboard",
+        Some("Experimental — tested by reference packets only"),
+    );
+    let warn = gtk::Label::new(Some(
+        "Experimental — tested by reference packets only. The 33-byte packets follow the layout \
+         used by L5P-Keyboard-RGB, l5p-kbl, OpenRGB and Lenovo Legion Toolkit, \
+         but this build has not been verified on a 4-zone laptop yet.",
+    ));
+    warn.set_wrap(true);
+    warn.set_xalign(0.0);
+    warn.set_margin_start(12);
+    warn.set_margin_end(12);
+    warn.set_margin_top(4);
+    warn.add_css_class("dim-label");
+    card.append(&warn);
+
+    let labels: Vec<&str> = FzEffect::ALL.iter().map(|f| f.display_name()).collect();
+    let effect_dd = gtk::DropDown::from_strings(&labels);
+    effect_dd.set_selected(
+        FzEffect::ALL
+            .iter()
+            .position(|f| *f == s0.effect)
+            .unwrap_or(0) as u32,
+    );
+    tip(
+        &effect_dd,
+        "Static and Breath use the four zone colours; Wave and Smooth are firmware rainbows",
+    );
+    card.append(&labeled_row_tip("Effect", "", &effect_dd, None));
+
+    let speed_dd = gtk::DropDown::from_strings(FZ_SPEED_LABELS);
+    speed_dd.set_selected((s0.speed.clamp(1, 4) - 1) as u32);
+    let speed_row = labeled_row_tip("Speed", "Breath, Wave and Smooth", &speed_dd, None);
+    card.append(&speed_row);
+
+    let bri_dd = gtk::DropDown::from_strings(FZ_BRIGHTNESS_LABELS);
+    bri_dd.set_selected(s0.brightness.min(2) as u32);
+    card.append(&labeled_row_tip(
+        "Brightness",
+        "Off, low or high",
+        &bri_dd,
+        None,
+    ));
+
+    let dir_dd = gtk::DropDown::from_strings(FZ_DIR_LABELS);
+    dir_dd.set_selected(match s0.direction {
+        WaveDir::Right => 0,
+        WaveDir::Left => 1,
+    });
+    let dir_row = labeled_row_tip("Wave direction", "Wave only", &dir_dd, None);
+    card.append(&dir_row);
+
+    let zones = gtk::Box::new(Orientation::Horizontal, 12);
+    zones.set_halign(Align::End);
+    for i in 0..4 {
+        let [r, g, b] = s0.colors[i];
+        let state_c = state.clone();
+        let picker = colour_picker((r, g, b), move |r, g, b| {
+            let mut s = state_c.get();
+            s.colors[i] = [r, g, b];
+            state_c.set(s);
+        });
+        tip(&picker, &format!("Zone {} colour (left → right)", i + 1));
+        let col = gtk::Box::new(Orientation::Vertical, 4);
+        let l = gtk::Label::new(Some(&format!("Zone {}", i + 1)));
+        l.add_css_class("dim-label");
+        col.append(&picker);
+        col.append(&l);
+        zones.append(&col);
+    }
+    let zones_row = labeled_row_tip("Zone colours", "Static and Breath", &zones, None);
+    card.append(&zones_row);
+
+    // Grey out controls the selected effect ignores.
+    let sync = {
+        let (speed_row, dir_row, zones_row) =
+            (speed_row.clone(), dir_row.clone(), zones_row.clone());
+        move |fx: FzEffect| {
+            let (c, s, d) = fz_sensitivity(fx);
+            zones_row.set_sensitive(c);
+            speed_row.set_sensitive(s);
+            dir_row.set_sensitive(d);
+        }
+    };
+    sync(s0.effect);
+    {
+        let state = state.clone();
+        effect_dd.connect_selected_notify(move |d| {
+            let fx = FzEffect::ALL
+                .get(d.selected() as usize)
+                .copied()
+                .unwrap_or(FzEffect::Static);
+            let mut s = state.get();
+            s.effect = fx;
+            state.set(s);
+            sync(fx);
+        });
+    }
+    {
+        let state = state.clone();
+        speed_dd.connect_selected_notify(move |d| {
+            let mut s = state.get();
+            s.speed = (d.selected() as u8 + 1).clamp(1, 4);
+            state.set(s);
+        });
+    }
+    {
+        let state = state.clone();
+        bri_dd.connect_selected_notify(move |d| {
+            let mut s = state.get();
+            s.brightness = (d.selected() as u8).min(2);
+            state.set(s);
+        });
+    }
+    {
+        let state = state.clone();
+        dir_dd.connect_selected_notify(move |d| {
+            let mut s = state.get();
+            s.direction = if d.selected() == 1 {
+                WaveDir::Left
+            } else {
+                WaveDir::Right
+            };
+            state.set(s);
+        });
+    }
+
+    let apply = gtk::Button::with_label("Apply");
+    apply.add_css_class("suggested-action");
+    apply.set_halign(Align::End);
+    apply.set_margin_top(8);
+    apply.set_margin_end(12);
+    apply.set_margin_bottom(8);
+    tip(
+        &apply,
+        "Send this state to the 4-zone controller and save it",
+    );
+    let toast = toast_overlay.clone();
+    apply.connect_clicked(move |btn| {
+        let s = state.get();
+        btn.set_sensitive(false);
+        let btn = btn.clone();
+        let toast = toast.clone();
+        super::dispatch_async(
+            move || legion_core::fourzone::apply_and_save(&s),
+            "4-zone write stopped without a result",
+            move |res| {
+                btn.set_sensitive(true);
+                match res {
+                    Ok(()) => {
+                        let msg = if s.brightness == 0 {
+                            "4-zone keyboard → off".to_string()
+                        } else {
+                            format!("4-zone keyboard → {}", s.effect.display_name())
+                        };
+                        let t = adw::Toast::new(&msg);
+                        t.set_timeout(2);
+                        toast.add_toast(t);
+                    }
+                    Err(e) => toast_error(&toast, &e),
+                }
+            },
+        );
+    });
+    card.append(&apply);
+    sec.append(&card);
+    page.append(&sec);
+
+    (page, adw::ViewStack::new()) // single page — no zone tabs
+}
+
+/// Fallback page for white-only lighting: a notice + the kbd_backlight
+/// brightness slider the EC owns.
 /// Writes go through the root daemon (`SetKbdBrightness`) — the user-space
 /// GTK process cannot write `/sys/class/leds/.../brightness` directly.
 fn build_simple_backlight_page(
@@ -840,6 +1039,17 @@ mod tests {
         for input in ["äää", "€€€", "🦀🦀", "#äää", "FF€€00"] {
             assert!(parse_hex(input).is_none(), "input {input:?}");
         }
+    }
+
+    #[test]
+    fn fourzone_controls_follow_effect() {
+        use legion_core::fourzone::FzEffect;
+        assert_eq!(fz_sensitivity(FzEffect::Static), (true, false, false));
+        assert_eq!(fz_sensitivity(FzEffect::Breath), (true, true, false));
+        assert_eq!(fz_sensitivity(FzEffect::Wave), (false, true, true));
+        assert_eq!(fz_sensitivity(FzEffect::Smooth), (false, true, false));
+        assert_eq!(FZ_BRIGHTNESS_LABELS.len(), 3); // index == brightness byte
+        assert_eq!(FZ_SPEED_LABELS.len(), 4); // index + 1 == speed byte
     }
 
     #[test]
