@@ -288,6 +288,9 @@ fn main() {
                 println!("fan {fan} → auto");
             } else {
                 println!("fan {fan} → {rpm} RPM");
+                if fans::manual_target_may_persist() {
+                    eprintln!("warning: {}", fans::GEN10_MANUAL_TARGET_WARNING);
+                }
             }
         }
         Commands::FanAuto => {
