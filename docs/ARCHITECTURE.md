@@ -240,7 +240,7 @@ The implementation writes the relevant `conservation_mode` and/or `charge_types`
 
 `src/keyboard.rs` scans `/sys/class/hidraw`, follows each device link, matches vendor `048d` and product `c197`, and checks the report descriptor for the Spectrum usage when available. It then opens `/dev/hidrawN` read/write and sends HID feature reports through ioctl. A process-local mutex serializes Spectrum access.
 
-The implementation supports zone effects, whole-keyboard effects, per-key maps, brightness, logo controls, and RGB panic diagnosis/recovery. The udev rule `data/udev/99-legion.rules` sets mode `0660` plus `uaccess` on matching `048d:c193` and `048d:c197` hidraw devices. The `uaccess` tag lets the active local session receive device access without making the node world-writable.
+The implementation supports zone effects, whole-keyboard effects, per-key maps, brightness, logo controls, and RGB panic diagnosis/recovery. The udev rule `data/udev/99-legion.rules` sets mode `0660`, group `legion` plus `uaccess` on matching `048d:c193`, `048d:c197` and ITE `c1xx`/`c6xx`/`c9xx` hidraw devices. The `uaccess` tag lets the active local session receive device access without making the node world-writable.
 
 RGB panic recovery (`src/rgb_panic.rs`) can inspect HID/kernel state, change sysfs permissions, reset USB, and unbind/rebind the HID driver. The daemon starts a watchdog thread in `src/daemon/main.rs`; its detailed loop and cooldown behavior are implemented there.
 

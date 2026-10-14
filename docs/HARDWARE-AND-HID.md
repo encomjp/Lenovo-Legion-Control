@@ -47,7 +47,7 @@ The source documents these transport facts for the Spectrum path:
 
 The complete field-level report layout is intentionally **not** documented here. The repository source establishes the report size, report ID, device matching, and access behavior, but does not establish a complete packet-field or checksum specification suitable for a general hardware guide. Do not infer that layout from these transport facts.
 
-The HID lighting flow is available as [SVG](assets/hid-lighting-flow.svg), [PNG](assets/hid-lighting-flow.png), and [DOT source](assets/hid-lighting-flow.dot); it shows the direct path to `hidraw`. The udev rule matches `048d:c193` and `048d:c197`, assigning mode `0660` and the `uaccess` tag. This enables the project’s direct non-root RGB path by giving the active local session an ACL through udev/logind, without making the matching device nodes world-writable.
+The HID lighting flow is available as [SVG](assets/hid-lighting-flow.svg), [PNG](assets/hid-lighting-flow.png), and [DOT source](assets/hid-lighting-flow.dot); it shows the direct path to `hidraw`. The udev rule matches `048d:c193`, `048d:c197` and the ITE lighting PID families `048d:c1xx`, `c6xx` and `c9xx`, assigning mode `0660`, group `legion` and the `uaccess` tag. This enables the project’s direct non-root RGB path by giving the active local session an ACL through udev/logind, without making the matching device nodes world-writable.
 
 ## 5. What `hidraw` means
 
@@ -59,7 +59,7 @@ For this project, discovery starts from `/sys/class/hidraw` and then selects the
 
 **Standard Linux behavior:** sysfs, hwmon, power-supply, platform-profile, `nvidia-smi`, udev, systemd, and hidraw are operating-system interfaces. Their presence and permissions depend on the kernel, drivers, firmware, distribution, service configuration, and the hardware that the host exposes.
 
-**Project-specific behavior:** Legion Control chooses particular paths and names, matches Spectrum VID/PID `048d:c197`, uses 960-byte feature reports with report ID `0x07`, serializes Spectrum access within a process, and maps daemon commands to its Rust hardware modules. Its udev rule covers `048d:c193` and `048d:c197`; that is not a claim that every Lenovo lighting controller uses either ID or the same protocol.
+**Project-specific behavior:** Legion Control chooses particular paths and names, matches Spectrum VID/PID `048d:c197`, uses 960-byte feature reports with report ID `0x07`, serializes Spectrum access within a process, and maps daemon commands to its Rust hardware modules. Its udev rule covers `048d:c193`, `048d:c197` and the `c1xx`/`c6xx`/`c9xx` ITE families so they can be probed; Spectrum commands are only sent to a controller whose report descriptor confirms the 960-byte Spectrum report (usage page `0xff89`), and `c193` is never driven. That is not a claim that every Lenovo lighting controller uses the same protocol.
 
 Likewise, the project’s optional `nvidia-smi` and `ryzen_smu` integrations are conditional paths. An absent interface is not evidence that Linux or the laptop is universally unsupported, and a present interface is not by itself proof that every project write operation is safe or enabled.
 

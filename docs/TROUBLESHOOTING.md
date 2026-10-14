@@ -109,7 +109,7 @@ ls -l /dev/hidraw*
 udevadm info --query=property --name=/dev/hidraw0 2>/dev/null | grep -E 'ID_VENDOR_ID|ID_MODEL_ID|ID_SERIAL'
 ```
 
-`data/udev/99-legion.rules` sets `0660` and `uaccess` on `048d:c193` and `048d:c197`. The `uaccess` tag lets the active local session receive access through udev/logind ACLs. The Spectrum implementation searches `/sys/class/hidraw` for `048d:c197` and opens the matching `/dev/hidrawN` device.
+`data/udev/99-legion.rules` sets `0660`, group `legion` and `uaccess` on `048d:c193`, `048d:c197` and the ITE `c1xx`/`c6xx`/`c9xx` lighting controllers. If RGB stays permission-denied after a fresh install, run `sudo udevadm control --reload-rules && sudo udevadm trigger --action=change -s hidraw` (installers before 0.2.16 loaded the rule before group `legion` existed). The `uaccess` tag lets the active local session receive access through udev/logind ACLs. The Spectrum implementation searches `/sys/class/hidraw` for `048d:c197` (or another ITE controller whose descriptor confirms the Spectrum report) and opens the matching `/dev/hidrawN` device.
 
 **Remedy**
 
