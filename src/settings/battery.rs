@@ -2,7 +2,39 @@
 
 use super::*;
 
-pub(crate) const OFF_CHARGE_HINT: &str = "Battery charged past the limit while the laptop was off — EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.";
+pub(crate) const OFF_CHARGE_HINT: &str = "Battery charged past the limit while the laptop was off, EC behavior. It settles to ~80% with use; unplug AC when off to prevent it.";
+
+/// Plain-words power flow. sysfs `power_now` is an unsigned magnitude, so the
+/// direction comes from the battery status.
+pub(crate) fn power_text(status: &str, watts: f64) -> String {
+    let w = watts.abs();
+    if w < 0.05 {
+        return match status {
+            "Not charging" | "Full" => "Plugged in, not charging".to_string(),
+            _ => "Idle".to_string(),
+        };
+    }
+    match status {
+        "Charging" => format!("Charging {w:.0} W"),
+        "Discharging" => format!("Draining {w:.1} W"),
+        "Not charging" | "Full" => "Plugged in, not charging".to_string(),
+        _ => format!("{w:.1} W"),
+    }
+}
+
+/// Manufacturer / model / chemistry without stray separators.
+fn cell_text(mfr: &str, model: &str, tech: &str) -> String {
+    let name = format!("{mfr} {model}");
+    let parts: Vec<&str> = [name.trim(), tech.trim()]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.is_empty() {
+        "Not reported".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
 
 pub(crate) fn build_battery_pages(
     toast_overlay: &adw::ToastOverlay,
@@ -25,38 +57,36 @@ pub(crate) fn build_battery_pages(
     let (cap_chip, cap_v, cap_d) = metric_chip_tip("Capacity", None);
     tip(
         &cap_chip,
-        "Battery charge level from sysfs BAT0/capacity — 0–100%",
+        "Battery charge level from sysfs BAT0/capacity, 0–100%",
     );
     let (volt_chip, volt_v, volt_d) = metric_chip_tip("Voltage", None);
     tip(
         &volt_chip,
-        "Pack voltage in volts — drops as the pack empties",
+        "Pack voltage in volts, drops as the pack empties",
     );
     let (power_chip, power_v, power_d) = metric_chip_tip("Power", None);
     tip(
         &power_chip,
-        "Watts in or out right now — positive while charging, drain while on battery",
+        "Watts in or out right now, positive while charging, drain while on battery",
     );
     let (health_chip, health_v, health_d) = metric_chip_tip("Health", None);
     tip(
         &health_chip,
-        "Wear vs design capacity — 100% is a fresh pack",
+        "Wear vs design capacity, 100% is a fresh pack",
     );
     let (cycles_chip, cycles_v, cycles_d) = metric_chip_tip("Cycles", None);
     tip(
         &cycles_chip,
-        "Charge cycle count from the battery gauge — grows with use",
+        "Charge cycle count from the battery gauge, grows with use",
     );
     let (limit_chip, limit_v, limit_d) = metric_chip_tip("Limit", None);
     tip(
         &limit_chip,
-        "Charge cap (60/80/100%) — set it in the rows below",
+        "Charge cap (60/80/100%), set it in the rows below",
     );
     // Capacity is the big readout above, voltage lives under Details and the
     // limit is the selector: only three chips stay on the surface.
-    for d in [&power_d, &health_d, &cycles_d] {
-        d.set_visible(false);
-    }
+    power_d.set_visible(false);
     chips.append(&health_chip);
     chips.append(&cycles_chip);
     chips.append(&power_chip);
@@ -67,7 +97,7 @@ pub(crate) fn build_battery_pages(
     let pct_box = gtk::Box::new(Orientation::Vertical, 0);
     pct_box.set_hexpand(true);
     pct_box.set_valign(Align::Center);
-    let big_pct = gtk::Label::new(Some("—"));
+    let big_pct = gtk::Label::new(Some("n/a"));
     big_pct.add_css_class("battery-pct");
     big_pct.set_xalign(0.0);
     let big_state = gtk::Label::new(None);
@@ -97,7 +127,7 @@ pub(crate) fn build_battery_pages(
     let stats = pref_group("", None);
     tip(
         &stats,
-        "Extra battery stats — expand when you need them: voltage, power, energy, health, cycles, pack identity",
+        "Extra battery stats, expand when you need them: voltage, power, energy, health, cycles, pack identity",
     );
     let details_exp = adw::ExpanderRow::builder()
         .title("Details")
@@ -110,11 +140,11 @@ pub(crate) fn build_battery_pages(
     let detail_meta = [
         (
             "Voltage",
-            "Battery pack voltage in volts — drops as the pack empties",
+            "Battery pack voltage in volts, drops as the pack empties",
         ),
         (
             "Power",
-            "Watts in or out right now — positive while charging, drain while on battery",
+            "Watts in or out right now, positive while charging, drain while on battery",
         ),
         (
             "Energy",
@@ -130,7 +160,7 @@ pub(crate) fn build_battery_pages(
     let detail_rows: Vec<adw::ActionRow> = detail_meta
         .into_iter()
         .map(|(title, tip_text)| {
-            let row = property_row(title, "—", Some(tip_text));
+            let row = property_row(title, "n/a", Some(tip_text));
             tip(&row, tip_text);
             details_exp.add_row(&row);
             row
@@ -155,13 +185,13 @@ pub(crate) fn build_battery_pages(
     for (btn, pct) in limit_buttons.iter().zip([60u32, 80, 100]) {
         let tip_text = match pct {
             60 => {
-                "Conservation (~60%): stops charging early so the pack sits cooler — best if the laptop stays plugged in most of the time"
+                "Conservation (~60%): stops charging early so the pack sits cooler, best if the laptop stays plugged in most of the time"
             }
             80 => {
                 "Long life (~80%): more runtime than 60%, gentler than always charging to 100%"
             }
             _ => {
-                "Full charge (100%): maximum capacity — use before travel or long unplugged sessions"
+                "Full charge (100%): maximum capacity, use before travel or long unplugged sessions"
             }
         };
         tip(btn, tip_text);
@@ -217,12 +247,16 @@ pub(crate) fn build_battery_pages(
             volt_v.set_text(&format!("{v:.2} V"));
         }
         if let Some(p) = legion_core::battery::power_w() {
-            power_v.set_text(&format!("{p:.1} W"));
+            power_v.set_text(&power_text(
+                &legion_core::battery::status().unwrap_or_default(),
+                p,
+            ));
         }
         if let Some(h) = legion_core::battery::health_pct() {
-            let (text, label) = legion_core::battery::health_display(h);
+            let (text, _) = legion_core::battery::health_display(h);
             health_v.set_text(&text);
-            health_d.set_text(label);
+            health_d.set_text("of design capacity");
+            tip(&health_chip, &health_tip(h));
         }
         if let Some(c) = legion_core::battery::cycles() {
             cycles_v.set_text(&format!("{c}"));
@@ -324,43 +358,35 @@ pub(crate) fn build_battery_pages(
                     volt_chip_c.remove_css_class("hot");
                     volt_chip_c.remove_css_class("warm");
                 } else {
-                    volt_v_c.set_text("—");
+                    volt_v_c.set_text("n/a");
                     volt_d_c.set_text("no sensor");
                 }
                 if let Some(p) = s.power_w {
-                    pow_l.set_subtitle(&format!("{p:.1} W"));
-                    power_v_c.set_text(&format!("{p:.1} W"));
-                    // detail: charging vs discharging
                     let st = s.status.as_deref().unwrap_or_default();
-                    power_d_c.set_text(if st == "Charging" {
-                        "charging"
-                    } else if st == "Discharging" {
-                        "discharging"
-                    } else {
-                        ""
-                    });
+                    let txt = power_text(st, p);
+                    pow_l.set_subtitle(&txt);
+                    power_v_c.set_text(&txt);
+                    power_d_c.set_text("");
                     power_chip_c.remove_css_class("hot");
                     power_chip_c.remove_css_class("warm");
                     if p.abs() > 45.0 {
                         power_chip_c.add_css_class("warm");
                     }
                 } else {
-                    pow_l.set_subtitle("—");
-                    power_v_c.set_text("—");
+                    pow_l.set_subtitle("n/a");
+                    power_v_c.set_text("n/a");
                     power_d_c.set_text("no sensor");
                 }
                 if let (Some(n), Some(f)) = (s.energy_now, s.energy_full) {
                     en_l.set_subtitle(&format!("{n:.1} / {f:.1} Wh"))
                 }
                 if let Some(h) = s.health {
-                    let (text, label) = legion_core::battery::health_display(h);
-                    health_l.set_subtitle(&if h > 100.0 {
-                        format!("{text} · {label} (raw {h:.1}%)")
-                    } else {
-                        text.clone()
-                    });
+                    let (text, _) = legion_core::battery::health_display(h);
+                    health_l.set_subtitle(&format!("{text} of design capacity"));
+                    tip(&health_l, &health_tip(h));
+                    tip(&health_chip_c, &health_tip(h));
                     health_v_c.set_text(&text);
-                    health_d_c.set_text(label);
+                    health_d_c.set_text("of design capacity");
                     health_chip_c.remove_css_class("hot");
                     health_chip_c.remove_css_class("warm");
                     if h < 70.0 {
@@ -369,7 +395,7 @@ pub(crate) fn build_battery_pages(
                         health_chip_c.add_css_class("warm");
                     }
                 } else {
-                    health_v_c.set_text("—");
+                    health_v_c.set_text("n/a");
                     health_d_c.set_text("no sensor");
                 }
                 if let Some(c) = s.cycles {
@@ -377,12 +403,12 @@ pub(crate) fn build_battery_pages(
                     cycles_v_c.set_text(&format!("{c}"));
                     cycles_d_c.set_text("charge cycles");
                 } else {
-                    cycles_v_c.set_text("—");
+                    cycles_v_c.set_text("n/a");
                     cycles_d_c.set_text("no sensor");
                 }
                 limit_v_c.set_text(&format!("{}%", s.limit));
                 limit_d_c.set_text("charge cap");
-                cell_l.set_subtitle(format!("{} {} · {}", s.mfr, s.model, s.tech).trim());
+                cell_l.set_subtitle(&cell_text(&s.mfr, &s.model, &s.tech));
                 glib::ControlFlow::Continue
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -391,6 +417,13 @@ pub(crate) fn build_battery_pages(
     });
 
     status_page
+}
+
+fn health_tip(raw: f64) -> String {
+    format!(
+        "Wear vs design capacity. Raw reading {raw:.1}%{}",
+        if raw > 100.0 { " (shown as 100%)" } else { "" }
+    )
 }
 
 // ─── Troubleshoot ───────────────────────────────────────────────────────────
@@ -406,7 +439,7 @@ fn build_ideapad_switches(
 ) -> adw::PreferencesGroup {
     use legion_core::ideapad::Toggle;
 
-    let group = pref_group("Keyboard & USB", None);
+    let group = pref_group("Keyboard &amp; USB", None);
     group.set_visible(false);
     gate.track(&group);
 
@@ -420,7 +453,7 @@ fn build_ideapad_switches(
     let specs: [Spec; 2] = [
         (
             Toggle::FnLock,
-            "Fn Lock",
+            "Fn lock",
             "F1 to F12 act as function keys without holding Fn",
             "Same as Fn+Esc. Needs the legion-control service to change.",
             DaemonCommand::SetFnLock,
@@ -467,7 +500,7 @@ fn build_ideapad_switches(
                     ),
                     Ok(DaemonResponse::Error(e)) => revert(&e),
                     Err(e) if is_version_skew_error(&e) => {
-                        revert("Service outdated — reinstall to update")
+                        revert("Service outdated, reinstall to update")
                     }
                     Err(e) => revert(&e),
                     Ok(_) => revert("Unexpected response from service"),
@@ -505,4 +538,25 @@ fn build_ideapad_switches(
         },
     );
     group
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn power_text_plain_words() {
+        assert_eq!(power_text("Discharging", 0.0), "Idle");
+        assert_eq!(power_text("Charging", 45.2), "Charging 45 W");
+        assert_eq!(power_text("Discharging", 9.84), "Draining 9.8 W");
+        assert_eq!(power_text("Not charging", 0.0), "Plugged in, not charging");
+        assert_eq!(power_text("Full", 3.0), "Plugged in, not charging");
+    }
+
+    #[test]
+    fn cell_text_has_no_bare_separator() {
+        assert_eq!(cell_text("", "", ""), "Not reported");
+        assert_eq!(cell_text("", "", "Li-poly"), "Li-poly");
+        assert_eq!(cell_text("LGC", "L23", "Li-poly"), "LGC L23, Li-poly");
+    }
 }

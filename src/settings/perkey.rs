@@ -1712,12 +1712,12 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     switch_l.add_css_class("row-title");
     tip(
         &switch_l,
-        "Key legends only (DE QWERTZ or US QWERTY) — does not change LED wiring",
+        "Key legends only (DE QWERTZ or US QWERTY), does not change LED wiring",
     );
     let layout_dd = gtk::DropDown::from_strings(&["DE QWERTZ", "US QWERTY"]);
     tip(
         &layout_dd,
-        "Keyboard legend only — LED colours are shared between DE and US layouts",
+        "Keyboard legend only, LED colours are shared between DE and US layouts",
     );
     layout_dd.set_selected(match layout.get() {
         KeyboardLayout::De => 0,
@@ -1734,7 +1734,7 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     area.add_css_class("perkey-canvas");
     tip(
         &area,
-        "Click or drag keys to paint with the colour above — switches keyboard to per-key mode",
+        "Click or drag keys to paint with the colour above, switches keyboard to per-key mode",
     );
 
     let colors_d = colors.clone();
@@ -1890,7 +1890,7 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     tools.add_css_class("perkey-tools");
 
     let clear = gtk::Button::with_label("Clear map");
-    clear.add_css_class("flat");
+    clear.add_css_class("pill-btn");
     tip(
         &clear,
         "Remove all per-key paints and return to the whole-keyboard effect",
@@ -1907,7 +1907,7 @@ pub fn build_perkey_editor(paint: Rc<Cell<(u8, u8, u8)>>) -> gtk::Box {
     tools.append(&clear);
 
     let fill = gtk::Button::with_label("Fill all");
-    fill.add_css_class("flat");
+    fill.add_css_class("pill-btn");
     tip(&fill, "Paint every key with the current brush colour");
     let colors_f = colors.clone();
     let area_f = area.clone();

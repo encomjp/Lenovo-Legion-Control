@@ -21,7 +21,7 @@ pub(crate) fn udev_rule_installed() -> bool {
 pub(crate) fn build_udev_permanent_section(
     toast_overlay: &adw::ToastOverlay,
 ) -> adw::PreferencesGroup {
-    let group = pref_group("Permanent fix (udev)", None);
+    let group = pref_group("Permanent fix", None);
 
     let installed = udev_rule_installed();
     let (pill_text, pill_kind) = if installed {
@@ -35,12 +35,12 @@ pub(crate) fn build_udev_permanent_section(
         Some(if installed {
             "udev rule 99-legion.rules is present and looks correct"
         } else {
-            "Rule file missing — Auto-fix only lasts until reboot; install permanently below"
+            "Rule file missing, Auto-fix only lasts until reboot; install permanently below"
         }),
     );
 
     let status_row = adw::ActionRow::builder()
-        .title("Udev rule 99-legion.rules")
+        .title("Keyboard access rule")
         .subtitle(if installed { "Present" } else { "Missing" })
         .activatable(false)
         .build();
@@ -103,7 +103,7 @@ pub(crate) fn build_udev_permanent_section(
                     set_pill(&pill_c, "Missing", "warn");
                     toast_error(
                         &overlay,
-                        "Helper finished but rule still not found — check /etc/udev/rules.d/99-legion.rules",
+                        "Helper finished but rule still not found, check /etc/udev/rules.d/99-legion.rules",
                     );
                     btn_c.set_label("Install permanently");
                 }
@@ -128,14 +128,15 @@ pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &Daemon
     page.append(&build_speakers_section(toast_overlay));
     page.append(&build_lighting_reset_section(toast_overlay, gate));
     // Rarely needed tools stay folded away.
-    let advanced = gtk::Expander::new(Some("Advanced"));
-    advanced.add_css_class("section-expander");
+    let advanced_group = pref_group("", None);
+    let advanced = adw::ExpanderRow::builder().title("Advanced").build();
     let inner = gtk::Box::new(Orientation::Vertical, 12);
     inner.set_margin_top(8);
     inner.append(&build_udev_permanent_section(toast_overlay));
     inner.append(&build_logs_section(toast_overlay, gate));
-    advanced.set_child(Some(&inner));
-    page.append(&advanced);
+    advanced.add_row(&inner);
+    advanced_group.add(&advanced);
+    page.append(&advanced_group);
     page
 }
 
@@ -145,14 +146,20 @@ pub(crate) fn build_lighting_reset_section(
 ) -> adw::PreferencesGroup {
     use legion_core::rgb_panic::{self, Health};
 
-    let group = pref_group("Keyboard lighting issue", None);
-
     let diag0 = rgb_panic::diagnose();
+    let group = pref_group(
+        if diag0.health == Health::Ok {
+            "Keyboard lighting"
+        } else {
+            "Keyboard lighting issue"
+        },
+        None,
+    );
     let (pill_text, pill_kind) = rgb_pill(diag0.health);
     let pill = status_pill_tip(pill_text, pill_kind, Some(rgb_pill_tooltip(diag0.health)));
 
     let status_row = adw::ActionRow::builder()
-        .title(&diag0.summary)
+        .title(rgb_title(diag0.health, &diag0.summary))
         .subtitle(rgb_short_help(diag0.health))
         .activatable(false)
         .build();
@@ -160,6 +167,7 @@ pub(crate) fn build_lighting_reset_section(
         &status_row,
         "Scans hidraw 048d:c197, ioctl health, brightness vs saved config, and kernel USB/HID errors",
     );
+    pill.set_width_request(PILL_COL_W);
     status_row.add_suffix(&pill);
     group.add(&status_row);
 
@@ -182,22 +190,18 @@ pub(crate) fn build_lighting_reset_section(
     details.set_margin_bottom(8);
     tip(
         &details,
-        "Raw diagnostic lines — selectable so you can copy them into a bug report",
+        "Raw diagnostic lines, selectable so you can copy them into a bug report",
     );
     expander.add_row(&details);
     group.add(&expander);
 
     let btn = secondary_button_tip(
-        match diag0.health {
-            Health::Ok => "Re-check RGB",
-            Health::SoftIssue => "Repair lighting",
-            Health::HardwareBroken => "USB reset & restore",
-            Health::NotApplicable => "Check RGB",
-        },
+        rgb_button_label(diag0.health),
         Some(
             "Soft lighting reset → fix permissions → USB reset → hid-generic rebind → restore saved look (daemon)",
         ),
     );
+    btn.set_width_request(BTN_COL_W);
     status_row.add_suffix(&btn);
     gate.track(&btn);
 
@@ -208,7 +212,7 @@ pub(crate) fn build_lighting_reset_section(
     let expander_c = expander.clone();
     let btn_c = btn.clone();
     btn.connect_clicked(move |_| {
-        set_busy(&btn_c, true, "Repair lighting");
+        set_busy(&btn_c, true, "Check again");
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let report = match send_command(DaemonCommand::FixRgbPanic) {
@@ -248,33 +252,27 @@ pub(crate) fn build_lighting_reset_section(
                 let (pt, pk) = rgb_pill(health);
                 set_pill(&pill_c, pt, pk);
                 tip(&pill_c, rgb_pill_tooltip(health));
-                status_c.set_title(&summary);
+                status_c.set_title(&rgb_title(health, &summary));
                 status_c.set_subtitle(rgb_short_help(health));
-                let mut body = steps.iter().map(|s| format!("· {s}")).collect::<Vec<_>>();
+                let mut body = steps.to_vec();
                 if !errors.is_empty() {
                     body.push(String::new());
                     body.push("Problems:".into());
-                    body.extend(errors.iter().map(|s| format!("· {s}")));
+                    body.extend(errors.iter().cloned());
                 }
                 details_c.set_text(&body.join("\n"));
                 expander_c.set_expanded(true);
                 match health {
-                    Health::Ok => toast_ok(&overlay, "Spectrum RGB healthy"),
+                    Health::Ok => toast_ok(&overlay, "Keyboard lighting is working"),
                     Health::SoftIssue => {
-                        toast_error(&overlay, "Partially fixed — check Lighting tab")
+                        toast_error(&overlay, "Partially fixed, check Lighting tab")
                     }
                     Health::HardwareBroken => {
-                        toast_error(&overlay, "Still broken — try reboot or USB replug")
+                        toast_error(&overlay, "Still broken, try reboot or USB replug")
                     }
                     Health::NotApplicable => toast_ok(&overlay, &summary),
                 }
-                let idle = match health {
-                    Health::Ok => "Re-check RGB",
-                    Health::SoftIssue => "Repair lighting",
-                    Health::HardwareBroken => "USB reset & restore",
-                    Health::NotApplicable => "Check RGB",
-                };
-                set_busy(&btn_c, false, idle);
+                set_busy(&btn_c, false, rgb_button_label(health));
                 glib::ControlFlow::Break
             }
             Ok(Err(e)) => {
@@ -282,12 +280,12 @@ pub(crate) fn build_lighting_reset_section(
                 details_c.set_text(&e);
                 expander_c.set_expanded(true);
                 toast_error(&overlay, &e);
-                set_busy(&btn_c, false, "Repair lighting");
+                set_busy(&btn_c, false, "Check again");
                 glib::ControlFlow::Break
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(_) => {
-                set_busy(&btn_c, false, "Repair lighting");
+                set_busy(&btn_c, false, "Check again");
                 toast_error(&overlay, "RGB fix failed");
                 glib::ControlFlow::Break
             }
@@ -303,34 +301,34 @@ pub(crate) fn build_logs_section(
 ) -> adw::PreferencesGroup {
     use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
 
-    let group = pref_group("Daemon logs", None);
+    let group = pref_group("Service logs", None);
 
     let text_view = gtk::TextView::new();
     text_view.set_editable(false);
-    text_view.set_monospace(true);
+    text_view.set_monospace(false);
     text_view.set_wrap_mode(gtk::WrapMode::WordChar);
     text_view.set_top_margin(6);
     text_view.set_bottom_margin(6);
     text_view.set_left_margin(8);
     text_view.set_right_margin(8);
     let buffer = text_view.buffer();
-    buffer.set_text("Fetching recent daemon output…");
+    buffer.set_text("Fetching recent service output…");
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&text_view));
-    scroll.set_vexpand(true);
-    scroll.set_min_content_height(200);
-    scroll.set_max_content_height(400);
+    scroll.set_vexpand(false);
+    scroll.set_min_content_height(120);
+    scroll.set_max_content_height(160);
     group.add(&scroll);
 
     let fetch_btn = secondary_button_tip(
         "Fetch logs",
-        Some("Query the last 100 log lines from the daemon"),
+        Some("Fetch the last 100 log lines from the background service"),
     );
     let copy_btn = secondary_button_tip("Copy", Some("Copy log text to clipboard"));
     let level_btn = secondary_button_tip(
         "Verbose",
-        Some("Toggle daemon between info and debug logging"),
+        Some("Switch between normal and detailed logging"),
     );
 
     let btn_row = gtk::Box::new(Orientation::Horizontal, 8);
@@ -355,7 +353,7 @@ pub(crate) fn build_logs_section(
                         t
                     }
                 }
-                Ok(DaemonResponse::Error(e)) => format!("daemon error: {e}"),
+                Ok(DaemonResponse::Error(e)) => format!("service error: {e}"),
                 Err(e) => format!("ipc error: {e}"),
                 _ => "Unexpected response".into(),
             };
@@ -387,7 +385,7 @@ pub(crate) fn build_logs_section(
                 let text = match send_command(DaemonCommand::GetRecentLogs(100)) {
                     Ok(DaemonResponse::RecentLogs(t)) if !t.is_empty() => t,
                     Ok(DaemonResponse::RecentLogs(_)) => "(no log entries)".into(),
-                    Ok(DaemonResponse::Error(e)) => format!("daemon error: {e}"),
+                    Ok(DaemonResponse::Error(e)) => format!("service error: {e}"),
                     Err(e) => format!("ipc error: {e}"),
                     _ => "Unexpected response".into(),
                 };
@@ -460,11 +458,32 @@ pub(crate) fn build_logs_section(
     group
 }
 
+/// Fixed widths so pills and buttons line up across Health rows.
+pub(crate) const PILL_COL_W: i32 = 104;
+pub(crate) const BTN_COL_W: i32 = 112;
+
+pub(crate) fn rgb_button_label(health: legion_core::rgb_panic::Health) -> &'static str {
+    use legion_core::rgb_panic::Health;
+    match health {
+        Health::SoftIssue => "Repair",
+        Health::HardwareBroken => "Reset USB",
+        Health::Ok | Health::NotApplicable => "Check again",
+    }
+}
+
+fn rgb_title(health: legion_core::rgb_panic::Health, summary: &str) -> String {
+    if health == legion_core::rgb_panic::Health::Ok {
+        "Keyboard lighting is working".to_string()
+    } else {
+        summary.to_string()
+    }
+}
+
 pub(crate) fn rgb_pill(health: legion_core::rgb_panic::Health) -> (&'static str, &'static str) {
     use legion_core::rgb_panic::Health;
     match health {
-        Health::Ok => ("OK", "ok"),
-        Health::SoftIssue => ("Panic", "warn"),
+        Health::Ok => ("Working", "ok"),
+        Health::SoftIssue => ("Needs repair", "warn"),
         Health::HardwareBroken => ("Not responding", "bad"),
         Health::NotApplicable => ("N/A", "muted"),
     }
@@ -473,12 +492,12 @@ pub(crate) fn rgb_pill(health: legion_core::rgb_panic::Health) -> (&'static str,
 pub(crate) fn rgb_pill_tooltip(health: legion_core::rgb_panic::Health) -> &'static str {
     use legion_core::rgb_panic::Health;
     match health {
-        Health::Ok => "Spectrum HID answering — brightness and ioctl look fine",
+        Health::Ok => "Spectrum HID answering, brightness and ioctl look fine",
         Health::SoftIssue => {
-            "Lights stuck off, permissions, or recent kernel USB blip — auto-fix should help"
+            "Lights stuck off, permissions, or recent kernel USB blip, auto-fix should help"
         }
         Health::HardwareBroken => {
-            "HID ioctl dead or device missing — needs USB reset (daemon) or replug"
+            "HID ioctl dead or device missing, needs USB reset (daemon) or replug"
         }
         Health::NotApplicable => "No 048d:c197 Spectrum controller on this machine",
     }
@@ -488,11 +507,11 @@ pub(crate) fn rgb_short_help(health: legion_core::rgb_panic::Health) -> &'static
     use legion_core::rgb_panic::Health;
     match health {
         Health::Ok => {
-            "Controller healthy. Daemon still watches kernel HID faults in the background."
+            "Watched in the background; repaired automatically if it stops responding."
         }
-        Health::SoftIssue => "Lighting not responding — run Auto-fix to restore it.",
+        Health::SoftIssue => "Lighting is not responding. Press Repair to restore it.",
         Health::HardwareBroken => {
-            "HID not responding — Auto-fix will USB-reset and rebind hid-generic."
+            "The keyboard controller is not responding. Reset USB to bring it back."
         }
         Health::NotApplicable => "No Spectrum RGB hardware detected.",
     }
@@ -514,7 +533,7 @@ pub(crate) fn build_selfcheck_section(toast_overlay: &adw::ToastOverlay) -> adw:
     run_btn.set_halign(Align::Center);
     tip(
         &run_btn,
-        "Runs read-only local checks — nothing is written or sent",
+        "Runs read-only local checks, nothing is written or sent",
     );
     check_row.add_suffix(&run_btn);
     group.add(&check_row);
@@ -532,13 +551,13 @@ pub(crate) fn build_selfcheck_section(toast_overlay: &adw::ToastOverlay) -> adw:
     results.set_margin_bottom(8);
     tip(
         &results,
-        "One line per check — selectable so you can copy it into a bug report",
+        "One line per check, selectable so you can copy it into a bug report",
     );
-    let expander = gtk::Expander::builder()
-        .label("Self-check results")
-        .child(&results)
+    let expander = adw::ExpanderRow::builder()
+        .title("Self-check results")
         .visible(false)
         .build();
+    expander.add_row(&results);
     group.add(&expander);
 
     {
@@ -584,9 +603,9 @@ pub(crate) fn build_selfcheck_section(toast_overlay: &adw::ToastOverlay) -> adw:
                                 lines.push(format!("Warning {:?}: {}", fault.severity, fault.detail));
                             }
                             results.set_text(&lines.join("\n"));
-                            expander.set_label(Some(&format!(
+                            expander.set_title(&format!(
                                 "Self-check results ({passed}/{total} passed)"
-                            )));
+                            ));
                             expander.set_expanded(true);
                             expander.set_visible(true);
                         }
