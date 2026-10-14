@@ -487,10 +487,19 @@ impl SetupCtx {
              enables the legion-control systemd unit so the hardware daemon also \
              starts on boot.",
         );
+        // ryzen_smu is only useful where Curve Optimizer is validated, and its
+        // DKMS build fails on fresh installs without dkms + kernel headers —
+        // only pre-select it when it can actually succeed.
+        let co_offered = legion_core::undervolt::machine_validated();
+        let co_missing = dkms_prereqs_missing();
         let co_switch = adw::SwitchRow::builder()
             .title("Install AMD tuning backend")
-            .subtitle("Curve Optimizer undervolt (ryzen_smu via DKMS)")
-            .active(true)
+            .subtitle(match &co_missing {
+                None => "Curve Optimizer undervolt (ryzen_smu via DKMS)".to_string(),
+                Some(cmd) => format!("Needs dkms + kernel headers first: {cmd}"),
+            })
+            .active(co_missing.is_none())
+            .visible(co_offered)
             .build();
         tip(
             &co_switch,
@@ -540,13 +549,22 @@ impl SetupCtx {
                                     start_legion_control()?;
                                 }
                             }
-                            if want_co {
-                                run_setup_helper_blocking("install-ryzen-smu")?;
-                                report.push(
-                                    "AMD tuning backend installed — Curve Optimizer is \
-                                     on the CPU page"
-                                        .into(),
-                                );
+                            if want_co && co_offered {
+                                // Optional: a failed DKMS build must not undo the
+                                // rest of the step — report it and carry on.
+                                match run_setup_helper_blocking("install-ryzen-smu") {
+                                    Ok(_) => report.push(
+                                        "AMD tuning backend installed — Curve Optimizer is \
+                                         on the CPU page"
+                                            .into(),
+                                    ),
+                                    Err(e) => report.push(format!(
+                                        "⚠ AMD tuning backend not installed (optional): {e}{}",
+                                        dkms_prereqs_missing()
+                                            .map(|cmd| format!("\n   Install the prerequisites with: {cmd}"))
+                                            .unwrap_or_default()
+                                    )),
+                                }
                             }
                             Ok(report)
                         },
@@ -755,4 +773,76 @@ pub(crate) fn setup_step_dialog(
     dialog.set_response_appearance(suggested, adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some(suggested));
     dialog
+}
+
+/// `Some(install command)` when the ryzen_smu DKMS build cannot work yet
+/// because `dkms` or the running kernel's headers are missing; `None` when
+/// both are present. The command matches the distro and kernel flavour.
+fn dkms_prereqs_missing() -> Option<String> {
+    let release = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let has_dkms = ["/usr/bin/dkms", "/usr/sbin/dkms"]
+        .iter()
+        .any(|p| std::path::Path::new(p).exists());
+    let has_headers = std::path::Path::new(&format!("/lib/modules/{release}/build")).exists();
+    if has_dkms && has_headers {
+        return None;
+    }
+    let os = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    Some(dkms_install_hint(&os, &release))
+}
+
+/// Distro-specific `dkms` + headers install command (pure; unit-tested).
+fn dkms_install_hint(os_release: &str, kernel: &str) -> String {
+    let ids: String = os_release
+        .lines()
+        .filter(|l| l.starts_with("ID=") || l.starts_with("ID_LIKE="))
+        .map(|l| l.split_once('=').map(|(_, v)| v.trim_matches('"').to_ascii_lowercase()).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if ids.contains("arch") {
+        let headers = if kernel.contains("cachyos") {
+            "linux-cachyos-headers"
+        } else if kernel.contains("-zen") {
+            "linux-zen-headers"
+        } else if kernel.contains("-lts") {
+            "linux-lts-headers"
+        } else {
+            "linux-headers"
+        };
+        format!("sudo pacman -S dkms {headers}")
+    } else if ids.contains("debian") || ids.contains("ubuntu") {
+        format!("sudo apt install dkms linux-headers-{kernel}")
+    } else if ids.contains("fedora") || ids.contains("rhel") {
+        format!("sudo dnf install dkms kernel-devel-{kernel}")
+    } else if ids.contains("suse") {
+        "sudo zypper install dkms kernel-devel".to_string()
+    } else {
+        "install dkms and the headers for your running kernel".to_string()
+    }
+}
+
+#[cfg(test)]
+mod dkms_hint_tests {
+    use super::dkms_install_hint;
+
+    #[test]
+    fn hints_match_distro_and_kernel_flavour() {
+        assert_eq!(
+            dkms_install_hint("ID=cachyos\nID_LIKE=arch\n", "7.2.10-1-cachyos"),
+            "sudo pacman -S dkms linux-cachyos-headers"
+        );
+        assert_eq!(dkms_install_hint("ID=arch\n", "6.19.2-zen1-1-zen"), "sudo pacman -S dkms linux-zen-headers");
+        assert_eq!(dkms_install_hint("ID=arch\n", "6.19.2-arch1-1"), "sudo pacman -S dkms linux-headers");
+        assert_eq!(
+            dkms_install_hint("ID=ubuntu\nID_LIKE=debian\n", "6.8.0-45-generic"),
+            "sudo apt install dkms linux-headers-6.8.0-45-generic"
+        );
+        assert_eq!(
+            dkms_install_hint("ID=fedora\n", "6.19.2-200.fc44.x86_64"),
+            "sudo dnf install dkms kernel-devel-6.19.2-200.fc44.x86_64"
+        );
+        assert!(dkms_install_hint("ID=gentoo\n", "6.1").contains("headers"));
+    }
 }
