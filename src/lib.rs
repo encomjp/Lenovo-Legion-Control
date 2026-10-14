@@ -25,6 +25,7 @@ pub mod models;
 pub mod profile;
 pub mod rgb_panic;
 pub mod selftest;
+pub mod telemetry_id;
 pub mod sensors;
 pub mod thermal;
 pub mod undervolt;

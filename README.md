@@ -188,6 +188,10 @@ GUI, CLI, and widget talk to `legion-daemon` for privileged ops. Daemon merges s
 
 One anonymized JSON per minute — model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/CO, settings digest, sanitized log tail, self-check — over HTTPS to private `legion-telemetry`. **On by default**; opt-out in `Setup → Alpha diagnostics` or first launch. Never: hostname, username, serials, MAC/IP. Self-hosters can set `LEGION_TELEMETRY_URL` + `LEGION_TELEMETRY_KEY`.
 
+**Device id.** Reports carry a pseudonymous `machine_id` so one laptop is counted once. It is a one-way SHA-256 hash (formatted as a UUID) of a fixed app salt, your firmware's DMI `product_uuid` and the product name; if the firmware UUID is missing or a placeholder, `/etc/machine-id` is hashed instead, and only if neither exists a random id is used. Honest properties: the id is **stable across reinstalls and config resets** (that is the point), so it is a persistent per-device identifier, not an anonymous per-session one; it cannot be reversed to the UUID, but anyone who already knows your device's `product_uuid` could confirm a match. The raw `product_uuid` and `/etc/machine-id` are never sent. The root daemon computes it and shares it with the GUI/CLI through `/var/lib/legion-control/machine-id`. When an older install switches from its random id, the next single report also carries `previous_machine_id` so history can be linked; it is not sent again. Turning telemetry off stops all reporting.
+
+**Fan diagnostics.** Reports include `fan_backend`, `fan_rpm_estimated` and `fan_layout`; the hourly report adds `fan_evidence` (chosen EC layout and why, and, only when the EC fallback is active, the raw RPM of each known layout next to the CPU temperature) to verify the "(est.)" fan readings. Numbers only, read-only.
+
 ---
 
 ## Hardware support / Officially tested
