@@ -15,6 +15,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Unit tests gate every release (hardware_live suites stay #[ignore]d).
+  test:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Install toolchain + GTK4/libadwaita
+        run: pacman -Syu --noconfirm --needed base-devel rust gtk4 libadwaita git >/dev/null
+      - uses: actions/checkout@v4
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets
+
   appimage:
     # Built on the oldest supported Ubuntu LTS so the AppImage only needs
     # glibc 2.35 on the host (AppImage catalog requirement). GTK4/libadwaita
@@ -204,7 +218,7 @@ jobs:
           path: packaging/out/*.pkg.tar.zst
 
   release:
-    needs: [appimage, appimage-check, deb, rpm, arch]
+    needs: [test, appimage, appimage-check, deb, rpm, arch]
     # Only publish on tag pushes — a workflow_dispatch from master must not
     # create a stray "master" release.
     if: startsWith(github.ref, 'refs/tags/')
