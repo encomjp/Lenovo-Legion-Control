@@ -533,6 +533,8 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
         }
     };
     let mut fallback = None;
+    // Spectrum-family sibling (e.g. c195) confirmed by its descriptor.
+    let mut sibling = None;
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -541,6 +543,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
             continue;
         };
         let mut matched = false;
+        let mut found_pid = String::new();
         for _ in 0..10 {
             let v = cur.join("idVendor");
             let p = cur.join("idProduct");
@@ -549,8 +552,12 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
                 // whole scan — stop walking this branch, try the next hidraw.
                 match (std::fs::read_to_string(&v), std::fs::read_to_string(&p)) {
                     (Ok(vendor), Ok(product)) => {
+                        found_pid = product.trim().to_lowercase();
+                        // c193 ("Lenovo Lighting") is a different device: never a target.
                         matched = vendor.trim().to_lowercase() == VID
-                            && product.trim().to_lowercase() == PID;
+                            && (found_pid == PID
+                                || (found_pid != "c193"
+                                    && crate::device::is_ite_lighting_pid(&found_pid)));
                         if matched {
                             log::trace!("hidraw scan: {name}: VID/PID match {VID}:{PID}");
                         } else {
@@ -580,6 +587,27 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
         }
         let path = PathBuf::from(format!("/dev/{name}"));
         let desc_path = entry.path().join("device/report_descriptor");
+        if found_pid != PID {
+            // Non-c197 controller: send Spectrum commands only if the
+            // descriptor positively confirms a Spectrum 960-byte report.
+            let confirmed = std::fs::read(&desc_path).is_ok_and(|d| {
+                d.windows(SPECTRUM_USAGE.len()).any(|w| w == SPECTRUM_USAGE)
+                    && crate::device::classify_ite(&found_pid, Some(&d))
+                        == Some(crate::device::IteClass::Spectrum)
+            });
+            if confirmed {
+                log::debug!(
+                    "hidraw scan: {name}: 048d:{found_pid} descriptor confirms Spectrum (960 B) — candidate {}",
+                    path.display()
+                );
+                sibling.get_or_insert(path);
+            } else {
+                log::trace!(
+                    "hidraw scan: {name}: 048d:{found_pid} descriptor is not Spectrum — never written"
+                );
+            }
+            continue;
+        }
         if let Ok(desc) = std::fs::read(&desc_path) {
             if desc
                 .windows(SPECTRUM_USAGE.len())
@@ -600,6 +628,7 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
         }
         fallback = Some(path);
     }
+    let fallback = fallback.or(sibling);
     match &fallback {
         Some(p) => log::debug!(
             "hidraw scan: done — no usage-page match, falling back to {}",
@@ -608,6 +637,13 @@ fn find_spectrum_hidraw() -> Option<PathBuf> {
         None => log::debug!("hidraw scan: done — no {VID}:{PID} candidate found"),
     }
     fallback
+}
+
+/// True when a Spectrum-capable HID controller is present (c197, or another
+/// ITE controller whose descriptor confirms Spectrum). Cheap sysfs scan; use
+/// it to avoid driving the Spectrum worker on machines without the hardware.
+pub fn spectrum_present() -> bool {
+    find_spectrum_hidraw().is_some()
 }
 
 struct SpectrumDevice {
@@ -630,7 +666,7 @@ fn hid_lock() -> &'static Mutex<()> {
 impl SpectrumDevice {
     fn open() -> Result<Self, String> {
         let path = find_spectrum_hidraw().ok_or_else(|| {
-            "Spectrum HID (048d:c197) not found — is udev rule installed?".to_string()
+            "Spectrum HID (048d:c197 or compatible ITE controller) not found — is udev rule installed?".to_string()
         })?;
         // Blocking open — matches spectrum-ctl.py (no O_NONBLOCK).
         let file = OpenOptions::new()
@@ -1190,6 +1226,10 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
 
         match &result {
             Ok(()) => log::debug!("spectrum: worker batch complete"),
+            // No Spectrum controller on this machine is a no-op, not a fault.
+            Err(_) if !spectrum_present() => {
+                log::debug!("spectrum: worker batch skipped — no Spectrum controller present")
+            }
             Err(e) => log::error!("spectrum: worker batch FAILED: {e}"),
         }
 
