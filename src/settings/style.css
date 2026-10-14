@@ -23,6 +23,14 @@
 /* ── Type ─────────────────────────────────────────────────────────── */
 .numeric {
     font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
+/* Values never use a monospace face */
+.monospace,
+label.monospace {
+    font-family: inherit;
+    font-feature-settings: "tnum";
 }
 
 /* Header — keep the title legible, quiet */
@@ -269,133 +277,222 @@ row.action > box.header > box.title label.subtitle {
 .status-dot.bad { background: @error_color; }
 
 /* ── Buttons ──────────────────────────────────────────────────────── */
-/* Secondary (default for every action button) */
-button.pill-btn {
+/* Exactly three variants, one shape (34px tall, 8px radius, same padding,
+ * size and weight). Rules match every button inside pages, dialogs and
+ * popovers, so buttons without a class look identical.
+ *   secondary    subtle fill + 1px border (default)
+ *   primary      accent fill (.suggested-action)
+ *   destructive  secondary with red text (.destructive-action)
+ * Excluded: segmented toggles, swatches and colour pickers (own rules). */
+.page button:not(.toggle):not(.swatch):not(.colour-picker),
+dialog button:not(.toggle):not(.swatch):not(.colour-picker),
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker),
+popover button:not(.toggle):not(.swatch):not(.colour-picker),
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker) {
     min-height: 22px;
+    min-width: 0;
     padding: 5px 14px;
     border-radius: 8px;
-    font-weight: 500;
     font-size: 0.9rem;
-    color: @window_fg_color;
-    background: alpha(@window_fg_color, 0.07);
-    border: 1px solid alpha(@window_fg_color, 0.40);
+    font-weight: 500;
     box-shadow: none;
+    background-image: none;
     transition: background 120ms ease-out, border-color 120ms ease-out;
 }
 
-button.pill-btn:hover {
-    background: alpha(@window_fg_color, 0.12);
+.page button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+popover button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive) {
+    color: @window_fg_color;
+    background-color: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.40);
+}
+
+.page button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):hover,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):hover,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):hover,
+popover button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):hover,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):hover {
+    background-color: alpha(@window_fg_color, 0.12);
     border-color: alpha(@window_fg_color, 0.55);
 }
 
-button.pill-btn:active {
-    background: alpha(@window_fg_color, 0.16);
+.page button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):active,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):active,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):active,
+popover button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):active,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):active {
+    background-color: alpha(@window_fg_color, 0.16);
 }
 
-/* Disabled: still a button (faint fill and outline), just muted. No
- * opacity, so the outline never vanishes. */
-button.pill-btn:disabled {
+.page button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):disabled,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):disabled,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):disabled,
+popover button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):disabled,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive):disabled {
     opacity: 1;
     color: alpha(@window_fg_color, 0.42);
-    background: alpha(@window_fg_color, 0.035);
+    background-color: alpha(@window_fg_color, 0.035);
     border-color: alpha(@window_fg_color, 0.16);
 }
 
-/* Primary: at most one per view */
-button.pill-btn.suggested-action {
-    background: @accent_bg_color;
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested {
     color: @accent_fg_color;
-    border-color: transparent;
+    background-color: @accent_bg_color;
+    border: 1px solid @accent_bg_color;
     font-weight: 600;
 }
 
-button.pill-btn.suggested-action:hover {
-    background: shade(@accent_bg_color, 1.10);
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:hover,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:hover,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:hover,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:hover,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:hover,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested:hover,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:hover,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:hover,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested:hover,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:hover {
+    background-color: shade(@accent_bg_color, 1.10);
 }
 
-button.pill-btn.suggested-action:active {
-    background: shade(@accent_bg_color, 0.92);
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:active,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:active,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:active,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:active,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:active,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested:active,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:active,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:active,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested:active,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:active {
+    background-color: shade(@accent_bg_color, 0.92);
 }
 
-button.pill-btn.suggested-action:disabled {
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:disabled,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:disabled,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:disabled,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:disabled,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested-action:disabled,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).suggested:disabled,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:disabled,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:disabled,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).suggested:disabled,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).suggested:disabled {
     opacity: 1;
     color: alpha(@window_fg_color, 0.42);
-    background: alpha(@window_fg_color, 0.07);
+    background-color: alpha(@window_fg_color, 0.07);
     border-color: alpha(@window_fg_color, 0.16);
 }
 
-/* Destructive: quiet until hovered */
-button.pill-btn.destructive-action {
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive {
     color: shade(@error_color, 0.80);
-    background: alpha(@error_color, 0.10);
-    border-color: alpha(@error_color, 0.45);
+    background-color: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.40);
 }
 
-button.pill-btn.destructive-action:disabled {
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:hover,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:hover,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:hover,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:hover,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:hover,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive:hover,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:hover,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:hover,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive:hover,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:hover {
+    background-color: alpha(@window_fg_color, 0.12);
+    border-color: alpha(@window_fg_color, 0.55);
+}
+
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:disabled,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:disabled,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:disabled,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:disabled,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action:disabled,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive:disabled,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:disabled,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:disabled,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive:disabled,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive:disabled {
+    opacity: 1;
     color: alpha(@error_color, 0.45);
-    background: alpha(@error_color, 0.04);
-    border-color: alpha(@error_color, 0.20);
+    background-color: alpha(@window_fg_color, 0.035);
+    border-color: alpha(@window_fg_color, 0.16);
 }
 
-button.pill-btn.destructive-action:hover {
-    background: alpha(@error_color, 0.18);
-}
-
-/* Icon button: same height as the text buttons */
-button.icon-btn {
+/* Icon-only buttons: 34x34, same radius */
+.page button:not(.toggle):not(.swatch):not(.colour-picker).image-button,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).image-button,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).image-button,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).image-button,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).image-button,
+.page button:not(.toggle):not(.swatch):not(.colour-picker).icon-btn,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).icon-btn,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).icon-btn,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).icon-btn,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).icon-btn {
     min-width: 22px;
-    min-height: 22px;
     padding: 5px;
+}
+
+@media (prefers-color-scheme: dark) {
+.page button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+popover button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive),
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker):not(.suggested-action):not(.suggested):not(.destructive-action):not(.destructive) {
+        border-color: alpha(@window_fg_color, 0.22);
+    }
+
+.page button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+window.dialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+popover button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action,
+messagedialog button:not(.toggle):not(.swatch):not(.colour-picker).destructive-action {
+        color: @error_color;
+        border-color: alpha(@window_fg_color, 0.22);
+    }
+}
+
+/* Dropdown and combo buttons share the same tokens */
+dropdown > button,
+dropdown > button.toggle {
+    min-height: 22px;
+    padding: 5px 12px;
     border-radius: 8px;
-    background: alpha(@window_fg_color, 0.07);
     border: 1px solid alpha(@window_fg_color, 0.40);
+    background-color: alpha(@window_fg_color, 0.07);
     box-shadow: none;
 }
 
-button.icon-btn:hover {
-    background: alpha(@window_fg_color, 0.12);
-}
-
-button.icon-btn:disabled {
-    opacity: 1;
-    color: alpha(@window_fg_color, 0.42);
-    background: alpha(@window_fg_color, 0.035);
-    border-color: alpha(@window_fg_color, 0.16);
-}
-
-/* Plain adw buttons placed in rows (ActionRow suffixes, banners) */
-.page button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker):not(.image-button),
-row button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker) {
+/* Colour buttons: same height and radius */
+.colour-picker {
+    min-width: 40px;
     min-height: 22px;
-    padding: 5px 14px;
+    padding: 5px 10px;
     border-radius: 8px;
-    font-weight: 500;
-    background: alpha(@window_fg_color, 0.07);
     border: 1px solid alpha(@window_fg_color, 0.40);
-    box-shadow: none;
-}
-
-.page button:disabled:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker):not(.image-button),
-row button:disabled:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker) {
-    opacity: 1;
-    color: alpha(@window_fg_color, 0.42);
-    background: alpha(@window_fg_color, 0.035);
-    border-color: alpha(@window_fg_color, 0.16);
-}
-
-row button.suggested-action:disabled {
-    opacity: 1;
-    color: alpha(@window_fg_color, 0.42);
-    background: alpha(@window_fg_color, 0.07);
-    border-color: alpha(@window_fg_color, 0.16);
-}
-
-row button.suggested-action {
-    min-height: 22px;
-    padding: 5px 14px;
-    border-radius: 8px;
-    font-weight: 600;
-    border: 1px solid transparent;
     box-shadow: none;
 }
 
@@ -411,7 +508,7 @@ row button.suggested-action {
 .segmented .seg-btn {
     min-height: 22px;
     min-width: 0;
-    padding: 4px 12px;
+    padding: 3px 12px;
     border-radius: 7px;
     font-weight: 500;
     font-size: 0.9rem;
@@ -459,7 +556,6 @@ row button.suggested-action {
 .detail-body {
     font-size: 0.80rem;
     opacity: 0.75;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     background: alpha(@window_fg_color, 0.05);
     border: 1px solid alpha(@window_fg_color, 0.09);
     border-radius: 8px;
@@ -527,13 +623,6 @@ row button.suggested-action {
 .swatch-00e65a { background: #00e65a; }
 .swatch-ff8c00 { background: #ff8c00; }
 .swatch-000000 { background: #1a1a1e; }
-
-.colour-picker {
-    min-width: 40px;
-    min-height: 22px;
-    padding: 4px;
-    border-radius: 8px;
-}
 
 .perkey-canvas {
     border-radius: 8px;
