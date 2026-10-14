@@ -259,6 +259,11 @@ pub fn nvme_fault_thresholds(max: Option<f64>, crit: Option<f64>) -> (f64, f64) 
 /// one whose slot differs from the iGPU's (integrated GPUs live on the CPU's
 /// PCI address; dGPUs sit on their own). When only one amdgpu hwmon exists
 /// the machine is APU-only and there is no dGPU to report.
+/// dGPU temperature (°C) from the amdgpu hwmon, if a discrete Radeon exists.
+pub fn amd_dgpu_temp_c() -> Option<f64> {
+    amd_dgpu_hwmon_read().map(|(t, _, _)| t).filter(|t| *t > 0.0)
+}
+
 fn amd_dgpu_hwmon_read() -> Option<(f64, f64, f64)> {
     let cards = find_hwmon("amdgpu");
     if cards.len() < 2 {

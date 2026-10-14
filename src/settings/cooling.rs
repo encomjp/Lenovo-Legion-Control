@@ -1,6 +1,8 @@
-//! Cooling — per-fan cards with automatic/manual control.
+//! Cooling — fan-curve editor, per-fan cards and manual control.
 
+use super::curve_editor::CurveEditor;
 use super::*;
+use std::collections::HashMap;
 
 pub(crate) fn build_cooling_overview_page(
     toast_overlay: &adw::ToastOverlay,
@@ -75,9 +77,63 @@ pub(crate) fn build_cooling_overview_page(
         gate.track(&locked);
         return page;
     }
+    let channels = legion_core::fans::channels();
+    let manual_supported = legion_core::fans::control_backend_name().is_some();
+    if !manual_supported {
+        let overview = pref_group("Fans overview", None);
+        tip(&overview, "Each card exposes full tuning for that fan");
+        for ch in &channels {
+            overview.add(&fan_card(
+                ch.id,
+                &ch.title,
+                ch.min_rpm as f64,
+                ch.max_rpm as f64,
+                toast_overlay,
+                apply_queue,
+            ));
+        }
+        if channels.is_empty() {
+            overview.add(&property_row(
+                "No fans detected",
+                "Check the daemon and HWMon",
+                Some("Fan channels missing — check legion-control service"),
+            ));
+        }
+        let note = pref_group("Manual control unavailable", None);
+        tip(
+            &note,
+            "This model exposes fan tachometers but no firmware write path for manual targets",
+        );
+        note.add(&property_row(
+            "Managed by Lenovo EC firmware",
+            "Manual fan control is not supported on this model (managed by Lenovo EC firmware)",
+            Some("Fan RPM is shown live above; the EC firmware owns the fan curve"),
+        ));
+        page.append(&overview);
+        page.append(&note);
+        gate.track(&overview);
+        gate.track(&note);
+        return page;
+    }
+
+    // ── Fan curve (primary) ──
+    let curve_box = build_fan_curve_section(&channels, toast_overlay, gate);
+    page.append(&curve_box);
+
+    // ── Advanced: manual speed (existing per-fan controls) ──
+    let advanced = gtk::Expander::new(Some("Advanced: manual speed"));
+    advanced.set_margin_top(6);
+    let inner = gtk::Box::new(Orientation::Vertical, 12);
+    inner.set_margin_top(10);
+    let hint = gtk::Label::new(Some(
+        "A fixed speed per fan. While a fan curve is running for the current power mode the daemon refuses manual speeds — use Reset to firmware first.",
+    ));
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint.add_css_class("dim-label");
+    inner.append(&hint);
     let overview = pref_group("Fans overview", None);
     tip(&overview, "Each card exposes full tuning for that fan");
-    let channels = legion_core::fans::channels();
     for ch in &channels {
         overview.add(&fan_card(
             ch.id,
@@ -94,24 +150,6 @@ pub(crate) fn build_cooling_overview_page(
             "Check the daemon and HWMon",
             Some("Fan channels missing — check legion-control service"),
         ));
-    }
-    let manual_supported = legion_core::fans::control_backend_name().is_some();
-    if !manual_supported {
-        let note = pref_group("Manual control unavailable", None);
-        tip(
-            &note,
-            "This model exposes fan tachometers but no firmware write path for manual targets",
-        );
-        note.add(&property_row(
-            "Managed by Lenovo EC firmware",
-            "Manual fan control is not supported on this model (managed by Lenovo EC firmware)",
-            Some("Fan RPM is shown live above; the EC firmware owns the fan curve"),
-        ));
-        page.append(&overview);
-        page.append(&note);
-        gate.track(&overview);
-        gate.track(&note);
-        return page;
     }
     let reset = pref_group("Automatic mode", None);
     let btn = primary_button_tip(
@@ -132,23 +170,495 @@ pub(crate) fn build_cooling_overview_page(
     tip(&row, "Recommended after testing loud manual speeds");
     row.add_suffix(&btn);
     reset.add(&row);
-    if legion_core::fans::manual_target_may_persist() {
-        let caveat = adw::ActionRow::builder()
-            .title("Gen 10 caveat")
-            .subtitle(legion_core::fans::GEN10_MANUAL_TARGET_WARNING)
-            .activatable(false)
-            .build();
-        tip(
-            &caveat,
-            "Some Gen 10 ECs keep the last manual RPM even after Auto; a full EC reset (unplug, hold power 30 s) restores the firmware curve",
-        );
-        reset.add(&caveat);
-    }
-    page.append(&overview);
-    page.append(&reset);
+    inner.append(&overview);
+    inner.append(&reset);
+    advanced.set_child(Some(&inner));
+    page.append(&advanced);
     gate.track(&overview);
     gate.track(&reset);
     page
+}
+
+/// One-line Gen 10 reminder shown only when a manual speed is set.
+const GEN10_MANUAL_HINT: &str = "Gen 10: a manual speed may persist until an EC reset — use Automatic or a curve to hand control back.";
+
+/// Show / clear the Gen 10 reminder on a fan's mode row. No-op below Gen 10.
+fn gen10_manual_hint(row: &adw::SwitchRow, manual: bool, toast: Option<&adw::ToastOverlay>) {
+    if !legion_core::fans::manual_target_may_persist() {
+        return;
+    }
+    if manual {
+        row.set_subtitle(GEN10_MANUAL_HINT);
+        if let Some(t) = toast {
+            toast_info(t, GEN10_MANUAL_HINT);
+        }
+    } else {
+        row.set_subtitle("");
+    }
+}
+
+fn profile_tab_label(name: &str) -> String {
+    match name {
+        "low-power" | "quiet" => "Quiet".into(),
+        "balanced" => "Balanced".into(),
+        "balanced-performance" => "Balanced+".into(),
+        "performance" => "Performance".into(),
+        "max-power" => "Max power".into(),
+        "custom" => "Custom".into(),
+        other => {
+            let mut c = other.chars();
+            c.next()
+                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// Everything the curve section updates after a daemon round trip.
+struct CurveUi {
+    editor: CurveEditor,
+    profile: RefCell<String>,
+    status: RefCell<Option<legion_core::fan_curve::FanCurveStatus>>,
+    drafts: RefCell<HashMap<String, legion_core::fan_curve::CurvePoints>>,
+    inflight: Cell<bool>,
+    busy: Cell<bool>,
+    headline: gtk::Label,
+    state_label: gtk::Label,
+    apply: gtk::Button,
+    reset: gtk::Button,
+    factory: gtk::Button,
+    cards: Vec<FanCardUi>,
+    toast: adw::ToastOverlay,
+}
+
+struct FanCardUi {
+    id: u8,
+    min: u32,
+    max: u32,
+    rpm: gtk::Label,
+    bar: gtk::ProgressBar,
+    source: gtk::Label,
+}
+
+impl CurveUi {
+    /// Curve stored on the daemon for `profile` (factory shape if none).
+    fn stored(&self, profile: &str) -> (legion_core::fan_curve::CurvePoints, bool) {
+        if let Some(st) = self.status.borrow().as_ref() {
+            if let Some((_, c)) = st.curves.iter().find(|(n, _)| n == profile) {
+                return (c.points, c.enabled);
+            }
+        }
+        (legion_core::fan_curve::default_points(profile), false)
+    }
+
+    fn dirty(&self) -> bool {
+        let profile = self.profile.borrow().clone();
+        self.editor.points() != self.stored(&profile).0
+    }
+
+    /// Refresh labels, buttons and fan cards from the current state.
+    fn sync(&self) {
+        let profile = self.profile.borrow().clone();
+        let (_, enabled) = self.stored(&profile);
+        let dirty = self.dirty();
+        let st = self.status.borrow();
+        let text = match st.as_ref() {
+            None => "Connecting to the daemon…".to_string(),
+            Some(st) => {
+                let now = st.current_profile == profile;
+                let base = if enabled && now && st.active {
+                    let t = st.temp_c.map_or("—".into(), |t| format!("{t:.0} °C"));
+                    let p = st.pct.map_or("—".into(), |p| format!("{p} %"));
+                    if st.safety {
+                        format!("Safety max · {t} — all fans at 100 %")
+                    } else {
+                        format!("Following curve · {t} → {p}")
+                    }
+                } else if enabled && now {
+                    match &st.fault {
+                        Some(f) => format!("Firmware control — {f}"),
+                        None => "Curve enabled · starting…".to_string(),
+                    }
+                } else if enabled {
+                    "Curve saved · runs while this power mode is active".to_string()
+                } else {
+                    "Firmware control (no curve)".to_string()
+                };
+                if dirty {
+                    format!("{base} · unsaved changes")
+                } else {
+                    base
+                }
+            }
+        };
+        self.state_label.set_text(&text);
+        let online = st.is_some() && !self.busy.get();
+        self.apply.set_sensitive(online && (dirty || !enabled));
+        self.reset.set_sensitive(online && enabled);
+        self.factory.set_sensitive(
+            st.is_some() && self.editor.points() != legion_core::fan_curve::default_points(&profile),
+        );
+        self.headline.set_text(&format!(
+            "{} curve · CPU/GPU temperature → fan speed",
+            profile_tab_label(&profile)
+        ));
+        self.editor.set_now(
+            st.as_ref()
+                .filter(|s| s.current_profile == profile)
+                .and_then(|s| s.temp_c),
+        );
+        let following = st.as_ref().filter(|s| s.active).and_then(|s| s.pct);
+        for c in &self.cards {
+            c.source.set_text(&match following {
+                Some(p) => format!("Following curve · {p} %"),
+                None => "Firmware curve".to_string(),
+            });
+        }
+    }
+
+    fn load_profile(&self, profile: &str) {
+        let pts = self
+            .drafts
+            .borrow()
+            .get(profile)
+            .copied()
+            .unwrap_or_else(|| self.stored(profile).0);
+        *self.profile.borrow_mut() = profile.to_string();
+        self.editor.set_points(pts);
+        self.sync();
+    }
+}
+
+fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi) {
+    let card = gtk::Box::new(Orientation::Vertical, 6);
+    card.add_css_class("card");
+    card.set_hexpand(true);
+    card.set_size_request(160, -1);
+    let top = gtk::Box::new(Orientation::Horizontal, 8);
+    top.set_margin_top(12);
+    top.set_margin_start(14);
+    top.set_margin_end(14);
+    let title = gtk::Label::new(Some(&ch.title));
+    title.add_css_class("heading");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    let range = gtk::Label::new(Some(&format!("{}–{} rpm", ch.min_rpm, ch.max_rpm)));
+    range.add_css_class("dim-label");
+    range.add_css_class("caption");
+    top.append(&title);
+    top.append(&range);
+    let rpm = gtk::Label::new(Some("— rpm"));
+    rpm.add_css_class("numeric");
+    rpm.add_css_class("title-2");
+    rpm.set_xalign(0.0);
+    rpm.set_margin_start(14);
+    let bar = gtk::ProgressBar::new();
+    bar.set_margin_start(14);
+    bar.set_margin_end(14);
+    let source = gtk::Label::new(Some("Firmware curve"));
+    source.add_css_class("dim-label");
+    source.add_css_class("caption");
+    source.set_xalign(0.0);
+    source.set_margin_start(14);
+    source.set_margin_bottom(12);
+    card.append(&top);
+    card.append(&rpm);
+    card.append(&bar);
+    card.append(&source);
+    let ui = FanCardUi {
+        id: ch.id,
+        min: ch.min_rpm,
+        max: ch.max_rpm,
+        rpm,
+        bar,
+        source,
+    };
+    (card, ui)
+}
+
+fn build_fan_curve_section(
+    channels: &[legion_core::device::FanCapability],
+    toast: &adw::ToastOverlay,
+    gate: &DaemonGate,
+) -> gtk::Box {
+    use legion_core::fan_curve;
+    let root = gtk::Box::new(Orientation::Vertical, 14);
+
+    // Mode selector (power profile whose curve is edited).
+    let mut choices = legion_core::profile::safe_choices();
+    if choices.is_empty() {
+        choices = ["low-power", "balanced", "performance", "custom"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    }
+    let current = legion_core::profile::current();
+    let initial = if choices.contains(&current) {
+        current.clone()
+    } else {
+        choices[0].clone()
+    };
+
+    let header = gtk::Box::new(Orientation::Horizontal, 12);
+    let headline = gtk::Label::new(None);
+    headline.add_css_class("heading");
+    headline.set_xalign(0.0);
+    headline.set_hexpand(true);
+    headline.set_wrap(true);
+    header.append(&headline);
+    let modes = gtk::Box::new(Orientation::Horizontal, 0);
+    modes.add_css_class("linked");
+    modes.set_valign(Align::Center);
+    modes.update_property(&[gtk::accessible::Property::Label("Curve for power mode")]);
+    let mut leader: Option<gtk::ToggleButton> = None;
+    let mut mode_buttons: Vec<(String, gtk::ToggleButton)> = Vec::new();
+    for name in &choices {
+        let b = gtk::ToggleButton::with_label(&profile_tab_label(name));
+        if let Some(l) = &leader {
+            b.set_group(Some(l));
+        } else {
+            leader = Some(b.clone());
+        }
+        b.set_active(*name == initial);
+        modes.append(&b);
+        mode_buttons.push((name.clone(), b));
+    }
+    header.append(&modes);
+    root.append(&header);
+
+    // Editor + status + buttons.
+    let editor = CurveEditor::new();
+    let editor_frame = gtk::Box::new(Orientation::Vertical, 8);
+    editor_frame.add_css_class("card");
+    editor_frame.set_hexpand(true);
+    editor.area.set_margin_top(10);
+    editor.area.set_margin_start(10);
+    editor.area.set_margin_end(10);
+    editor_frame.append(&editor.area);
+    let state_label = gtk::Label::new(None);
+    state_label.set_xalign(0.0);
+    state_label.set_wrap(true);
+    state_label.set_margin_start(14);
+    state_label.set_margin_end(14);
+    state_label.add_css_class("dim-label");
+    editor_frame.append(&state_label);
+    let safety_note = gtk::Label::new(Some(
+        "Above 90 °C every fan goes to 100 % regardless of the curve. Any sensor error hands the fans back to the firmware.",
+    ));
+    safety_note.set_xalign(0.0);
+    safety_note.set_wrap(true);
+    safety_note.set_margin_start(14);
+    safety_note.set_margin_end(14);
+    safety_note.add_css_class("caption");
+    editor_frame.append(&safety_note);
+    let buttons = gtk::Box::new(Orientation::Horizontal, 8);
+    buttons.set_halign(Align::End);
+    buttons.set_margin_start(14);
+    buttons.set_margin_end(14);
+    buttons.set_margin_bottom(12);
+    let factory = gtk::Button::with_label("Factory shape");
+    factory.add_css_class("flat");
+    tip(
+        &factory,
+        "Put this mode's points back to the built-in shape (not applied until you press Apply curve)",
+    );
+    let reset = gtk::Button::with_label("Reset to firmware");
+    tip(
+        &reset,
+        "Stop the software curve for this power mode — the fans go back to the firmware curve",
+    );
+    let apply = gtk::Button::with_label("Apply curve");
+    apply.add_css_class("suggested-action");
+    tip(&apply, "Save this curve and let the daemon drive the fans with it");
+    buttons.append(&factory);
+    buttons.append(&reset);
+    buttons.append(&apply);
+    editor_frame.append(&buttons);
+
+    // Fan cards.
+    let cards_box = gtk::Box::new(Orientation::Horizontal, 12);
+    cards_box.set_homogeneous(true);
+    let mut card_uis = Vec::new();
+    for ch in channels {
+        let (w, ui) = fan_card_ui(ch);
+        cards_box.append(&w);
+        card_uis.push(ui);
+    }
+    root.append(&editor_frame);
+    root.append(&cards_box);
+    gate.track(&editor_frame);
+
+    let ui = Rc::new(CurveUi {
+        editor: editor.clone(),
+        profile: RefCell::new(initial.clone()),
+        status: RefCell::new(None),
+        drafts: RefCell::new(HashMap::new()),
+        inflight: Cell::new(false),
+        busy: Cell::new(false),
+        headline,
+        state_label,
+        apply: apply.clone(),
+        reset: reset.clone(),
+        factory: factory.clone(),
+        cards: card_uis,
+        toast: toast.clone(),
+    });
+    editor.set_points(fan_curve::default_points(&initial));
+    ui.sync();
+
+    // Edits update the draft for the selected mode and the dirty state.
+    {
+        let ui = ui.clone();
+        editor.connect_changed(move || {
+            let profile = ui.profile.borrow().clone();
+            ui.drafts.borrow_mut().insert(profile, ui.editor.points());
+            ui.sync();
+        });
+    }
+    // Mode switch.
+    for (name, b) in &mode_buttons {
+        let ui = ui.clone();
+        let name = name.clone();
+        b.connect_toggled(move |b| {
+            if b.is_active() {
+                ui.load_profile(&name);
+            }
+        });
+    }
+    {
+        let ui = ui.clone();
+        factory.connect_clicked(move |_| {
+            let profile = ui.profile.borrow().clone();
+            ui.editor.set_points(fan_curve::default_points(&profile));
+            ui.drafts.borrow_mut().insert(profile, ui.editor.points());
+            ui.sync();
+        });
+    }
+    // Apply / Reset (async IPC — GTK main thread never blocks).
+    let send = {
+        let ui = ui.clone();
+        Rc::new(move |enabled: bool| {
+            let profile = ui.profile.borrow().clone();
+            let points = if enabled {
+                ui.editor.points()
+            } else {
+                ui.stored(&profile).0
+            };
+            ui.busy.set(true);
+            ui.sync();
+            let ui2 = ui.clone();
+            let p2 = profile.clone();
+            run_daemon_command_async(
+                DaemonCommand::SetFanCurve {
+                    profile,
+                    points,
+                    enabled,
+                },
+                move |res| {
+                    ui2.busy.set(false);
+                    match res {
+                        Ok(DaemonResponse::FanCurves(st)) => {
+                            *ui2.status.borrow_mut() = Some(st);
+                            if enabled {
+                                ui2.drafts.borrow_mut().remove(&p2);
+                                toast_ok(&ui2.toast, "Fan curve applied");
+                            } else {
+                                toast_ok(&ui2.toast, "Fans back on the firmware curve");
+                            }
+                        }
+                        Ok(DaemonResponse::Error(e)) | Err(e) => toast_error(&ui2.toast, &e),
+                        Ok(_) => toast_error(&ui2.toast, "Unexpected response from the daemon"),
+                    }
+                    ui2.sync();
+                },
+            );
+        })
+    };
+    {
+        let send = send.clone();
+        apply.connect_clicked(move |_| send(true));
+    }
+    {
+        let send = send.clone();
+        reset.connect_clicked(move |_| send(false));
+    }
+
+    // Poll status + RPM every 2 s while the page is visible.
+    let weak = editor.area.downgrade();
+    let ui_poll = ui.clone();
+    let tick = move || {
+        let ui = ui_poll.clone();
+        if ui.inflight.get() {
+            return;
+        }
+        ui.inflight.set(true);
+        let fans: Vec<u8> = ui.cards.iter().map(|c| c.id).collect();
+        dispatch_async(
+            move || {
+                let st = match send_command(DaemonCommand::GetFanCurves)? {
+                    DaemonResponse::FanCurves(s) => s,
+                    DaemonResponse::Error(e) => {
+                        return Err(format!(
+                            "Fan curves unavailable ({e}) — update and restart legion-control"
+                        ))
+                    }
+                    _ => return Err("Unexpected response from the daemon".into()),
+                };
+                let rpms: Vec<(u8, Option<u32>)> = fans
+                    .iter()
+                    .map(|f| (*f, legion_core::fans::read_rpm(*f)))
+                    .collect();
+                Ok((st, rpms))
+            },
+            "Fan status request stopped",
+            move |res| {
+                ui.inflight.set(false);
+                match res {
+                    Ok((st, rpms)) => {
+                        *ui.status.borrow_mut() = Some(st);
+                        for (id, rpm) in rpms {
+                            if let Some(c) = ui.cards.iter().find(|c| c.id == id) {
+                                match rpm {
+                                    Some(r) => {
+                                        c.rpm.set_text(&format!("{r} rpm"));
+                                        let span = c.max.saturating_sub(c.min).max(1) as f64;
+                                        c.bar.set_fraction(
+                                            (r.saturating_sub(c.min) as f64 / span).clamp(0.0, 1.0),
+                                        );
+                                    }
+                                    None => c.rpm.set_text("— rpm"),
+                                }
+                            }
+                        }
+                        // Pick up CLI / other-client changes unless mid-edit.
+                        let profile = ui.profile.borrow().clone();
+                        if !ui.editor.is_dragging() && !ui.drafts.borrow().contains_key(&profile) {
+                            ui.editor.set_points(ui.stored(&profile).0);
+                        }
+                        ui.sync();
+                    }
+                    Err(e) => {
+                        ui.state_label.set_text(&e);
+                        ui.apply.set_sensitive(false);
+                        ui.reset.set_sensitive(false);
+                    }
+                }
+            },
+        );
+    };
+    tick();
+    let tick = Rc::new(tick);
+    glib::timeout_add_local(Duration::from_secs(2), move || {
+        let Some(area) = weak.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+        if area.is_mapped() {
+            tick();
+        }
+        glib::ControlFlow::Continue
+    });
+
+    root
 }
 
 pub(crate) fn fan_card(
@@ -156,7 +666,7 @@ pub(crate) fn fan_card(
     title: &str,
     min_rpm: f64,
     max_rpm: f64,
-    _toast_overlay: &adw::ToastOverlay,
+    toast_overlay: &adw::ToastOverlay,
     apply_queue: &ApplyQueue,
 ) -> adw::PreferencesGroup {
     let sec_tip = match fan {
@@ -232,6 +742,10 @@ pub(crate) fn fan_card(
     );
     sw.add_suffix(&rpm_l);
     group.add(&sw);
+    if !auto {
+        // Already manual when the page opens: keep the reminder visible.
+        gen10_manual_hint(&sw, true, None);
+    }
 
     let scale = gtk::Scale::with_range(Orientation::Horizontal, min_rpm, max_rpm, 100.0);
     scale.set_draw_value(false);
@@ -279,6 +793,7 @@ pub(crate) fn fan_card(
     let suppressing = Rc::new(Cell::new(false));
     let suppressing_s = suppressing.clone();
     let high_s = high_accepted.clone();
+    let toast_s = toast_overlay.clone();
     sw.connect_active_notify(move |s| {
         if suppressing_s.get() {
             return;
@@ -287,6 +802,7 @@ pub(crate) fn fan_card(
             scale_s.set_sensitive(false);
             speed_val_s.set_text("—");
             sw_title.set_title("Automatic");
+            gen10_manual_hint(&sw_title, false, None);
             queue.set_fan(fan, 0);
         } else {
             let rpm = scale_s.value() as u32;
@@ -299,6 +815,7 @@ pub(crate) fn fan_card(
                 let queue = queue.clone();
                 let suppressing = suppressing_s.clone();
                 let high_s = high_s.clone();
+                let toast_r = toast_s.clone();
                 confirm_risk(
                     s,
                     "Very high fan speed",
@@ -321,7 +838,8 @@ pub(crate) fn fan_card(
                         scale_r.set_sensitive(true);
                         speed_val_r.set_text(&format!("~{rpm}"));
                         sw_title.set_title("Manual");
-                                    queue.set_fan(fan, rpm);
+                        gen10_manual_hint(&sw_title, true, Some(&toast_r));
+                        queue.set_fan(fan, rpm);
                     },
                 );
                 return;
@@ -329,6 +847,7 @@ pub(crate) fn fan_card(
             scale_s.set_sensitive(true);
             speed_val_s.set_text(&format!("~{rpm}"));
             sw_title.set_title("Manual");
+            gen10_manual_hint(&sw_title, true, Some(&toast_s));
             queue.set_fan(fan, rpm);
         }
     });

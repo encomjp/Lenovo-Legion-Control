@@ -288,6 +288,11 @@ enum Commands {
         #[arg(long)]
         i_understand_instability_risk: bool,
     },
+    /// Software fan curve (per power mode): show | set | enable | disable
+    FanCurve {
+        #[command(subcommand)]
+        action: Option<FanCurveCmd>,
+    },
     /// Thermal throttle control
     Thermal {
         #[command(subcommand)]
@@ -376,6 +381,26 @@ enum DiagAction {
     Enable,
     /// Turn anonymous telemetry off (for this user and the root daemon)
     Disable,
+}
+
+#[derive(Subcommand)]
+enum FanCurveCmd {
+    /// Show stored curves and live engine status (default)
+    Show,
+    /// Store a curve: 8 `temp:pct` pairs, e.g. 30:0,40:15,50:25,60:38,70:52,80:68,90:86,100:100
+    Set {
+        /// Platform profile (balanced, performance, custom, low-power, …)
+        profile: String,
+        /// 8 comma-separated temp:pct pairs (20–100 °C rising, 0–100 % not falling, last = 100 % at ≥90 °C)
+        points: String,
+        /// Store without enabling
+        #[arg(long)]
+        keep_disabled: bool,
+    },
+    /// Enable the stored (or factory) curve for a profile
+    Enable { profile: String },
+    /// Disable the curve for a profile (fans return to firmware control)
+    Disable { profile: String },
 }
 
 #[derive(Subcommand)]
@@ -1021,6 +1046,7 @@ fn main() {
                 _ => fail("unexpected response from service"),
             }
         }
+        Commands::FanCurve { action } => fan_curve_cmd(action.unwrap_or(FanCurveCmd::Show)),
         Commands::Thermal { command } => match command {
             ThermalCmd::Status => match send_command(DaemonCommand::GetThermalStatus) {
                 Ok(DaemonResponse::ThermalStatus(s)) => print_thermal_status(&s),
@@ -1577,6 +1603,12 @@ fn cmd_label(cmd: &Commands) -> String {
         Commands::ResetUndervolt {
             i_understand_instability_risk,
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
+        Commands::FanCurve { action } => match action {
+            None | Some(FanCurveCmd::Show) => "fan-curve show".into(),
+            Some(FanCurveCmd::Set { profile, .. }) => format!("fan-curve set {profile}"),
+            Some(FanCurveCmd::Enable { profile }) => format!("fan-curve enable {profile}"),
+            Some(FanCurveCmd::Disable { profile }) => format!("fan-curve disable {profile}"),
+        },
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
         Commands::GpuMode {
@@ -1587,6 +1619,100 @@ fn cmd_label(cmd: &Commands) -> String {
             apply,
             allow_downgrade,
         } => format!("check-update apply={apply} allow_downgrade={allow_downgrade}"),
+    }
+}
+
+fn fan_curve_status() -> legion_core::fan_curve::FanCurveStatus {
+    match send_command(DaemonCommand::GetFanCurves) {
+        Ok(DaemonResponse::FanCurves(s)) => s,
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
+fn print_fan_curves(st: &legion_core::fan_curve::FanCurveStatus) {
+    println!("profile now : {}", st.current_profile);
+    let live = if st.active {
+        let temp = st.temp_c.map_or("?".into(), |t| format!("{t:.1} °C"));
+        let pct = st.pct.map_or("?".into(), |p| format!("{p} %"));
+        format!(
+            "curve active — {temp} → {pct}{}",
+            if st.safety { " (SAFETY: all fans max)" } else { "" }
+        )
+    } else if let Some(f) = &st.fault {
+        format!("firmware control — fault: {f}")
+    } else {
+        "firmware control".into()
+    };
+    println!("engine      : {live}");
+    if st.curves.is_empty() {
+        println!("no curves stored (factory shapes are used when you `enable` a profile)");
+    }
+    for (name, c) in &st.curves {
+        let pts: Vec<String> = c.points.iter().map(|(t, p)| format!("{t}:{p}")).collect();
+        println!(
+            "{name:<22} {}  {}",
+            if c.enabled { "enabled " } else { "disabled" },
+            pts.join(",")
+        );
+    }
+}
+
+fn fan_curve_cmd(action: FanCurveCmd) {
+    use legion_core::fan_curve as fc;
+    let send = |profile: String, points: fc::CurvePoints, enabled: bool| {
+        match send_command(DaemonCommand::SetFanCurve {
+            profile: profile.clone(),
+            points,
+            enabled,
+        }) {
+            Ok(DaemonResponse::FanCurves(st)) => {
+                println!(
+                    "fan curve for '{profile}' {}",
+                    if enabled { "enabled" } else { "disabled (firmware control)" }
+                );
+                print_fan_curves(&st);
+            }
+            Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+            _ => fail("unexpected response from service"),
+        }
+    };
+    let stored = |profile: &str| {
+        fan_curve_status()
+            .curves
+            .into_iter()
+            .find(|(n, _)| n == profile)
+            .map_or_else(|| fc::default_points(profile), |(_, c)| c.points)
+    };
+    match action {
+        FanCurveCmd::Show => print_fan_curves(&fan_curve_status()),
+        FanCurveCmd::Set {
+            profile,
+            points,
+            keep_disabled,
+        } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            match fc::parse_points(&points) {
+                Ok(p) => send(profile, p, !keep_disabled),
+                Err(e) => usage_fail(e),
+            }
+        }
+        FanCurveCmd::Enable { profile } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            let p = stored(&profile);
+            send(profile, p, true);
+        }
+        FanCurveCmd::Disable { profile } => {
+            if let Err(e) = fc::validate_profile_name(&profile) {
+                usage_fail(e);
+            }
+            let p = stored(&profile);
+            send(profile, p, false);
+        }
     }
 }
 

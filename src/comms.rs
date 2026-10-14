@@ -150,6 +150,15 @@ pub enum DaemonCommand {
         mode: crate::gpu_mode::GpuMode,
         acknowledge: bool,
     },
+    // ── appended (software fan curves) ──
+    /// Stored per-profile fan curves plus live engine status.
+    GetFanCurves,
+    /// Store (and optionally enable) the curve for a platform profile.
+    SetFanCurve {
+        profile: String,
+        points: [(u8, u8); 8],
+        enabled: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,6 +214,8 @@ pub enum DaemonResponse {
     DaemonVersion(String),
     // ── appended (GPU working mode / MUX) ──
     GpuMode(crate::gpu_mode::GpuModeStatus),
+    // ── appended (software fan curves) ──
+    FanCurves(crate::fan_curve::FanCurveStatus),
 }
 
 /// System-wide socket used when the daemon runs as root (required for sysfs writes).
@@ -468,6 +479,10 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::SetGpuMode { mode, acknowledge } => {
             format!("SetGpuMode({},ack={acknowledge})", mode.as_str())
         }
+        DaemonCommand::GetFanCurves => "GetFanCurves".into(),
+        DaemonCommand::SetFanCurve {
+            profile, enabled, ..
+        } => format!("SetFanCurve({},enabled={enabled})", sanitize_log(profile)),
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_label: {label}");
@@ -521,6 +536,8 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::SetUsbCharging(_) => "SetUsbCharging",
         DaemonCommand::GetGpuMode => "GetGpuMode",
         DaemonCommand::SetGpuMode { .. } => "SetGpuMode",
+        DaemonCommand::GetFanCurves => "GetFanCurves",
+        DaemonCommand::SetFanCurve { .. } => "SetFanCurve",
     };
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_kind: {kind}");
@@ -555,6 +572,7 @@ pub fn response_kind(resp: &DaemonResponse) -> &'static str {
         DaemonResponse::ThermalStatus(_) => "ThermalStatus",
         DaemonResponse::DaemonVersion(_) => "DaemonVersion",
         DaemonResponse::GpuMode(_) => "GpuMode",
+        DaemonResponse::FanCurves(_) => "FanCurves",
     }
 }
 
@@ -583,6 +601,7 @@ pub fn cmd_is_write(cmd: &DaemonCommand) -> bool {
             | DaemonCommand::SetFnLock(_)
             | DaemonCommand::SetUsbCharging(_)
             | DaemonCommand::SetGpuMode { .. }
+            | DaemonCommand::SetFanCurve { .. }
     );
     // Per-command classifier — trace only to keep hot paths quiet.
     log::trace!("cmd_is_write: {is_write}");
@@ -871,5 +890,61 @@ mod tests {
             }
             other => panic!("unexpected decode: {}", cmd_label(&other)),
         }
+    }
+
+    /// Fan-curve variants are appended after SetGpuMode / GpuMode.
+    #[test]
+    fn fan_curve_ipc_is_appended_and_round_trips() {
+        let idx = |c: &DaemonCommand| bincode_opts().serialize(c).unwrap()[0];
+        // SetGpuMode is index 42 → GetFanCurves 43, SetFanCurve 44.
+        assert_eq!(
+            idx(&DaemonCommand::SetGpuMode {
+                mode: crate::gpu_mode::GpuMode::Hybrid,
+                acknowledge: false
+            }),
+            42
+        );
+        assert_eq!(idx(&DaemonCommand::GetFanCurves), 43);
+        let set = DaemonCommand::SetFanCurve {
+            profile: "balanced".into(),
+            points: crate::fan_curve::default_points("balanced"),
+            enabled: true,
+        };
+        assert_eq!(idx(&set), 44);
+        let bytes = bincode_opts().serialize(&set).unwrap();
+        match bincode_opts().deserialize::<DaemonCommand>(&bytes).unwrap() {
+            DaemonCommand::SetFanCurve {
+                profile,
+                points,
+                enabled,
+            } => {
+                assert_eq!(profile, "balanced");
+                assert_eq!(points, crate::fan_curve::default_points("balanced"));
+                assert!(enabled);
+            }
+            other => panic!("unexpected decode: {}", cmd_label(&other)),
+        }
+        assert!(cmd_is_write(&set));
+        assert!(!cmd_is_write(&DaemonCommand::GetFanCurves));
+        assert_eq!(cmd_kind(&set), "SetFanCurve");
+        assert_eq!(cmd_label(&set), "SetFanCurve(balanced,enabled=true)");
+
+        // DaemonResponse: GpuMode was index 25 → FanCurves 26.
+        let resp = DaemonResponse::FanCurves(crate::fan_curve::FanCurveStatus {
+            curves: vec![],
+            current_profile: "balanced".into(),
+            active: false,
+            temp_c: None,
+            pct: None,
+            safety: false,
+            fault: Some("x".into()),
+        });
+        let bytes = bincode_opts().serialize(&resp).unwrap();
+        assert_eq!(bytes[0], 26);
+        assert!(matches!(
+            bincode_opts().deserialize::<DaemonResponse>(&bytes).unwrap(),
+            DaemonResponse::FanCurves(_)
+        ));
+        assert_eq!(response_kind(&resp), "FanCurves");
     }
 }

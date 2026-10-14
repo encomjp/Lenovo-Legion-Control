@@ -208,6 +208,9 @@ pub struct AppConfig {
     pub welcome_seen: bool,
     #[serde(default)]
     pub thermal: ThermalConfig,
+    /// Software fan curves keyed by platform profile (daemon engine).
+    #[serde(default)]
+    pub fan_curves: std::collections::BTreeMap<String, crate::fan_curve::FanCurve>,
     /// Optional anonymous diagnostics (alpha) — enabled by default (opt-out);
     /// the user disables it in Settings.
     #[serde(default)]
@@ -392,6 +395,7 @@ impl Default for AppConfig {
             active_profile: String::new(),
             welcome_seen: false,
             thermal: ThermalConfig::default(),
+            fan_curves: Default::default(),
             diagnostics: DiagnosticsConfig::default(),
             four_zone: FourZoneConfig::default(),
         }
