@@ -620,10 +620,17 @@ fn handle_client(mut stream: UnixStream, state: &Arc<Mutex<ClientState>>) {
 
     let kind = cmd_kind(&cmd);
     let is_write = cmd_is_write(&cmd);
+    // Log level and log tail are not hardware writes, but flooding the
+    // journal or reading log lines (paths, errors) is still privileged.
+    let needs_auth = is_write
+        || matches!(
+            cmd,
+            DaemonCommand::SetLogLevel(_) | DaemonCommand::GetRecentLogs(_)
+        );
     // A non-root daemon's socket lives in the owner's 0700 XDG_RUNTIME_DIR,
     // so only the root daemon needs the per-peer write check.
     // SAFETY: geteuid() is a pure POSIX syscall.
-    if is_write && unsafe { libc::geteuid() } == 0 && !peer_may_write(peer) {
+    if needs_auth && unsafe { libc::geteuid() } == 0 && !peer_may_write(peer) {
         log::warn!("denied write cmd {kind} from uid {peer:?} (not root, legion group or active seat)");
         let _ = send_response(
             &mut stream,
