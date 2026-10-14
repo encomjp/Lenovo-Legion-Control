@@ -10,8 +10,8 @@ use legion_core::comms::{
 };
 use legion_core::thermal::ThermalConfig;
 use legion_core::{
-    battery, config, cpu, device, fans, ideapad, keyboard, logging, profile, rgb_panic, sensors,
-    thermal, undervolt,
+    battery, config, cpu, device, fans, gpu_mode, ideapad, keyboard, logging, profile, rgb_panic,
+    sensors, thermal, undervolt,
 };
 
 use std::collections::HashMap;
@@ -1203,6 +1203,11 @@ fn process_command(
         DaemonCommand::GetDaemonVersion => {
             DaemonResponse::DaemonVersion(env!("CARGO_PKG_VERSION").to_string())
         }
+        DaemonCommand::GetGpuMode => DaemonResponse::GpuMode(gpu_mode::status()),
+        DaemonCommand::SetGpuMode { mode, acknowledge } => match gpu_mode::set(mode, acknowledge) {
+            Ok(st) => DaemonResponse::GpuMode(st),
+            Err(e) => DaemonResponse::Error(e),
+        },
     };
 
     let elapsed = t0.elapsed().as_millis() as u64;

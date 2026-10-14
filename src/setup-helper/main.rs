@@ -454,6 +454,34 @@ fn install_yogafan() -> Result<(), String> {
     )
 }
 
+/// Load the distribution's `acpi_call` module for this boot only (GPU mode
+/// switching backend). Never builds anything and never persists the module:
+/// the MUX setting is a one-shot firmware write, so nothing needs it at boot.
+fn load_acpi_call() -> Result<(), String> {
+    if Path::new("/proc/acpi/call").exists() {
+        println!("acpi_call is already loaded");
+        return Ok(());
+    }
+    let modprobe = executable(&["/usr/bin/modprobe", "/usr/sbin/modprobe"])?;
+    let status = Command::new(modprobe)
+        .arg("acpi_call")
+        .status()
+        .map_err(|e| format!("cannot run modprobe acpi_call: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "modprobe acpi_call failed with {status} — install your distribution's acpi_call package first"
+        ));
+    }
+    for _ in 0..10 {
+        if Path::new("/proc/acpi/call").exists() {
+            println!("acpi_call loaded for this boot; no ACPI method was called");
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err("acpi_call loaded but /proc/acpi/call did not appear".into())
+}
+
 fn real_main() -> Result<(), String> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("this helper must be authorized through PolicyKit".into());
@@ -465,8 +493,9 @@ fn real_main() -> Result<(), String> {
         Some("restart-daemon") => restart_daemon(),
         Some("install-udev") => install_udev_rule(),
         Some("install-yogafan") => install_yogafan(),
+        Some("load-acpi-call") => load_acpi_call(),
         _ => Err(
-            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, restart-daemon, install-udev, install-yogafan"
+            "allowed operations: install-ryzen-smu, remove-ryzen-smu, enable-daemon, restart-daemon, install-udev, install-yogafan, load-acpi-call"
                 .into(),
         ),
     }
