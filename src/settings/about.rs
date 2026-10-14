@@ -1324,7 +1324,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     let pill = status_pill_tip(pill_text, pill_kind, Some(amp_pill_tooltip(diag0.health)));
 
     let status_row = adw::ActionRow::builder()
-        .title(&diag0.summary)
+        .title(amp_title(diag0.health, &diag0.summary))
         .subtitle(amp_short_help(diag0.health))
         .activatable(false)
         .build();
@@ -1332,6 +1332,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
         &status_row,
         "Plain-language summary — expand details for raw checks",
     );
+    pill.set_width_request(super::fix::PILL_COL_W);
     status_row.add_suffix(&pill);
     group.add(&status_row);
 
@@ -1361,11 +1362,9 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
 
     let btn = secondary_button_tip(
         match diag0.health {
-            Health::Ok => "Refresh and re-check",
-            Health::SoftIssue => "Repair speakers",
-            Health::HardwareBroken => "Try soft fix anyway",
-            Health::DriverMissing => "Install speaker firmware",
-            Health::NotApplicable => "Not applicable",
+            Health::Ok | Health::NotApplicable => "Check again",
+            Health::SoftIssue | Health::HardwareBroken => "Repair",
+            Health::DriverMissing => "Install",
         },
         Some(amp_action_tooltip(diag0.health)),
     );
@@ -1378,6 +1377,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             "No AW88399 smart-amp on this model — speaker fix is Gen10 Pro 7 only and will be removed once kernel 7.3 ships",
         ));
     }
+    btn.set_width_request(super::fix::BTN_COL_W);
     status_row.add_suffix(&btn);
 
     let overlay = toast_overlay.clone();
@@ -1387,7 +1387,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     let expander_c = expander.clone();
     let btn_c = btn.clone();
     btn.connect_clicked(move |_| {
-        set_busy(&btn_c, true, "Repair speakers");
+        set_busy(&btn_c, true, "Check again");
 
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -1416,7 +1416,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                 let (pt, pk) = amp_pill(report.after.health);
                 set_pill(&pill_c, pt, pk);
                 tip(&pill_c, amp_pill_tooltip(report.after.health));
-                status_c.set_title(&report.after.summary);
+                status_c.set_title(&amp_title(report.after.health, &report.after.summary));
                 status_c.set_subtitle(amp_short_help(report.after.health));
                 let mut body = report.after.details.clone();
                 if !report.steps.is_empty() {
@@ -1433,7 +1433,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                 expander_c.set_expanded(true);
 
                 match report.after.health {
-                    Health::Ok => toast_ok(&overlay, "Speakers look good"),
+                    Health::Ok => toast_ok(&overlay, "Speakers are working"),
                     Health::SoftIssue => {
                         toast_error(&overlay, "Still needs attention — check sound settings")
                     }
@@ -1449,11 +1449,9 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
                 }
 
                 let idle = match report.after.health {
-                    Health::Ok => "Refresh and re-check",
-                    Health::SoftIssue => "Repair speakers",
-                    Health::HardwareBroken => "Try soft fix anyway",
-                    Health::DriverMissing => "Install speaker firmware",
-                    Health::NotApplicable => "Check speakers",
+                    Health::Ok | Health::NotApplicable => "Check again",
+                    Health::SoftIssue | Health::HardwareBroken => "Repair",
+                    Health::DriverMissing => "Install",
                 };
                 set_busy(&btn_c, false, idle);
                 tip(&btn_c, amp_action_tooltip(report.after.health));
@@ -1462,7 +1460,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(_) => {
-                set_busy(&btn_c, false, "Repair speakers");
+                set_busy(&btn_c, false, "Check again");
                 toast_error(&overlay, "Something went wrong");
                 glib::ControlFlow::Break
             }
@@ -1472,11 +1470,19 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     group
 }
 
+fn amp_title(health: legion_core::audio::Health, summary: &str) -> String {
+    if health == legion_core::audio::Health::Ok {
+        "Speakers are working".to_string()
+    } else {
+        summary.to_string()
+    }
+}
+
 pub(crate) fn amp_pill(health: legion_core::audio::Health) -> (&'static str, &'static str) {
     use legion_core::audio::Health;
     match health {
-        Health::Ok => ("OK", "ok"),
-        Health::SoftIssue => ("Needs fix", "warn"),
+        Health::Ok => ("Working", "ok"),
+        Health::SoftIssue => ("Needs repair", "warn"),
         Health::HardwareBroken => ("Broken", "bad"),
         Health::DriverMissing => ("Driver missing", "warn"),
         Health::NotApplicable => ("N/A", "muted"),
@@ -1522,7 +1528,7 @@ pub(crate) fn amp_action_tooltip(health: legion_core::audio::Health) -> &'static
 pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str {
     use legion_core::audio::Health;
     match health {
-        Health::Ok => "Smart amp is connected. You can still refresh if sound feels off.",
+        Health::Ok => "Speaker amplifier connected.",
         Health::SoftIssue => {
             "Amp is fine — volume, mute, or the wrong output is likely the issue."
         }
