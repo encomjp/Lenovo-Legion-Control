@@ -571,7 +571,9 @@ if [[ "$DO_DAEMON" -eq 1 ]]; then
     sudo_run install -Dm755 "$BIN_DAEMON" /usr/local/bin/legion-daemon
   fi
   sudo_run systemctl daemon-reload
-  sudo_run systemctl enable --now legion-control
+  sudo_run systemctl enable legion-control
+  # restart, not start: an upgrade must replace the already-running daemon.
+  sudo_run systemctl restart legion-control
   sleep 0.4
   if systemctl is-active --quiet legion-control; then
     ok "Daemon running: systemctl status legion-control"
