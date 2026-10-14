@@ -155,11 +155,11 @@ impl CurveEditor {
         let desc: Vec<String> = st
             .points
             .iter()
-            .map(|(t, p)| format!("{t} °C {p} %"))
+            .map(|(t, p)| format!("{t} °C {p}%"))
             .collect();
         let sel = st.points[st.focused];
         let text = format!(
-            "Point {} of {POINTS} selected: {} °C, {} %. Curve: {}",
+            "Point {} of {POINTS} selected: {} °C, {}%. Curve: {}",
             st.focused + 1,
             sel.0,
             sel.1,
@@ -181,6 +181,27 @@ impl CurveEditor {
             let (fr, fgc, fb) = (fg.red() as f64, fg.green() as f64, fg.blue() as f64);
             let light_text = (fr + fgc + fb) / 3.0 > 0.5; // dark theme
             let pad = if light_text { 0.18 } else { 1.0 };
+            // Panel colour for label backplates, so text never sits on a line.
+            #[allow(deprecated)]
+            let panel = area
+                .style_context()
+                .lookup_color("card_bg_color")
+                .map(|c| (c.red() as f64, c.green() as f64, c.blue() as f64))
+                .unwrap_or(if light_text { (0.19, 0.19, 0.2) } else { (1.0, 1.0, 1.0) });
+            let plate = |cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64| {
+                let r = 5.0;
+                cr.new_sub_path();
+                cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+                cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+                cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+                cr.arc(x + r, y + r, r, std::f64::consts::PI, 1.5 * std::f64::consts::PI);
+                cr.close_path();
+                cr.set_source_rgb(panel.0, panel.1, panel.2);
+                let _ = cr.fill_preserve();
+                cr.set_source_rgba(fr, fgc, fb, 0.25);
+                cr.set_line_width(1.0);
+                let _ = cr.stroke();
+            };
 
             // Plot background.
             cr.set_source_rgba(fr, fgc, fb, 0.04);
@@ -201,8 +222,10 @@ impl CurveEditor {
                 cr.line_to(g.l + g.w, g.y(pct));
                 let _ = cr.stroke();
                 cr.set_source_rgba(fr, fgc, fb, 0.65);
-                cr.move_to(6.0, g.y(pct) + 4.0);
-                let _ = cr.show_text(&format!("{pct:.0}%"));
+                let label = format!("{pct:.0}%");
+                let lw = cr.text_extents(&label).map(|e| e.width()).unwrap_or(24.0);
+                cr.move_to(MARGIN_L - 8.0 - lw, g.y(pct) + 4.0);
+                let _ = cr.show_text(&label);
             }
             let mut tc = AXIS_T_MIN;
             while tc <= AXIS_T_MAX {
@@ -211,13 +234,24 @@ impl CurveEditor {
                 cr.line_to(g.x(tc), g.t + g.h);
                 let _ = cr.stroke();
                 cr.set_source_rgba(fr, fgc, fb, 0.65);
-                cr.move_to(g.x(tc) - 14.0, g.t + g.h + 16.0);
-                let _ = cr.show_text(&format!("{tc:.0}°C"));
+                let label = format!("{tc:.0} °C");
+                let lw = cr.text_extents(&label).map(|e| e.width()).unwrap_or(34.0);
+                cr.move_to(g.x(tc) - lw / 2.0, g.t + g.h + 16.0);
+                let _ = cr.show_text(&label);
                 tc += 10.0;
             }
-            cr.set_source_rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.95);
-            cr.move_to(g.x(90.0) + 4.0, g.t + g.h - 6.0);
-            let _ = cr.show_text("safety max");
+            {
+                let label = "Safety max";
+                let lw = cr.text_extents(label).map(|e| e.width()).unwrap_or(60.0);
+                let zone_w = g.x(100.0) - g.x(90.0);
+                // Centred in the zone, near the bottom, on a small panel.
+                let bx = g.x(90.0) + (zone_w - lw - 12.0) / 2.0;
+                let by = g.t + g.h - 26.0;
+                plate(cr, bx, by, lw + 12.0, 20.0);
+                cr.set_source_rgba(fr, fgc, fb, 0.9);
+                cr.move_to(bx + 6.0, by + 14.0);
+                let _ = cr.show_text(label);
+            }
 
             // Curve polyline (flat extension to both axis edges).
             cr.set_source_rgb(ACCENT.0, ACCENT.1, ACCENT.2);
@@ -242,7 +276,7 @@ impl CurveEditor {
                 cr.line_to(nx, g.t + g.h);
                 let _ = cr.stroke();
                 cr.set_dash(&[], 0.0);
-                let label = format!("now {now:.0}°C");
+                let label = format!("now {now:.0} °C");
                 let ext = cr.text_extents(&label).map(|e| e.width()).unwrap_or(50.0);
                 let lx = if nx + 6.0 + ext > g.l + g.w { nx - 6.0 - ext } else { nx + 6.0 };
                 cr.move_to(lx, g.t + 13.0);
@@ -273,14 +307,16 @@ impl CurveEditor {
             }
             // Readout of the selected point.
             let (st_t, st_p) = st.points[st.focused];
-            let readout = format!("{st_t} °C · {st_p} %");
+            let readout = format!("{st_t} °C, {st_p}%");
             let ext = cr.text_extents(&readout).map(|e| e.width()).unwrap_or(70.0);
             let sx = g.x(st_t as f64);
             let sy = g.y(st_p as f64);
-            let rx = (sx - ext / 2.0).clamp(g.l, g.l + g.w - ext);
-            let ry = if sy < g.t + 40.0 { sy + 26.0 } else { sy - 16.0 };
-            cr.set_source_rgba(fr, fgc, fb, 0.9);
-            cr.move_to(rx, ry);
+            let bw = ext + 14.0;
+            let bx = (sx - bw / 2.0).clamp(g.l + 2.0, g.l + g.w - bw - 2.0);
+            let by = if sy < g.t + 40.0 { sy + 12.0 } else { sy - 34.0 };
+            plate(cr, bx, by, bw, 22.0);
+            cr.set_source_rgba(fr, fgc, fb, 0.95);
+            cr.move_to(bx + 7.0, by + 15.0);
             let _ = cr.show_text(&readout);
         });
     }

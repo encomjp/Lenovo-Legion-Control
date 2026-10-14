@@ -1,4 +1,4 @@
-//! Cooling — fan-curve editor, per-fan cards and manual control.
+//! Cooling, fan-curve editor, per-fan cards and manual control.
 
 use super::curve_editor::CurveEditor;
 use super::*;
@@ -10,15 +10,15 @@ pub(crate) fn build_cooling_overview_page(
     gate: &DaemonGate,
 ) -> gtk::Box {
     let page = page_lede("");
-    // LOQ 15AHP10 / R8CN — tachometer locked behind yogafan
+    // LOQ 15AHP10 / R8CN, tachometer locked behind yogafan
     if legion_core::fans::needs_yogafan_setup() {
-        let locked = pref_group("Fans locked — driver required", None);
+        let locked = pref_group("Fans locked, driver required", None);
         tip(
             &locked,
             "lenovo_wmi_other binds but reads 0 RPM on this model; yogafan provides the real tachometer",
         );
         let banner = adw::Banner::new(
-            "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+            "Fan sensors need the yogafan driver, install to unlock RPM reading and control",
         );
         banner.set_button_label(Some("Unlock fans"));
         locked.add(&banner);
@@ -56,15 +56,15 @@ pub(crate) fn build_cooling_overview_page(
             let locked_c = locked_c.clone();
             run_setup_helper("install-yogafan", move |result| match result {
                 Ok(_) => {
-                    toast_ok(&overlay, "Fans unlocked — reopen the Cooling page to see RPM");
-                    banner_c.set_title("Installed — reopen this page");
+                    toast_ok(&overlay, "Fans unlocked, reopen the Cooling page to see RPM");
+                    banner_c.set_title("Installed, reopen this page");
                     locked_c.set_sensitive(false);
                 }
                 Err(e) => {
                     toast_error(&overlay, &e);
                     banner_c.set_sensitive(true);
                     banner_c.set_title(
-                        "Fan sensors need the yogafan driver — install to unlock RPM reading and control",
+                        "Fan sensors need the yogafan driver, install to unlock RPM reading and control",
                     );
                 }
             });
@@ -96,7 +96,7 @@ pub(crate) fn build_cooling_overview_page(
             overview.add(&property_row(
                 "No fans detected",
                 "Check the daemon and HWMon",
-                Some("Fan channels missing — check legion-control service"),
+                Some("Fan channels missing, check legion-control service"),
             ));
         }
         let note = pref_group("Manual control unavailable", None);
@@ -127,7 +127,7 @@ pub(crate) fn build_cooling_overview_page(
     let inner = gtk::Box::new(Orientation::Vertical, 12);
     inner.set_margin_top(10);
     let hint = gtk::Label::new(Some(
-        "Set a fixed speed per fan. While a fan curve is running for the current power mode manual speeds are refused; use Reset to firmware first.",
+        "Fixed speeds only apply while no fan curve is running.",
     ));
     hint.set_wrap(true);
     hint.set_xalign(0.0);
@@ -149,13 +149,13 @@ pub(crate) fn build_cooling_overview_page(
         overview.add(&property_row(
             "No fans detected",
             "Check the daemon and HWMon",
-            Some("Fan channels missing — check legion-control service"),
+            Some("Fan channels missing, check legion-control service"),
         ));
     }
     let reset = pref_group("Automatic mode", None);
     let btn = secondary_button_tip(
         "All fans automatic",
-        Some("Clears manual RPM on all detected fans — returns to the firmware fan curve"),
+        Some("Clears manual RPM on all detected fans, returns to the firmware fan curve"),
     );
     let queue = apply_queue.clone();
     let fan_ids: Vec<u8> = channels.iter().map(|c| c.id).collect();
@@ -181,7 +181,7 @@ pub(crate) fn build_cooling_overview_page(
 }
 
 /// One-line Gen 10 reminder shown only when a manual speed is set.
-const GEN10_MANUAL_HINT: &str = "Gen 10: a manual speed may persist until an EC reset — use Automatic or a curve to hand control back.";
+const GEN10_MANUAL_HINT: &str = "This speed can stay set until you switch back to Automatic.";
 
 /// Show / clear the Gen 10 reminder on a fan's mode row. No-op below Gen 10.
 fn gen10_manual_hint(row: &adw::SwitchRow, manual: bool, toast: Option<&adw::ToastOverlay>) {
@@ -225,6 +225,12 @@ struct CurveUi {
     busy: Cell<bool>,
     headline: gtk::Label,
     state_label: gtk::Label,
+    reason: gtk::Label,
+    mode_hint: gtk::Label,
+    mode_buttons: Vec<(String, gtk::ToggleButton)>,
+    initial_active: String,
+    touched: Cell<bool>,
+    programmatic: Cell<bool>,
     state_dot: Option<gtk::Widget>,
     apply: gtk::Button,
     reset: gtk::Button,
@@ -260,7 +266,54 @@ impl CurveUi {
 
     /// Refresh labels, buttons and fan cards from the current state.
     fn sync(&self) {
+        // The power mode that is active right now (live from the service).
+        let active = self
+            .status
+            .borrow()
+            .as_ref()
+            .map(|s| s.current_profile.clone())
+            .unwrap_or_else(|| self.initial_active.clone());
+        // Until the user picks a mode themselves, the selector follows the
+        // active one (Fn+Q, Home, tray).
+        if !self.touched.get()
+            && *self.profile.borrow() != active
+            && self.mode_buttons.iter().any(|(n, _)| *n == active)
+        {
+            self.programmatic.set(true);
+            if let Some((_, b)) = self.mode_buttons.iter().find(|(n, _)| *n == active) {
+                b.set_active(true);
+            }
+            self.programmatic.set(false);
+            let pts = self
+                .drafts
+                .borrow()
+                .get(&active)
+                .copied()
+                .unwrap_or_else(|| self.stored(&active).0);
+            *self.profile.borrow_mut() = active.clone();
+            self.editor.set_points(pts);
+        }
+        for (n, b) in &self.mode_buttons {
+            let want = if *n == active {
+                format!("{} (active)", profile_tab_label(n))
+            } else {
+                profile_tab_label(n)
+            };
+            if b.label().as_deref() != Some(want.as_str()) {
+                b.set_label(&want);
+            }
+        }
         let profile = self.profile.borrow().clone();
+        if profile != active {
+            self.mode_hint.set_text(&format!(
+                "{} is active now. This curve applies when you switch to {}.",
+                profile_tab_label(&active),
+                profile_tab_label(&profile)
+            ));
+            self.mode_hint.set_visible(true);
+        } else {
+            self.mode_hint.set_visible(false);
+        }
         let (_, enabled) = self.stored(&profile);
         let dirty = self.dirty();
         let st = self.status.borrow();
@@ -270,25 +323,25 @@ impl CurveUi {
             Some(st) => {
                 let now = st.current_profile == profile;
                 let base = if enabled && now && st.active {
-                    let t = st.temp_c.map_or("—".into(), |t| format!("{t:.0} °C"));
-                    let p = st.pct.map_or("—".into(), |p| format!("{p} %"));
+                    let t = st.temp_c.map_or("unknown".into(), |t| format!("{t:.0} °C"));
+                    let p = st.pct.map_or("unknown".into(), |p| format!("{p}%"));
                     if st.safety {
                         kind = "bad";
-                        format!("Safety max at {t}: all fans at 100 %")
+                        format!("Safety max at {t}: all fans at 100%")
                     } else {
                         kind = "ok";
                         format!("Following the curve: {t}, fans at {p}")
                     }
                 } else if enabled && now {
                     match &st.fault {
-                        Some(f) => format!("Firmware is in control: {f}"),
+                        Some(f) => format!("Firmware curve in control: {f}"),
                         None => "Curve enabled, starting…".to_string(),
                     }
                 } else if enabled {
                     kind = "ok";
                     "Curve saved. It runs while this power mode is active".to_string()
                 } else {
-                    "Firmware is in control (no custom curve)".to_string()
+                    "Firmware curve in control".to_string()
                 };
                 if dirty {
                     kind = "warn";
@@ -308,11 +361,21 @@ impl CurveUi {
         }
         self.state_label.set_text(&text);
         let online = st.is_some() && !self.busy.get();
+        let can_factory =
+            st.is_some() && self.editor.points() != legion_core::fan_curve::default_points(&profile);
         self.apply.set_sensitive(online && (dirty || !enabled));
         self.reset.set_sensitive(online && enabled);
-        self.factory.set_sensitive(
-            st.is_some() && self.editor.points() != legion_core::fan_curve::default_points(&profile),
-        );
+        self.factory.set_sensitive(can_factory);
+        // Say why a button is greyed out instead of leaving it a mystery.
+        let mut why = Vec::new();
+        if st.is_some() && !can_factory {
+            why.push("Already the factory shape");
+        }
+        if st.is_some() && !enabled {
+            why.push("No custom curve to reset");
+        }
+        self.reason.set_text(&why.join(", "));
+        self.reason.set_visible(!why.is_empty());
         self.headline
             .set_text(&format!("Fan curve for {}", profile_tab_label(&profile)));
         self.editor.set_now(
@@ -320,12 +383,14 @@ impl CurveUi {
                 .filter(|s| s.current_profile == profile)
                 .and_then(|s| s.temp_c),
         );
+        // The status line already says when the firmware is in charge, so a
+        // card only speaks up while the curve is actually driving its fan.
         let following = st.as_ref().filter(|s| s.active).and_then(|s| s.pct);
         for c in &self.cards {
-            c.source.set_text(&match following {
-                Some(p) => format!("Following the curve, {p} %"),
-                None => "Firmware curve".to_string(),
-            });
+            c.source.set_visible(following.is_some());
+            if let Some(p) = following {
+                c.source.set_text(&format!("Following the curve, {p}%"));
+            }
         }
     }
 
@@ -348,14 +413,14 @@ fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi)
     card.add_css_class("fan-card");
     card.set_hexpand(true);
     card.set_valign(Align::Fill);
-    tip(&card, &format!("{} · {}–{} rpm", ch.title, ch.min_rpm, ch.max_rpm));
+    tip(&card, &format!("{}, {}–{} rpm", ch.title, ch.min_rpm, ch.max_rpm));
     let top = gtk::Box::new(Orientation::Horizontal, 8);
     let title = gtk::Label::new(Some(&ch.title));
     title.add_css_class("row-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let rpm = gtk::Label::new(Some("— rpm"));
+    let rpm = gtk::Label::new(Some("…"));
     rpm.add_css_class("numeric");
     rpm.add_css_class("fan-rpm");
     rpm.set_xalign(1.0);
@@ -363,7 +428,9 @@ fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi)
     top.append(&rpm);
     let bar = gtk::ProgressBar::new();
     bar.add_css_class("card-bar");
-    let source = gtk::Label::new(Some("Firmware curve"));
+    bar.set_opacity(0.0);
+    let source = gtk::Label::new(None);
+    source.set_visible(false);
     source.add_css_class("row-sub");
     source.set_xalign(0.0);
     source.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -429,8 +496,17 @@ fn build_fan_curve_section(
         modes.append(&b);
         mode_buttons.push((name.clone(), b));
     }
+    let edit_for = gtk::Label::new(Some("Edit curve for"));
+    edit_for.add_css_class("row-sub");
+    edit_for.set_valign(Align::Center);
+    header.append(&edit_for);
     header.append(&modes);
     root.append(&header);
+    let mode_hint = gtk::Label::new(None);
+    mode_hint.add_css_class("row-sub");
+    mode_hint.set_xalign(0.0);
+    mode_hint.set_visible(false);
+    root.append(&mode_hint);
 
     // Editor + status + buttons.
     let editor = CurveEditor::new();
@@ -441,6 +517,17 @@ fn build_fan_curve_section(
     editor_frame.append(&editor.area);
     let (state_row, state_label) = status_line("", "");
     state_row.set_valign(Align::Center);
+    let reason = gtk::Label::new(None);
+    reason.add_css_class("row-sub");
+    reason.set_xalign(0.0);
+    reason.set_wrap(true);
+    reason.set_margin_start(14);
+    reason.set_visible(false);
+    let state_col = gtk::Box::new(Orientation::Vertical, 2);
+    state_col.set_valign(Align::Center);
+    state_col.set_hexpand(true);
+    state_col.append(&state_row);
+    state_col.append(&reason);
     let buttons = gtk::Box::new(Orientation::Horizontal, 8);
     buttons.set_halign(Align::End);
     let factory = secondary_button_tip(
@@ -453,19 +540,19 @@ fn build_fan_curve_section(
     );
     let apply = primary_button_tip(
         "Apply curve",
-        Some("Save this curve and let the daemon drive the fans with it"),
+        Some("Save this curve and use it to drive the fans"),
     );
     buttons.append(&factory);
     buttons.append(&reset);
     buttons.append(&apply);
     let action_row = gtk::Box::new(Orientation::Horizontal, 12);
     state_row.set_hexpand(true);
-    action_row.append(&state_row);
+    action_row.append(&state_col);
     action_row.append(&buttons);
     editor_frame.append(&action_row);
     tip(
         &editor_frame,
-        "Above 90 °C every fan goes to 100 % regardless of the curve. Any sensor error hands the fans back to the firmware.",
+        "Above 90 °C every fan goes to 100% regardless of the curve. Any sensor error hands the fans back to the firmware.",
     );
     let state_dot = state_row.first_child();
 
@@ -492,6 +579,12 @@ fn build_fan_curve_section(
         busy: Cell::new(false),
         headline,
         state_label,
+        reason,
+        mode_hint,
+        mode_buttons: mode_buttons.clone(),
+        initial_active: current.clone(),
+        touched: Cell::new(false),
+        programmatic: Cell::new(false),
         state_dot,
         apply: apply.clone(),
         reset: reset.clone(),
@@ -516,7 +609,8 @@ fn build_fan_curve_section(
         let ui = ui.clone();
         let name = name.clone();
         b.connect_toggled(move |b| {
-            if b.is_active() {
+            if b.is_active() && !ui.programmatic.get() {
+                ui.touched.set(true);
                 ui.load_profile(&name);
             }
         });
@@ -530,7 +624,7 @@ fn build_fan_curve_section(
             ui.sync();
         });
     }
-    // Apply / Reset (async IPC — GTK main thread never blocks).
+    // Apply / Reset (async IPC, GTK main thread never blocks).
     let send = {
         let ui = ui.clone();
         Rc::new(move |enabled: bool| {
@@ -595,7 +689,7 @@ fn build_fan_curve_section(
                     DaemonResponse::FanCurves(s) => s,
                     DaemonResponse::Error(e) => {
                         return Err(format!(
-                            "Fan curves unavailable ({e}) — update and restart legion-control"
+                            "Fan curves unavailable ({e}), update and restart legion-control"
                         ))
                     }
                     _ => return Err("Unexpected response from the daemon".into()),
@@ -623,12 +717,13 @@ fn build_fan_curve_section(
                                         } else {
                                             format!("{r} rpm")
                                         });
+                                        c.bar.set_opacity(if r == 0 { 0.0 } else { 1.0 });
                                         let span = c.max.saturating_sub(c.min).max(1) as f64;
                                         c.bar.set_fraction(
                                             (r.saturating_sub(c.min) as f64 / span).clamp(0.0, 1.0),
                                         );
                                     }
-                                    None => c.rpm.set_text("— rpm"),
+                                    None => c.rpm.set_text("…"),
                                 }
                             }
                         }
@@ -680,25 +775,24 @@ pub(crate) fn fan_card(
     let group = pref_group(title, None);
     tip(&group, sec_tip);
 
-    let rpm_l = gtk::Label::new(Some(&legion_core::fans::rpm_label(fan)));
-    rpm_l.add_css_class("numeric");
-    rpm_l.add_css_class("fan-rpm");
-    tip(
-        &rpm_l,
-        "Live RPM from the EC — may show Auto or 0 while firmware is driving the fan",
-    );
-
     // Models without a fan-target write backend (e.g. Y7000P 16IRX9 / 83DG)
     // are EC-owned: show RPM read-only instead of a manual switch/slider
     // that could only ever fail with "no fan backend/device for target write".
     if legion_core::fans::control_backend_name().is_none() {
+        let rpm_l = gtk::Label::new(Some(&legion_core::fans::rpm_label(fan)));
+        rpm_l.add_css_class("numeric");
+        rpm_l.add_css_class("fan-rpm");
+        tip(
+            &rpm_l,
+            "Live speed from the firmware. May read Auto or 0 while it drives the fan",
+        );
         let mode_row = adw::ActionRow::builder()
             .title("Auto (EC controlled)")
             .activatable(false)
             .build();
         tip(
             &mode_row,
-            "The EC firmware owns the fan curve on this model — no manual target write path is exposed",
+            "The EC firmware owns the fan curve on this model, no manual target write path is exposed",
         );
         mode_row.add_suffix(&rpm_l);
         group.add(&mode_row);
@@ -740,9 +834,8 @@ pub(crate) fn fan_card(
         .build();
     tip(
         &sw,
-        "On = Automatic firmware curve · Off = Manual fixed RPM with the slider",
+        "On = Automatic firmware curve, Off = Manual fixed RPM with the slider",
     );
-    sw.add_suffix(&rpm_l);
     group.add(&sw);
     if !auto {
         // Already manual when the page opens: keep the reminder visible.
@@ -754,22 +847,22 @@ pub(crate) fn fan_card(
     scale.set_digits(0);
     scale.set_hexpand(true);
     scale.set_width_request(180);
-    let speed_val = gtk::Label::new(Some("—"));
+    let speed_val = gtk::Label::new(Some("Auto"));
     speed_val.add_css_class("numeric");
     speed_val.add_css_class("scale-value");
-    speed_val.set_width_chars(5);
+    speed_val.set_width_chars(9);
     speed_val.set_xalign(1.0);
     tip(
         &scale,
         &format!(
-            "Target RPM for {title} · enabled only in Manual · about {min_rpm:.0}–{max_rpm:.0}"
+            "Target RPM for {title}, enabled only in Manual, about {min_rpm:.0}–{max_rpm:.0}"
         ),
     );
     let cur = legion_core::fans::display_target(fan);
     if cur > 0 {
         scale.set_value(cur as f64);
         scale.set_sensitive(true);
-        speed_val.set_text(&format!("~{cur}"));
+        speed_val.set_text(&format!("~{cur} rpm"));
     } else {
         scale.set_value(min_rpm);
         scale.set_sensitive(false);
@@ -781,7 +874,7 @@ pub(crate) fn fan_card(
         .build();
     tip(
         &speed_row,
-        "Automatic follows temperature · Manual holds a fixed speed until you change it",
+        "Automatic follows temperature, Manual holds a fixed speed until you change it",
     );
     speed_row.add_suffix(&scale);
     speed_row.add_suffix(&speed_val);
@@ -802,7 +895,7 @@ pub(crate) fn fan_card(
         }
         if s.is_active() {
             scale_s.set_sensitive(false);
-            speed_val_s.set_text("—");
+            speed_val_s.set_text("Auto");
             sw_title.set_title("Automatic");
             gen10_manual_hint(&sw_title, false, None);
             queue.set_fan(fan, 0);
@@ -831,14 +924,14 @@ pub(crate) fn fan_card(
                             suppressing.set(true);
                             sw_r.set_active(true);
                             scale_r.set_sensitive(false);
-                            speed_val_r.set_text("—");
+                            speed_val_r.set_text("Auto");
                             sw_title.set_title("Automatic");
                                 suppressing.set(false);
                             return;
                         }
                         high_s.set(true);
                         scale_r.set_sensitive(true);
-                        speed_val_r.set_text(&format!("~{rpm}"));
+                        speed_val_r.set_text(&format!("~{rpm} rpm"));
                         sw_title.set_title("Manual");
                         gen10_manual_hint(&sw_title, true, Some(&toast_r));
                         queue.set_fan(fan, rpm);
@@ -847,7 +940,7 @@ pub(crate) fn fan_card(
                 return;
             }
             scale_s.set_sensitive(true);
-            speed_val_s.set_text(&format!("~{rpm}"));
+            speed_val_s.set_text(&format!("~{rpm} rpm"));
             sw_title.set_title("Manual");
             gen10_manual_hint(&sw_title, true, Some(&toast_s));
             queue.set_fan(fan, rpm);
@@ -860,7 +953,7 @@ pub(crate) fn fan_card(
     let high_sc = high_accepted.clone();
     let speed_val_sc = speed_val.clone();
     scale.connect_value_changed(move |sc| {
-        speed_val_sc.set_text(&format!("~{}", sc.value() as u32));
+        speed_val_sc.set_text(&format!("~{} rpm", sc.value() as u32));
         if sw_sc.is_active() || suppressing_sc.get() {
             return;
         }
@@ -895,25 +988,6 @@ pub(crate) fn fan_card(
             return;
         }
         queue_sc.set_fan(fan, rpm);
-    });
-
-    // Sysfs read on a worker thread; only the label update touches GTK.
-    glib::timeout_add_local(Duration::from_secs(2), move || {
-        let (tx, rx) = mpsc::channel();
-        let fan = fan;
-        std::thread::spawn(move || {
-            let _ = tx.send(legion_core::fans::rpm_label(fan));
-        });
-        let rpm_l_c = rpm_l.clone();
-        glib::timeout_add_local(Duration::from_millis(50), move || match rx.try_recv() {
-            Ok(text) => {
-                rpm_l_c.set_text(&text);
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
-        });
-        glib::ControlFlow::Continue
     });
 
     group
