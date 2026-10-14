@@ -336,7 +336,8 @@ button.icon-btn:hover {
 }
 
 /* Plain adw buttons placed in rows (ActionRow suffixes, banners) */
-row button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle) {
+.page button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker):not(.image-button),
+row button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker) {
     min-height: 22px;
     padding: 5px 14px;
     border-radius: 8px;
@@ -436,7 +437,7 @@ row button.suggested-action {
 .scale-value {
     font-weight: 600;
     font-size: 0.86rem;
-    min-width: 3.4rem;
+    min-width: 4.8rem;
     font-variant-numeric: tabular-nums;
 }
 

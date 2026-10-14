@@ -216,7 +216,7 @@ impl CurveEditor {
                 tc += 10.0;
             }
             cr.set_source_rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.95);
-            cr.move_to(g.x(90.0) + 4.0, g.t + 13.0);
+            cr.move_to(g.x(90.0) + 4.0, g.t + g.h - 6.0);
             let _ = cr.show_text("safety max");
 
             // Curve polyline (flat extension to both axis edges).

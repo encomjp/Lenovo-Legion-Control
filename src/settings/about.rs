@@ -639,7 +639,7 @@ pub(crate) fn build_kde_widget_section(toast_overlay: &adw::ToastOverlay) -> adw
         .tooltip_text("Remove the per-user widget package")
         .sensitive(installed)
         .build();
-    let install = primary_button_tip(
+    let install = secondary_button_tip(
         if installed {
             "Update widget"
         } else {
@@ -895,7 +895,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
 
     let daemon_suffix = gtk::Box::new(Orientation::Horizontal, 8);
     daemon_suffix.set_valign(Align::Center);
-    let daemon_button = primary_button_tip(
+    let daemon_button = secondary_button_tip(
         if is_mismatch { "Restart daemon" } else { "Enable" },
         Some("Uses a narrowly scoped PolicyKit helper; no shell command is accepted"),
     );
@@ -964,7 +964,7 @@ pub(crate) fn build_components_section(toast_overlay: &adw::ToastOverlay) -> adw
         .sensitive(smu_installed)
         .tooltip_text("Unload and remove the optional ryzen_smu DKMS driver")
         .build();
-    let install_smu = primary_button_tip(
+    let install_smu = secondary_button_tip(
         "Install",
         Some("Builds the bundled, pinned ryzen_smu source through DKMS using PolicyKit"),
     );
@@ -1078,10 +1078,16 @@ pub(crate) fn build_about_pages(
     startup.add(&restore_sw);
     setup_page.append(&startup);
     setup_page.append(&build_components_section(toast_overlay));
-    setup_page.append(&build_kde_widget_section(toast_overlay));
+    let more_setup = gtk::Expander::new(Some("More options"));
+    more_setup.add_css_class("section-expander");
+    let more_setup_box = gtk::Box::new(Orientation::Vertical, 12);
+    more_setup_box.set_margin_top(8);
+    more_setup_box.append(&build_kde_widget_section(toast_overlay));
     let (diag_group, diag_consent, diag_share_switch) =
         build_diagnostics_section(toast_overlay, sync);
-    setup_page.append(&diag_group);
+    more_setup_box.append(&diag_group);
+    more_setup.set_child(Some(&more_setup_box));
+    setup_page.append(&more_setup);
 
     let help = pref_group("Help", None);
     let report_row = adw::ActionRow::builder()
@@ -1106,9 +1112,9 @@ pub(crate) fn build_about_pages(
         .title("Donate")
         .activatable(true)
         .build();
-    donate_row.add_prefix(&color_icon(
+    donate_row.add_prefix(&mono_icon(
         include_bytes!("../../data/icons/donate.svg"),
-        24,
+        20,
     ));
     tip(
         &donate_row,
@@ -1179,6 +1185,7 @@ pub(crate) fn build_about_pages(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let laptop_more = pref_group("", None);
     for (k, v, tip_text) in [
         (
             "Model",
@@ -1256,16 +1263,26 @@ pub(crate) fn build_about_pages(
             "Discrete GPU name: nvidia-smi when awake, else PCI ID map, else lspci",
         ),
     ] {
-        laptop.add(&property_row(k, v, Some(tip_text)));
+        let essential = matches!(k, "Model" | "Machine type" | "BIOS" | "Processor" | "Graphics");
+        if essential {
+            laptop.add(&property_row(k, v, Some(tip_text)));
+        } else {
+            laptop_more.add(&property_row(k, v, Some(tip_text)));
+        }
     }
     if !info.profile_notes.is_empty() {
-        laptop.add(&property_row(
+        laptop_more.add(&property_row(
             "Notes",
             &info.profile_notes,
             Some("Quirks and capabilities notes from the matched model profile"),
         ));
     }
     hardware_page.append(&laptop);
+    let hardware_more = gtk::Expander::new(Some("More details"));
+    hardware_more.add_css_class("section-expander");
+    let hardware_more_box = gtk::Box::new(Orientation::Vertical, 12);
+    hardware_more_box.set_margin_top(8);
+    hardware_more_box.append(&laptop_more);
 
     let lighting = pref_group("Lighting and profiles", None);
     let saved = legion_core::config::config_dir_display();
@@ -1286,7 +1303,9 @@ pub(crate) fn build_about_pages(
     ));
     // Storage was a redundant duplicate of Hardware — merged here so the
     // About hub stays at Setup / Hardware / Help only.
-    hardware_page.append(&lighting);
+    hardware_more_box.append(&lighting);
+    hardware_more.set_child(Some(&hardware_more_box));
+    hardware_page.append(&hardware_more);
     (
         setup_page,
         help_page,
@@ -1340,7 +1359,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
     expander.add_row(&details);
     group.add(&expander);
 
-    let btn = primary_button_tip(
+    let btn = secondary_button_tip(
         match diag0.health {
             Health::Ok => "Refresh and re-check",
             Health::SoftIssue => "Repair speakers",
@@ -1359,19 +1378,7 @@ pub(crate) fn build_speakers_section(toast_overlay: &adw::ToastOverlay) -> adw::
             "No AW88399 smart-amp on this model — speaker fix is Gen10 Pro 7 only and will be removed once kernel 7.3 ships",
         ));
     }
-    let action = adw::ActionRow::builder()
-        .title("Repair")
-        .subtitle(if diag0.health == Health::NotApplicable {
-            "Not applicable on this hardware"
-        } else {
-            ""
-        })
-        .activatable(false)
-        .build();
-    tip(&action, amp_action_tooltip(diag0.health));
-    action.add_suffix(&btn);
-    action.set_sensitive(diag0.health != Health::NotApplicable);
-    group.add(&action);
+    status_row.add_suffix(&btn);
 
     let overlay = toast_overlay.clone();
     let pill_c = pill.clone();

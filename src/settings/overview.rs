@@ -496,7 +496,7 @@ pub(crate) fn build_overview(
             cr.set_source_rgba(fr, fg_g, fb, 0.55);
             cr.set_font_size(12.0);
             cr.move_to(left + 10.0, h / 2.0 + 4.0);
-            let _ = cr.show_text("Collecting temperature…");
+            let _ = cr.show_text("Collecting temperature...");
         }
     });
     chart_card.append(&area);
@@ -1217,6 +1217,7 @@ pub(crate) fn attach_custom_ppt_group(
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         val.add_css_class("scale-value");
+        val.set_xalign(1.0);
         tip(&val, &ppt_tip);
 
         let adj = gtk::Adjustment::new(

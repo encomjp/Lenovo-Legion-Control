@@ -185,15 +185,6 @@ pub fn section_tip(title: &str, blurb: Option<&str>) -> (gtk::Box, gtk::Box) {
     (wrap, card)
 }
 
-/// Section title label (sentence case) used above panels and groups.
-pub fn section_title(text: &str) -> gtk::Label {
-    let l = gtk::Label::new(Some(text));
-    l.add_css_class("section-title");
-    l.set_halign(Align::Start);
-    l.set_xalign(0.0);
-    l
-}
-
 /// Linked segmented toggle group with radio semantics for mutually
 /// exclusive choices. `active` starts checked (`u32::MAX` = none).
 pub fn segmented(labels: &[String], active: u32) -> (gtk::Box, Vec<gtk::ToggleButton>) {

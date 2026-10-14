@@ -51,7 +51,7 @@ pub(crate) fn build_udev_permanent_section(
     status_row.add_suffix(&pill);
     group.add(&status_row);
 
-    let btn = primary_button_tip(
+    let btn = secondary_button_tip(
         if installed {
             "Reinstall permanently"
         } else {
@@ -127,8 +127,15 @@ pub(crate) fn build_fix_compact(toast_overlay: &adw::ToastOverlay, gate: &Daemon
     page.append(&build_selfcheck_section(toast_overlay));
     page.append(&build_speakers_section(toast_overlay));
     page.append(&build_lighting_reset_section(toast_overlay, gate));
-    page.append(&build_udev_permanent_section(toast_overlay));
-    page.append(&build_logs_section(toast_overlay, gate));
+    // Rarely needed tools stay folded away.
+    let advanced = gtk::Expander::new(Some("Advanced"));
+    advanced.add_css_class("section-expander");
+    let inner = gtk::Box::new(Orientation::Vertical, 12);
+    inner.set_margin_top(8);
+    inner.append(&build_udev_permanent_section(toast_overlay));
+    inner.append(&build_logs_section(toast_overlay, gate));
+    advanced.set_child(Some(&inner));
+    page.append(&advanced);
     page
 }
 
@@ -180,7 +187,7 @@ pub(crate) fn build_lighting_reset_section(
     expander.add_row(&details);
     group.add(&expander);
 
-    let btn = primary_button_tip(
+    let btn = secondary_button_tip(
         match diag0.health {
             Health::Ok => "Re-check RGB",
             Health::SoftIssue => "Repair lighting",
@@ -191,16 +198,7 @@ pub(crate) fn build_lighting_reset_section(
             "Soft lighting reset → fix permissions → USB reset → hid-generic rebind → restore saved look (daemon)",
         ),
     );
-    let action = adw::ActionRow::builder()
-        .title("Auto-fix")
-        .activatable(false)
-        .build();
-    tip(
-        &action,
-        "Needs updated legion-control service for USB reset privileges",
-    );
-    action.add_suffix(&btn);
-    group.add(&action);
+    status_row.add_suffix(&btn);
     gate.track(&btn);
 
     let overlay = toast_overlay.clone();
@@ -325,12 +323,12 @@ pub(crate) fn build_logs_section(
     scroll.set_max_content_height(400);
     group.add(&scroll);
 
-    let fetch_btn = primary_button_tip(
+    let fetch_btn = secondary_button_tip(
         "Fetch logs",
         Some("Query the last 100 log lines from the daemon"),
     );
-    let copy_btn = primary_button_tip("Copy", Some("Copy log text to clipboard"));
-    let level_btn = primary_button_tip(
+    let copy_btn = secondary_button_tip("Copy", Some("Copy log text to clipboard"));
+    let level_btn = secondary_button_tip(
         "Verbose",
         Some("Toggle daemon between info and debug logging"),
     );
@@ -513,7 +511,6 @@ pub(crate) fn build_selfcheck_section(toast_overlay: &adw::ToastOverlay) -> adw:
     let run_btn = gtk::Button::with_label("Run");
     run_btn.set_valign(Align::Center);
     run_btn.add_css_class("pill-btn");
-    run_btn.set_size_request(110, -1);
     run_btn.set_halign(Align::Center);
     tip(
         &run_btn,
@@ -576,15 +573,15 @@ pub(crate) fn build_selfcheck_section(toast_overlay: &adw::ToastOverlay) -> adw:
                                 .iter()
                                 .map(|c| {
                                     format!(
-                                        "{} {} — {}",
-                                        if c.ok { "✓" } else { "✗" },
+                                        "{} {}: {}",
+                                        if c.ok { "OK" } else { "Problem" },
                                         c.name,
                                         c.detail
                                     )
                                 })
                                 .collect();
                             for fault in &faults {
-                                lines.push(format!("⚠ {:?} — {}", fault.severity, fault.detail));
+                                lines.push(format!("Warning {:?}: {}", fault.severity, fault.detail));
                             }
                             results.set_text(&lines.join("\n"));
                             expander.set_label(Some(&format!(

@@ -188,26 +188,28 @@ pub(crate) fn build_profiles_page(
                 let summary = legion_core::config::get_named_profile(&name)
                     .map(|p| profile_summary(&p))
                     .unwrap_or_else(|| "Unreadable profile".into());
+                let short = legion_core::config::get_named_profile(&name)
+                    .map(|p| {
+                        format!(
+                            "{} · charge limit {}%",
+                            friendly_profile(&p.platform_profile),
+                            p.charge_limit
+                        )
+                    })
+                    .unwrap_or_else(|| "Unreadable profile".into());
                 let row = adw::ActionRow::builder()
                     .title(glib::markup_escape_text(&name))
-                    .subtitle(glib::markup_escape_text(&summary))
-                    .subtitle_lines(2)
+                    .subtitle(glib::markup_escape_text(&short))
                     .activatable(false)
                     .build();
+                tip(&row, &summary);
                 if name == active {
                     let badge = status_pill_tip("Active", "ok", Some("Last profile you loaded"));
                     badge.set_valign(Align::Center);
                     row.add_prefix(&badge);
                 }
-                let load = gtk::Button::with_label("Load");
-                load.add_css_class("pill-btn");
-                load.set_valign(Align::Center);
-                tip(&load, "Apply this profile now");
-                let del = gtk::Button::with_label("Delete");
-                del.add_css_class("flat");
-                del.add_css_class("pill-btn");
-                del.set_valign(Align::Center);
-                tip(&del, "Remove this profile from disk");
+                let load = secondary_button_tip("Load", Some("Apply this profile now"));
+                let del = destructive_button_tip("Delete", Some("Remove this profile from disk"));
                 row.add_suffix(&load);
                 row.add_suffix(&del);
 

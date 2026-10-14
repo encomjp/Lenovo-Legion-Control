@@ -565,6 +565,7 @@ pub(crate) fn build_cpu_power_page(
         val.add_css_class("dim-label");
         val.add_css_class("numeric");
         val.add_css_class("scale-value");
+        val.set_xalign(1.0);
         let adj = gtk::Adjustment::new(
             lim.current as f64,
             lim.min as f64,
