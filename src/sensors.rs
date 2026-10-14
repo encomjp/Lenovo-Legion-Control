@@ -182,6 +182,23 @@ pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
     result
 }
 /// Get the first hwmon device matching a name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EcTemp {
+    Cpu,
+    Gpu,
+}
+
+/// Pure: legion_hwmon temperature label → EC slot. Older LenovoLegionLinux
+/// builds label them "EC CPU"/"EC GPU"; current ones use "CPU Temperature" /
+/// "GPU Temperature" (82RC, 82WQ, 82WS, 83F6 fleet dumps).
+fn ec_temp_slot(label: &str) -> Option<EcTemp> {
+    match label {
+        "EC CPU" | "CPU Temperature" => Some(EcTemp::Cpu),
+        "EC GPU" | "GPU Temperature" => Some(EcTemp::Gpu),
+        _ => None,
+    }
+}
+
 pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
     find_hwmon(name).into_iter().next()
 }
@@ -367,17 +384,17 @@ pub fn read_all() -> SensorReadings {
                     let input_path = hw.join(fname.replace("_label", "_input"));
                     if let Some(val) = read_int(&input_path) {
                         let temp = val as f64 / 1000.0;
-                        match label.as_str() {
-                            "EC CPU" => {
-                                log::debug!("sensors::read_all: EC CPU → ec_cpu={temp}");
+                        match ec_temp_slot(&label) {
+                            Some(EcTemp::Cpu) => {
+                                log::debug!("sensors::read_all: {label} → ec_cpu={temp}");
                                 s.ec_cpu = temp;
                             }
-                            "EC GPU" => {
-                                log::debug!("sensors::read_all: EC GPU → ec_gpu={temp}");
+                            Some(EcTemp::Gpu) => {
+                                log::debug!("sensors::read_all: {label} → ec_gpu={temp}");
                                 s.ec_gpu = temp;
                             }
-                            other => log::trace!(
-                                "sensors::read_all: legion_hwmon label '{other}' not mapped"
+                            None => log::trace!(
+                                "sensors::read_all: legion_hwmon label '{label}' not mapped"
                             ),
                         }
                     }
@@ -816,6 +833,16 @@ pub(crate) fn select_ssd_temp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ec_temp_labels_cover_both_legion_hwmon_spellings() {
+        assert_eq!(ec_temp_slot("EC CPU"), Some(EcTemp::Cpu));
+        assert_eq!(ec_temp_slot("CPU Temperature"), Some(EcTemp::Cpu));
+        assert_eq!(ec_temp_slot("EC GPU"), Some(EcTemp::Gpu));
+        assert_eq!(ec_temp_slot("GPU Temperature"), Some(EcTemp::Gpu));
+        assert_eq!(ec_temp_slot("IC Temperature"), None);
+        assert_eq!(ec_temp_slot("Fan 1"), None);
+    }
 
     #[test]
     fn compute_cpu_usage_zero_and_clamp() {
