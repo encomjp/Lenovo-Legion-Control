@@ -13,6 +13,8 @@ pub(crate) struct CurveOptimizerUi {
     refresh_button: gtk::Button,
     startup_switch: adw::SwitchRow,
     persistence_suppress: Rc<Cell<bool>>,
+    /// Uniform offset last seen on the hardware, kept for Undo.
+    applied: Rc<Cell<Option<i16>>>,
 }
 
 #[cfg(test)]
@@ -77,6 +79,7 @@ pub(crate) fn update_curve_optimizer_ui(
     ui.status_row.set_subtitle(&subtitle);
     ui.offset_scale
         .set_range(status.minimum as f64, status.maximum as f64);
+    ui.applied.set(current_val);
     if let Some(current) = status
         .current
         .first()
@@ -291,6 +294,7 @@ pub(crate) fn build_curve_optimizer(
         refresh_button,
         startup_switch,
         persistence_suppress,
+        applied: Rc::new(Cell::new(None)),
     };
 
     let value_label = ui.offset_value.clone();
@@ -385,6 +389,7 @@ pub(crate) fn build_curve_optimizer(
                 ui.apply_button.set_label("Applying…");
                 let ui_done = ui.clone();
                 let overlay = overlay.clone();
+                let before = ui.applied.get();
                 run_daemon_command_async(
                     DaemonCommand::SetCurveOptimizer {
                         offset,
@@ -394,7 +399,27 @@ pub(crate) fn build_curve_optimizer(
                         ui_done.apply_button.set_label("Apply");
                         match update_curve_optimizer_ui(&ui_done, result) {
                             Ok(()) => {
-                                toast_ok(&overlay, "Curve Optimizer offset verified");
+                                match before.filter(|b| *b != offset) {
+                                    Some(prev) => {
+                                        let ui_undo = ui_done.clone();
+                                        let overlay_undo = overlay.clone();
+                                        undo_toast(&overlay, "Curve Optimizer offset applied", 10, move || {
+                                            let ui = ui_undo.clone();
+                                            let overlay = overlay_undo.clone();
+                                            run_daemon_command_async(
+                                                DaemonCommand::SetCurveOptimizer {
+                                                    offset: prev,
+                                                    acknowledge: true,
+                                                },
+                                                move |result| match update_curve_optimizer_ui(&ui, result) {
+                                                    Ok(()) => toast_ok(&overlay, "Previous offset restored"),
+                                                    Err(error) => toast_error(&overlay, &error),
+                                                },
+                                            );
+                                        });
+                                    }
+                                    None => toast_ok(&overlay, "Curve Optimizer offset verified"),
+                                }
                                 refresh_curve_optimizer_persistence(&ui_done, Some(&overlay));
                             }
                             Err(error) => {
@@ -520,6 +545,8 @@ pub(crate) fn build_cpu_power_page(
     preview.add(&lock_row);
     let sliders_box = gtk::Box::new(Orientation::Vertical, 0);
     preview.add(&sliders_box);
+    // The two firmware safety cutoffs live in a folded Advanced section.
+    let adv_box = gtk::Box::new(Orientation::Vertical, 0);
     {
         let overlay = overlay.clone();
         go_custom_btn.connect_clicked(move |btn| {
@@ -555,10 +582,11 @@ pub(crate) fn build_cpu_power_page(
         titles.append(&title);
         if let Some(sub) = limit_subtitle(lim.id) {
             let sub = gtk::Label::new(Some(sub));
+            sub.set_wrap(true);
+            sub.set_max_width_chars(28);
             sub.set_xalign(0.0);
             sub.add_css_class("dim-label");
             sub.add_css_class("caption");
-            sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
             titles.append(&sub);
         }
         tip(&row, &range);
@@ -583,7 +611,11 @@ pub(crate) fn build_cpu_power_page(
         row.append(&titles);
         row.append(&scale);
         row.append(&val);
-        sliders_box.append(&row);
+        if matches!(lim.id, "cpu_temp" | "gpu_temp") {
+            adv_box.append(&row);
+        } else {
+            sliders_box.append(&row);
+        }
         // Wire edits through the same Custom-gate Home uses: auto-switch to
         // Custom on first drag, then queue the firmware-attribute write.
         let overlay = toast_overlay.clone();
@@ -594,43 +626,98 @@ pub(crate) fn build_cpu_power_page(
         let val_c = val.clone();
         let lim_id = lim.id.to_string();
         let lim_unit = lim.unit.symbol().to_string();
+        let lim_label = lim.label.to_string();
+        // Last value that was announced (with Undo); drags settle into one toast.
+        let committed = Rc::new(Cell::new(lim.current));
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let apply_limit = {
+            let overlay = overlay.clone();
+            let queue = queue.clone();
+            let drop_slot = drop_slot.clone();
+            let choices_slot = choices_slot.clone();
+            let lim_id = lim_id.clone();
+            Rc::new(move |v: u32| {
+                let drop_opt = drop_slot.borrow().clone();
+                let choices = choices_slot.borrow().clone();
+                match drop_opt {
+                    Some(drop) if !choices.is_empty() => {
+                        ensure_custom_then_ppt(&overlay, &drop, &choices, &queue, &lim_id, v);
+                    }
+                    _ => {
+                        queue.set_fw_attr(&lim_id, v.to_string());
+                        legion_core::config::remember_ppt(&lim_id, v);
+                    }
+                }
+            })
+        };
         scale.connect_value_changed(move |s| {
             if suppress_c.get() {
                 return;
             }
             let v = s.value().round() as u32;
             val_c.set_text(&format!("{v} {lim_unit}"));
-            // Home dropdown may not exist yet (build order) — fall back to a
-            // direct queued write; Home syncs from firmware on its next poll.
-            let drop_opt = drop_slot.borrow().clone();
-            let choices = choices_slot.borrow().clone();
-            match drop_opt {
-                Some(drop) if !choices.is_empty() => {
-                    ensure_custom_then_ppt(&overlay, &drop, &choices, &queue, &lim_id, v);
-                }
-                _ => {
-                    queue.set_fw_attr(&lim_id, v.to_string());
-                    legion_core::config::remember_ppt(&lim_id, v);
-                }
+            // Home dropdown may not exist yet (build order), the helper falls
+            // back to a direct queued write; Home syncs on its next poll.
+            apply_limit(v);
+            if let Some(id) = pending.borrow_mut().take() {
+                id.remove();
             }
+            let overlay = overlay.clone();
+            let committed = committed.clone();
+            let pending_c = pending.clone();
+            let apply_limit = apply_limit.clone();
+            let suppress = suppress_c.clone();
+            let scale = s.clone();
+            let val = val_c.clone();
+            let unit = lim_unit.clone();
+            let label = lim_label.clone();
+            let id = glib::timeout_add_local_once(std::time::Duration::from_millis(900), move || {
+                pending_c.borrow_mut().take();
+                let prev = committed.get();
+                let now = scale.value().round() as u32;
+                if prev == now {
+                    return;
+                }
+                committed.set(now);
+                undo_toast(&overlay, &format!("{label} changed"), 10, move || {
+                    suppress.set(true);
+                    scale.set_value(prev as f64);
+                    suppress.set(false);
+                    val.set_text(&format!("{prev} {unit}"));
+                    committed.set(prev);
+                    apply_limit(prev);
+                });
+            });
+            *pending.borrow_mut() = Some(id);
         });
     }
     sliders_box.set_sensitive(custom_active);
+    adv_box.set_sensitive(custom_active);
     page.append(&preview);
+    let advanced = gtk::Expander::new(Some("Advanced"));
+    advanced.add_css_class("section-expander");
+    let adv_inner = gtk::Box::new(Orientation::Vertical, 0);
+    adv_inner.set_margin_top(8);
+    adv_inner.append(&adv_box);
+    advanced.set_child(Some(&adv_inner));
+    advanced.set_expanded(false);
+    page.append(&advanced);
     // Follow the firmware mode (it can change from Home, the tray or a profile).
     {
         let lock_row = lock_row.downgrade();
         let sliders = sliders_box.downgrade();
+        let adv = adv_box.downgrade();
         let btn = go_custom_btn.downgrade();
         glib::timeout_add_seconds_local(2, move || {
-            let (Some(lock_row), Some(sliders), Some(btn)) =
-                (lock_row.upgrade(), sliders.upgrade(), btn.upgrade())
+            let (Some(lock_row), Some(sliders), Some(adv), Some(btn)) =
+                (lock_row.upgrade(), sliders.upgrade(), adv.upgrade(), btn.upgrade())
             else {
                 return glib::ControlFlow::Break;
             };
             let on = legion_core::profile::current() == "custom";
             if sliders.is_sensitive() != on {
                 sliders.set_sensitive(on);
+                adv.set_sensitive(on);
                 btn.set_visible(!on);
                 lock_row.set_title(lock_title(on));
                 tip(&lock_row, lock_tip(on));
@@ -647,8 +734,9 @@ fn limit_subtitle(id: &str) -> Option<&'static str> {
         "ppt_pl1_spl" => "Sustained CPU power",
         "ppt_pl2_sppt" => "A few seconds",
         "ppt_pl3_fppt" => "Under a second",
-        "cpu_temp" => "Firmware cutoff, not Thermal throttle",
-        "gpu_temp" => "Firmware cutoff for the GPU",
+        "cpu_temp" | "gpu_temp" => {
+            "Firmware safety cutoff. Use Temperature limit on Tuning for everyday control."
+        }
         _ => return None,
     })
 }

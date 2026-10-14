@@ -408,6 +408,56 @@ impl CurveUi {
     }
 }
 
+/// Send a curve to the service. With `offer_undo`, the toast carries an Undo
+/// button that sends the previously stored curve back through this same path.
+fn send_curve(
+    ui: &Rc<CurveUi>,
+    profile: String,
+    points: legion_core::fan_curve::CurvePoints,
+    enabled: bool,
+    offer_undo: bool,
+) {
+    // State before this change: the stored curve, or the firmware curve if none.
+    let (prev_points, prev_enabled) = ui.stored(&profile);
+    ui.busy.set(true);
+    ui.sync();
+    let ui2 = ui.clone();
+    let p2 = profile.clone();
+    run_daemon_command_async(
+        DaemonCommand::SetFanCurve {
+            profile,
+            points,
+            enabled,
+        },
+        move |res| {
+            ui2.busy.set(false);
+            match res {
+                Ok(DaemonResponse::FanCurves(st)) => {
+                    *ui2.status.borrow_mut() = Some(st);
+                    let text = if enabled {
+                        ui2.drafts.borrow_mut().remove(&p2);
+                        "Fan curve applied"
+                    } else {
+                        "Fans back on the firmware curve"
+                    };
+                    if offer_undo {
+                        let ui3 = ui2.clone();
+                        let p3 = p2.clone();
+                        undo_toast(&ui2.toast, text, 10, move || {
+                            send_curve(&ui3, p3.clone(), prev_points, prev_enabled, false);
+                        });
+                    } else {
+                        toast_ok(&ui2.toast, text);
+                    }
+                }
+                Ok(DaemonResponse::Error(e)) | Err(e) => toast_error(&ui2.toast, &e),
+                Ok(_) => toast_error(&ui2.toast, "Unexpected response from the daemon"),
+            }
+            ui2.sync();
+        },
+    );
+}
+
 fn fan_card_ui(ch: &legion_core::device::FanCapability) -> (gtk::Box, FanCardUi) {
     let card = gtk::Box::new(Orientation::Vertical, 6);
     card.add_css_class("panel");
@@ -635,34 +685,7 @@ fn build_fan_curve_section(
             } else {
                 ui.stored(&profile).0
             };
-            ui.busy.set(true);
-            ui.sync();
-            let ui2 = ui.clone();
-            let p2 = profile.clone();
-            run_daemon_command_async(
-                DaemonCommand::SetFanCurve {
-                    profile,
-                    points,
-                    enabled,
-                },
-                move |res| {
-                    ui2.busy.set(false);
-                    match res {
-                        Ok(DaemonResponse::FanCurves(st)) => {
-                            *ui2.status.borrow_mut() = Some(st);
-                            if enabled {
-                                ui2.drafts.borrow_mut().remove(&p2);
-                                toast_ok(&ui2.toast, "Fan curve applied");
-                            } else {
-                                toast_ok(&ui2.toast, "Fans back on the firmware curve");
-                            }
-                        }
-                        Ok(DaemonResponse::Error(e)) | Err(e) => toast_error(&ui2.toast, &e),
-                        Ok(_) => toast_error(&ui2.toast, "Unexpected response from the daemon"),
-                    }
-                    ui2.sync();
-                },
-            );
+            send_curve(&ui, profile, points, enabled, true);
         })
     };
     {

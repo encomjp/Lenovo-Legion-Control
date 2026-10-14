@@ -174,6 +174,35 @@ fn build_fourzone_page(
     let state = Rc::new(Cell::new(cfg.four_zone.to_state()));
     let s0 = state.get();
 
+    // Changes apply and save themselves after ~250 ms without further edits.
+    let commit: Rc<dyn Fn()> = {
+        let state = state.clone();
+        let toast = toast_overlay.clone();
+        let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        Rc::new(move || {
+            if let Some(id) = pending.borrow_mut().take() {
+                id.remove();
+            }
+            let state = state.clone();
+            let toast = toast.clone();
+            let pending_c = pending.clone();
+            let id = glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+                pending_c.borrow_mut().take();
+                let s = state.get();
+                super::dispatch_async(
+                    move || legion_core::fourzone::apply_and_save(&s),
+                    "4-zone write stopped without a result",
+                    move |res| {
+                        if let Err(e) = res {
+                            toast_error(&toast, &e);
+                        }
+                    },
+                );
+            });
+            *pending.borrow_mut() = Some(id);
+        })
+    };
+
     let (sec, card) = section_tip("4-zone RGB keyboard", None);
     let warn = gtk::Label::new(Some(
         "Experimental, tested by reference packets only. The 33-byte packets follow the layout \
@@ -226,10 +255,12 @@ fn build_fourzone_page(
     for i in 0..4 {
         let [r, g, b] = s0.colors[i];
         let state_c = state.clone();
+        let commit_c = commit.clone();
         let picker = colour_picker((r, g, b), &format!("Zone {} colour", i + 1), move |r, g, b| {
             let mut s = state_c.get();
             s.colors[i] = [r, g, b];
             state_c.set(s);
+            commit_c();
         });
         let col = gtk::Box::new(Orientation::Vertical, 4);
         let l = gtk::Label::new(Some(&format!("Zone {}", i + 1)));
@@ -255,6 +286,7 @@ fn build_fourzone_page(
     sync(s0.effect);
     {
         let state = state.clone();
+        let commit = commit.clone();
         effect_dd.connect_selected_notify(move |d| {
             let fx = FzEffect::ALL
                 .get(d.selected() as usize)
@@ -264,26 +296,32 @@ fn build_fourzone_page(
             s.effect = fx;
             state.set(s);
             sync(fx);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         speed_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.speed = (d.selected() as u8 + 1).clamp(1, 4);
             state.set(s);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         bri_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.brightness = (d.selected() as u8).min(2);
             state.set(s);
+            commit();
         });
     }
     {
         let state = state.clone();
+        let commit = commit.clone();
         dir_dd.connect_selected_notify(move |d| {
             let mut s = state.get();
             s.direction = if d.selected() == 1 {
@@ -292,40 +330,10 @@ fn build_fourzone_page(
                 WaveDir::Right
             };
             state.set(s);
+            commit();
         });
     }
 
-    let apply = primary_button_tip("Apply", Some("Send this state to the 4-zone controller and save it"));
-    apply.set_halign(Align::End);
-    apply.set_margin_top(8);
-    let toast = toast_overlay.clone();
-    apply.connect_clicked(move |btn| {
-        let s = state.get();
-        btn.set_sensitive(false);
-        let btn = btn.clone();
-        let toast = toast.clone();
-        super::dispatch_async(
-            move || legion_core::fourzone::apply_and_save(&s),
-            "4-zone write stopped without a result",
-            move |res| {
-                btn.set_sensitive(true);
-                match res {
-                    Ok(()) => {
-                        let msg = if s.brightness == 0 {
-                            "4-zone keyboard off".to_string()
-                        } else {
-                            format!("4-zone keyboard: {}", s.effect.display_name())
-                        };
-                        let t = adw::Toast::new(&msg);
-                        t.set_timeout(2);
-                        toast.add_toast(t);
-                    }
-                    Err(e) => toast_error(&toast, &e),
-                }
-            },
-        );
-    });
-    card.append(&apply);
     sec.append(&card);
     page.append(&sec);
 
@@ -802,6 +810,10 @@ fn zone_editor(
         effect_tooltip(EFFECT_IDS.get(fx_sel as usize).copied().unwrap_or("static")),
     );
 
+    // Zones other than All Lights save and apply themselves shortly after the
+    // last change. All Lights overwrites every zone, so it keeps a button.
+    let auto = zone != RgbZone::All;
+    let commit = auto_commit(&effect_dd, &color, &speed, &brightness, zone);
     let (strip, refresh) = preview_strip(&effect_dd, &color, &brightness, show_brightness);
     strip.set_margin_bottom(6);
     wrap.append(&strip);
@@ -817,8 +829,10 @@ fn zone_editor(
     speed_dd.set_width_request(200);
     speed_dd.set_selected((speed.get().saturating_sub(1) as u32).min(2));
     let speed_c = speed.clone();
+    let commit_s = commit.clone();
     speed_dd.connect_selected_notify(move |d| {
         speed_c.set((d.selected() as u8).saturating_add(1).min(3));
+        commit_s();
     });
     let speed_row = field_row("Speed", &speed_dd, "How fast the animation moves");
     let sync_speed = {
@@ -833,21 +847,25 @@ fn zone_editor(
 
     {
         let refresh = refresh.clone();
+        let commit = commit.clone();
         effect_dd.connect_selected_notify(move |d| {
             let idx = d.selected() as usize;
             let id = EFFECT_IDS.get(idx).copied().unwrap_or("static");
             tip(d, effect_tooltip(id));
             sync_speed(idx);
             refresh();
+            commit();
         });
     }
 
     let picker = colour_picker(color.get(), "Colour", {
         let color = color.clone();
         let refresh = refresh.clone();
+        let commit = commit.clone();
         move |r, g, b| {
             color.set((r, g, b));
             refresh();
+            commit();
         }
     });
     let colour_box = gtk::Box::new(Orientation::Horizontal, 12);
@@ -873,11 +891,13 @@ fn zone_editor(
         let bri_val_c = bright_val.clone();
         let bri_c = brightness.clone();
         let refresh_b = refresh.clone();
+        let commit_b = commit.clone();
         bright_slider.connect_value_changed(move |s| {
             let level = s.value().round().clamp(0.0, 9.0) as u8;
             bri_val_c.set_text(&level_label(level));
             bri_c.set(level);
             refresh_b();
+            commit_b();
         });
         tip(&bright_slider, "0% turns this zone off");
         let bright_box = gtk::Box::new(Orientation::Horizontal, 10);
@@ -887,10 +907,12 @@ fn zone_editor(
         wrap.append(&field_row("Brightness", &bright_box, "Brightness of this zone only"));
     }
 
-    let apply = apply_button(&effect_dd, &color, &speed, &brightness, zone, &toast);
-    apply.set_halign(Align::End);
-    apply.set_margin_top(8);
-    wrap.append(&apply);
+    if !auto {
+        let apply = apply_button(&effect_dd, &color, &speed, &brightness, zone, &toast);
+        apply.set_halign(Align::End);
+        apply.set_margin_top(8);
+        wrap.append(&apply);
+    }
 
     wrap
 }
@@ -992,6 +1014,49 @@ fn rgba_to_rgb(rgba: gtk::gdk::RGBA) -> (u8, u8, u8) {
     )
 }
 
+/// Debounced live apply: waits for ~250 ms without changes, then sends the
+/// state through `apply_lighting`, which also writes the saved zone config.
+fn auto_commit(
+    effect_dd: &gtk::DropDown,
+    color: &Rc<Cell<(u8, u8, u8)>>,
+    speed: &Rc<Cell<u8>>,
+    brightness: &Rc<Cell<u8>>,
+    zone: RgbZone,
+) -> Rc<dyn Fn()> {
+    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let (effect_dd, color, speed, brightness) = (
+        effect_dd.clone(),
+        color.clone(),
+        speed.clone(),
+        brightness.clone(),
+    );
+    Rc::new(move || {
+        if zone == RgbZone::All {
+            return;
+        }
+        if let Some(id) = pending.borrow_mut().take() {
+            id.remove();
+        }
+        let pending_c = pending.clone();
+        let (effect_dd, color, speed, brightness) = (
+            effect_dd.clone(),
+            color.clone(),
+            speed.clone(),
+            brightness.clone(),
+        );
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+            pending_c.borrow_mut().take();
+            let id = EFFECT_IDS
+                .get(effect_dd.selected() as usize)
+                .copied()
+                .unwrap_or("static");
+            let (r, g, b) = color.get();
+            apply_lighting(id, r, g, b, speed.get(), brightness.get(), zone);
+        });
+        *pending.borrow_mut() = Some(id);
+    })
+}
+
 fn apply_button(
     effect_dd: &gtk::DropDown,
     color: &Rc<Cell<(u8, u8, u8)>>,
@@ -1001,8 +1066,8 @@ fn apply_button(
     toast: &adw::ToastOverlay,
 ) -> gtk::Button {
     let apply = primary_button_tip(
-        "Apply",
-        Some("Send this effect, colour, speed and brightness to the keyboard now"),
+        "Use on all lights",
+        Some("Send this effect, colour, speed and brightness to every light now"),
     );
     let effect_dd_c = effect_dd.clone();
     let color_a = color.clone();

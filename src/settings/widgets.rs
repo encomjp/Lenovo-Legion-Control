@@ -485,3 +485,22 @@ impl DaemonGate {
         }
     }
 }
+
+/// Toast with an "Undo" button. `on_undo` runs once if the button is pressed
+/// before the toast times out.
+pub fn undo_toast(
+    overlay: &adw::ToastOverlay,
+    text: &str,
+    seconds: u32,
+    on_undo: impl Fn() + 'static,
+) {
+    log::info!("ui: {text}");
+    let toast = adw::Toast::new(text);
+    toast.set_button_label(Some("Undo"));
+    toast.set_timeout(seconds);
+    toast.connect_button_clicked(move |t| {
+        on_undo();
+        t.dismiss();
+    });
+    overlay.add_toast(toast);
+}
