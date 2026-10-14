@@ -235,17 +235,9 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     } else {
         let co = undervolt::status();
         let is_root = unsafe { libc::geteuid() } == 0;
-        out.push(check(
-            "curve_optimizer",
-            co.available || !is_root,
-            if co.available {
-                format!("available ({})", co.reason)
-            } else if is_root {
-                format!("root probe failed: {}", co.reason)
-            } else {
-                format!("unavailable without root (expected): {}", co.reason)
-            },
-        ));
+        let (ok, detail) =
+            curve_optimizer_verdict(undervolt::applicability(), co.available, &co.reason, is_root);
+        out.push(check("curve_optimizer", ok, detail));
     }
 
     // cpufreq inputs + dynamic scaling policy check (bounds check against hardware capability).
@@ -360,6 +352,26 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
     out
 }
 
+/// Curve Optimizer self-check verdict. Only fails when it is applicable
+/// (validated AMD machine with ryzen_smu present) and the probe still broke.
+fn curve_optimizer_verdict(
+    applicable: Result<(), String>,
+    available: bool,
+    reason: &str,
+    is_root: bool,
+) -> (bool, String) {
+    if let Err(why) = applicable {
+        return (true, format!("not applicable / optional driver not installed: {why}"));
+    }
+    if available {
+        (true, format!("available ({reason})"))
+    } else if is_root {
+        (false, format!("root probe failed: {reason}"))
+    } else {
+        (true, format!("unavailable without root (expected): {reason}"))
+    }
+}
+
 // ═══ Machine fault detection (anomalies, distinct from pass/fail) ═════════
 
 /// Scan for active machine anomalies. Read-only; typical cost is one
@@ -405,18 +417,22 @@ pub fn scan_faults() -> Vec<Fault> {
     }
 
     // ── NVMe thermals ───────────────────────────────────────────────────
-    for t in &s.ssd_composite {
-        if *t >= 84.0 {
+    // Thresholds come from each drive's own tempN_max/tempN_crit (70/84 °C
+    // only when the drive reports none).
+    for r in sensors::nvme_readings() {
+        let t = r.temp;
+        let (warn, critical) = sensors::nvme_fault_thresholds(r.max, r.crit);
+        if t >= critical {
             out.push(fault(
                 "nvme_overheat",
                 Severity::Critical,
-                format!("NVMe at {t:.0}°C — approaching throttle/limit"),
+                format!("NVMe at {t:.0}°C — at its {critical:.0}°C limit"),
             ));
-        } else if *t >= 70.0 {
+        } else if t >= warn {
             out.push(fault(
                 "nvme_hot",
                 Severity::Warning,
-                format!("NVMe at {t:.0}°C"),
+                format!("NVMe at {t:.0}°C (warns from {warn:.0}°C)"),
             ));
         }
     }
@@ -813,13 +829,14 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
         .contains("AMD");
     if is_amd {
         let smu = std::path::Path::new("/sys/kernel/ryzen_smu_drv").exists();
+        // Optional driver: absence is not a failure.
         out.push(check(
             "ryzen_smu_module",
-            smu,
+            true,
             if smu {
                 "loaded".to_string()
             } else {
-                "not loaded (needed for Curve Optimizer only)".to_string()
+                "not installed (optional, Curve Optimizer only)".to_string()
             },
         ));
     } else {
@@ -833,4 +850,25 @@ pub fn run_deployment_checks() -> Vec<SelfCheck> {
     let passed = out.iter().filter(|c| c.ok).count();
     log::debug!("deployment checks: done — {passed}/{} passed", out.len());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::curve_optimizer_verdict as verdict;
+
+    #[test]
+    fn curve_optimizer_not_applicable_is_ok() {
+        let (ok, d) = verdict(Err("driver not loaded".into()), false, "x", true);
+        assert!(ok && d.contains("not applicable"), "{d}");
+        let (ok, _) = verdict(Err("codename 14 not validated".into()), false, "x", false);
+        assert!(ok);
+    }
+
+    #[test]
+    fn curve_optimizer_fails_only_when_applicable_and_broken() {
+        assert!(verdict(Ok(()), true, "ok", true).0);
+        assert!(!verdict(Ok(()), false, "smu read failed", true).0);
+        // Non-root cannot run the probe: expected, not a failure.
+        assert!(verdict(Ok(()), false, "needs root", false).0);
+    }
 }
