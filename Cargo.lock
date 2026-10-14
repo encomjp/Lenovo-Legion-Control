@@ -996,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "lenovo-legion-tool"
-version = "0.2.21"
+version = "0.2.22"
 dependencies = [
  "bincode",
  "chrono",
