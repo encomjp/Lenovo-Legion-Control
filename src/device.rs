@@ -738,6 +738,15 @@ fn pretty_fan_label(raw: &str, id: u8) -> String {
         "GPU fan".into()
     } else if lower.contains("aux") || lower.contains("system") || id == 4 {
         "Aux fan".into()
+    } else if lower
+        .strip_prefix("fan")
+        .is_some_and(|n| n.trim().parse::<u8>().is_ok())
+    {
+        // legion_hwmon "Fan 1"/"Fan 3" carry no role — use the id's title
+        // instead of "Fan 1 fan".
+        fan_title(id).into()
+    } else if lower.ends_with("fan") {
+        t.into()
     } else {
         format!("{t} fan")
     }
@@ -1160,6 +1169,11 @@ mod tests {
         assert_eq!(pretty_fan_label("System", 4), "Aux fan");
         assert_eq!(pretty_fan_label("", 2), "GPU fan");
         assert_eq!(pretty_fan_label("Chassis", 9), "Chassis fan");
+        // legion_hwmon labels (83F6): never "Fan 1 fan".
+        assert_eq!(pretty_fan_label("Fan 1", 1), "CPU fan");
+        assert_eq!(pretty_fan_label("Fan 2", 2), "GPU fan");
+        assert_eq!(pretty_fan_label("Fan 3", 3), "Fan 3");
+        assert_eq!(pretty_fan_label("Chassis Fan", 9), "Chassis Fan");
     }
 
     #[test]
