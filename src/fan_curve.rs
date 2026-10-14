@@ -529,7 +529,7 @@ pub fn status() -> FanCurveStatus {
 pub fn store(profile_name: &str, points: CurvePoints, enabled: bool) -> Result<(), String> {
     validate_profile_name(profile_name)?;
     validate(&points)?;
-    let known = profile::choices();
+    let known = profile::safe_choices();
     if !known.is_empty() && !known.iter().any(|c| c == profile_name) {
         return Err(format!(
             "profile '{profile_name}' not in choices: {}",

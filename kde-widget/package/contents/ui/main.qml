@@ -53,12 +53,22 @@ PlasmoidItem {
     readonly property string gpuDisplayName: compactHardwareName(gpuName, "GPU")
 
     // Power modes: label, legion-cli argument and accent colour.
-    readonly property var modes: [
+    readonly property var allModes: [
         { label: "Quiet",       cli: "quiet",       color: "#3A7BD5" },
         { label: "Balanced",    cli: "balanced",    color: "#C8102E" },
         { label: "Performance", cli: "performance", color: "#E0892B" },
         { label: "Max power",   cli: "max-power",   color: "#8E5BD6" }
     ]
+    // Modes this laptop offers, from `legion-cli profile --with-choices`
+    // (MODES line of the poller). Until it arrives, Max power stays hidden
+    // so it never shows on a model whose firmware does not offer it.
+    property var availableModes: []
+    readonly property var modes: allModes.filter(function (m) {
+        if (availableModes.length === 0) return m.cli !== "max-power"
+        for (var i = 0; i < availableModes.length; i++)
+            if (profileKeyOf(availableModes[i]) === m.cli) return true
+        return false
+    })
     readonly property string profileKey: profileKeyOf(profile)
     readonly property int modeIndex: {
         for (var i = 0; i < modes.length; i++)
@@ -541,6 +551,7 @@ PlasmoidItem {
                     case "CHARGE_LIMIT":if(!writeGuard)root.chargeLimit=val==="100"?"":val;break;
                     case "BAT_POWER":root.batWatts=val;break;
                     case "PROFILE":if(!writeGuard)root.profile=val;break;
+                    case "MODES":{var ms=val.split(/\s+/).filter(function(x){return x!==""}); if(ms.join(" ")!==root.availableModes.join(" "))root.availableModes=ms;break;}
                     case "KBD_LEVEL":if(!writeGuard)root.kbdLevel=val;break;
                 }
             }

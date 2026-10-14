@@ -161,7 +161,11 @@ enum Commands {
     /// Monitor sensors live (2s refresh)
     Watch,
     /// Show current platform profile
-    Profile,
+    Profile {
+        /// Also print the modes this laptop offers ("choices: a b c")
+        #[arg(long)]
+        with_choices: bool,
+    },
     /// Set platform profile
     SetProfile {
         /// Profile name: quiet/low-power, balanced, performance, max-power, custom
@@ -466,8 +470,15 @@ fn main() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }
         }
-        Commands::Profile => match send_command(DaemonCommand::GetProfile) {
-            Ok(DaemonResponse::Profile(p)) => println!("{}", friendly_profile(&p)),
+        Commands::Profile { with_choices } => match send_command(DaemonCommand::GetProfile) {
+            Ok(DaemonResponse::Profile(p)) => {
+                println!("{}", friendly_profile(&p));
+                if with_choices {
+                    // Same list the GUI and tray offer (firmware choices
+                    // minus modes withheld on this machine).
+                    println!("choices: {}", legion_core::profile::safe_choices().join(" "));
+                }
+            }
             Ok(DaemonResponse::Error(e)) => fail(e),
             Err(e) => fail(e),
             _ => fail("unexpected response from service"),
@@ -476,6 +487,13 @@ fn main() {
             let name = normalize_profile(&name);
             if let Some(why) = legion_core::profile::blocked_reason(&name) {
                 fail(format!("refusing to set '{name}': {why}"));
+            }
+            let available = legion_core::profile::safe_choices();
+            if !available.is_empty() && !available.contains(&name) {
+                usage_fail(format!(
+                    "'{name}' is not available on this laptop. Available modes: {}",
+                    available.join(", ")
+                ));
             }
             if name == "max-power" {
                 eprintln!(
@@ -1578,7 +1596,7 @@ fn cmd_label(cmd: &Commands) -> String {
     match cmd {
         Commands::Status => "status".into(),
         Commands::Watch => "watch".into(),
-        Commands::Profile => "profile".into(),
+        Commands::Profile { with_choices } => format!("profile with_choices={with_choices}"),
         Commands::SetProfile { name } => format!("set-profile name={name}"),
         Commands::Fan => "fan".into(),
         Commands::SetFan { fan, rpm } => format!("set-fan fan={fan} rpm={rpm}"),

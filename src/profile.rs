@@ -138,6 +138,43 @@ const DANGEROUS_PROFILES: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// DMI `product_version` values whose firmware has a broken max-power
+/// entry. Mirrors `fwbug_list` in the upstream kernel
+/// (drivers/platform/x86/lenovo/wmi-gamezone.c, matched on sys_vendor
+/// "LENOVO" plus product_version), which drops max-power from
+/// platform_profile_choices on these machines. Kept here so older kernels
+/// and out-of-tree drivers that still list it get the same treatment.
+const MAX_POWER_BROKEN_PRODUCTS: &[&str] = &[
+    "Legion Go 8APU1",
+    "Legion Go S 8APU1",
+    "Legion Go S 8ARP1",
+    "Legion Go 8ASP2",
+    "Legion Go 8AHP2",
+];
+
+const MAX_POWER_BROKEN_REASON: &str =
+    "the firmware on this model has a broken Max power entry (same list as the kernel)";
+
+/// Pure: true when `(sys_vendor, product_version)` is on the kernel's
+/// broken-max-power list. Exact match like the kernel's DMI_MATCH on a full
+/// string, but tolerant of surrounding whitespace and vendor case.
+pub fn max_power_broken_for(sys_vendor: &str, product_version: &str) -> bool {
+    sys_vendor.trim().eq_ignore_ascii_case("LENOVO")
+        && MAX_POWER_BROKEN_PRODUCTS
+            .iter()
+            .any(|p| *p == product_version.trim())
+}
+
+/// This machine is on the kernel's broken-max-power list.
+pub fn max_power_broken() -> bool {
+    let read = |f: &str| {
+        fs::read_to_string(format!("/sys/class/dmi/id/{f}"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    max_power_broken_for(&read("sys_vendor"), &read("product_version"))
+}
+
 /// Why writing `profile` is blocked on a machine with this BIOS version.
 /// Pure so the deny-list is unit-testable without sysfs.
 pub fn blocked_reason_for(bios_version: &str, profile: &str) -> Option<&'static str> {
@@ -148,33 +185,53 @@ pub fn blocked_reason_for(bios_version: &str, profile: &str) -> Option<&'static 
         .map(|(_, _, why)| *why)
 }
 
+/// Pure: every reason a mode is withheld (BIOS deny-list, then the DMI
+/// broken-max-power list).
+pub fn withheld_reason(
+    bios_version: &str,
+    max_power_broken: bool,
+    profile: &str,
+) -> Option<&'static str> {
+    blocked_reason_for(bios_version, profile)
+        .or_else(|| (max_power_broken && profile.trim() == "max-power").then_some(MAX_POWER_BROKEN_REASON))
+}
+
+/// Pure: the firmware's choices minus every withheld mode, order kept.
+pub fn filter_choices(choices: &[String], bios_version: &str, max_power_broken: bool) -> Vec<String> {
+    choices
+        .iter()
+        .filter(|c| withheld_reason(bios_version, max_power_broken, c).is_none())
+        .cloned()
+        .collect()
+}
+
 fn dmi_bios_version() -> String {
     fs::read_to_string("/sys/class/dmi/id/bios_version")
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }
 
-/// Why `profile` must not be written on this machine, if it is on the deny-list.
+/// Why `profile` must not be written on this machine, if it is withheld.
 pub fn blocked_reason(profile: &str) -> Option<&'static str> {
-    blocked_reason_for(&dmi_bios_version(), profile)
+    withheld_reason(&dmi_bios_version(), max_power_broken(), profile)
 }
 
-/// Platform profile choices minus the ones known to be dangerous here.
-/// GUI and CLI present this list; `set` enforces it.
+/// THE list of power modes the app offers: the firmware's
+/// `platform_profile_choices` minus the modes withheld on this machine.
+/// GUI (Home, Cooling, Profiles, automatic switching), tray, CLI and the
+/// widget (through `legion-cli profile --with-choices`) all use this; `set`
+/// enforces it. Never hard-code a mode list instead.
 pub fn safe_choices() -> Vec<String> {
-    let bios = dmi_bios_version();
-    choices()
-        .into_iter()
-        .filter(|c| blocked_reason_for(&bios, c).is_none())
-        .collect()
+    filter_choices(&choices(), &dmi_bios_version(), max_power_broken())
 }
 
 /// `(profile, reason)` for every advertised choice that is blocked here.
 pub fn blocked_choices() -> Vec<(String, &'static str)> {
     let bios = dmi_bios_version();
+    let broken = max_power_broken();
     choices()
         .into_iter()
-        .filter_map(|c| blocked_reason_for(&bios, &c).map(|why| (c, why)))
+        .filter_map(|c| withheld_reason(&bios, broken, &c).map(|why| (c, why)))
         .collect()
 }
 
@@ -224,8 +281,22 @@ pub fn set(profile: &str) -> Result<(), String> {
     write_profile(Path::new(LEGACY_PROFILE), name)
 }
 
+/// When this process last wrote a power mode (see [`since_last_set`]).
+static LAST_SET: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Time since this process last changed the power mode, `None` if never.
+/// The firmware may drop writes made right after a mode change, so power
+/// limit writes wait until this is at least 500 ms.
+pub fn since_last_set() -> Option<std::time::Duration> {
+    LAST_SET
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .map(|t| t.elapsed())
+}
+
 fn write_profile(path: &Path, name: &str) -> Result<(), String> {
     log::info!("profile → {name} via {}", path.display());
+    *LAST_SET.lock().unwrap_or_else(|p| p.into_inner()) = Some(std::time::Instant::now());
     fs::write(path, format!("{name}\n")).map_err(|e| {
         let ctx = format!(
             "profile::set '{name}' failed on {}: {e} (kind={:?}, raw={})",
@@ -501,6 +572,49 @@ mod tests {
         // Unrelated machines and unreadable DMI are never blocked.
         assert!(blocked_reason_for("SMCN20WW", "custom").is_none());
         assert!(blocked_reason_for("", "custom").is_none());
+    }
+
+    #[test]
+    fn max_power_broken_mirrors_kernel_dmi_list() {
+        for p in [
+            "Legion Go 8APU1",
+            "Legion Go S 8APU1",
+            "Legion Go S 8ARP1",
+            "Legion Go 8ASP2",
+            "Legion Go 8AHP2",
+        ] {
+            assert!(max_power_broken_for("LENOVO", p), "{p}");
+            assert!(max_power_broken_for("lenovo\n", &format!("{p}\n")), "{p} trimmed");
+        }
+        // Vendor must match, product must match exactly.
+        assert!(!max_power_broken_for("ASUS", "Legion Go 8APU1"));
+        assert!(!max_power_broken_for("LENOVO", "Legion Pro 7 16AFR10H"));
+        assert!(!max_power_broken_for("LENOVO", "Legion Go"));
+        assert!(!max_power_broken_for("", ""));
+    }
+
+    #[test]
+    fn filter_choices_drops_withheld_modes_only() {
+        let all: Vec<String> = ["low-power", "balanced", "performance", "max-power", "custom"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // This machine (83RU, SMCN): nothing withheld.
+        assert_eq!(filter_choices(&all, "SMCN20WW", false), all);
+        // Broken max-power entry: only max-power goes, order kept.
+        assert_eq!(
+            filter_choices(&all, "SMCN20WW", true),
+            vec!["low-power", "balanced", "performance", "custom"]
+        );
+        // BIOS deny-list still applies on top.
+        assert_eq!(
+            filter_choices(&all, "Q7CN34WW", true),
+            vec!["low-power", "balanced", "performance"]
+        );
+        assert!(withheld_reason("", true, "max-power").is_some());
+        assert!(withheld_reason("", true, "performance").is_none());
+        // Empty choices stay empty (caller falls back).
+        assert!(filter_choices(&[], "", true).is_empty());
     }
 
     #[test]
