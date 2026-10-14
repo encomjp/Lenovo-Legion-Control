@@ -12,7 +12,9 @@
 //! [`run_deployment_checks`] validates install state: user group membership,
 //! daemon unit enabled, udev rule applied, socket permissions, binary path.
 
-use crate::{battery, comms, config, device, fans, keyboard, profile, sensors, thermal, undervolt};
+use crate::{
+    battery, comms, config, device, fans, ideapad, keyboard, profile, sensors, thermal, undervolt,
+};
 use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -206,6 +208,21 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             true,
             "not exposed (physical shutter or no ideapad attr)",
         )),
+    }
+
+    for (name, toggle) in [
+        ("fn_lock", ideapad::Toggle::FnLock),
+        ("usb_charging", ideapad::Toggle::UsbCharging),
+    ] {
+        out.push(check(
+            name,
+            true,
+            match ideapad::get(toggle) {
+                Some(true) => "on (ideapad attr)",
+                Some(false) => "off (ideapad attr)",
+                None => "not exposed (optional)",
+            },
+        ));
     }
 
     // Platform profile.
