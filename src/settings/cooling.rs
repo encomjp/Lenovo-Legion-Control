@@ -209,7 +209,7 @@ pub(crate) fn fan_card(
         return group;
     }
 
-    let auto = legion_core::fans::read_target(fan).unwrap_or(0) == 0;
+    let auto = legion_core::fans::display_target(fan) == 0;
     let sw = adw::SwitchRow::builder()
         .title(if auto { "Automatic" } else { "Manual" })
         .active(auto)
@@ -237,7 +237,7 @@ pub(crate) fn fan_card(
             "Target RPM for {title} · enabled only in Manual · about {min_rpm:.0}–{max_rpm:.0}"
         ),
     );
-    let cur = legion_core::fans::read_target(fan).unwrap_or(0);
+    let cur = legion_core::fans::display_target(fan);
     if cur > 0 {
         scale.set_value(cur as f64);
         scale.set_sensitive(true);

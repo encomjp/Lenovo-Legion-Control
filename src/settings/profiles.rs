@@ -228,7 +228,8 @@ pub(crate) fn build_profiles_page(
         for fan in legion_core::fans::slot_ids() {
             legion_core::config::remember_fan(
                 fan,
-                legion_core::fans::read_target(fan).unwrap_or(0),
+                // Out-of-range firmware targets save as auto, not max.
+                legion_core::fans::display_target(fan),
             );
         }
         legion_core::config::save_named_profile(&name);

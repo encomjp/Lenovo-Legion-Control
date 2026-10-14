@@ -728,6 +728,7 @@ pub(crate) fn set_fan_metrics_from_sensors(
                 legion_core::fans::read_target(*id).unwrap_or(0),
             ),
         };
+        let target = legion_core::fans::effective_target(target, legion_core::fans::read_max(*id));
         set_fan_metric(value, detail, rpm, target);
         if estimated && rpm > 0 {
             // Unverified EC-fallback layout — don't present it as a real tach.
