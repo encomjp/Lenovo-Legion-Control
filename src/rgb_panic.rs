@@ -272,6 +272,14 @@ pub fn diagnose() -> Diagnosis {
     }
 }
 
+const NEEDS_ROOT_MSG: &str = "USB reset / permission repair needs root and was skipped — \
+restart or update the legion-control daemon (sudo systemctl restart legion-control) and retry";
+
+fn is_root() -> bool {
+    // SAFETY: geteuid() is a pure POSIX syscall with no memory safety requirements.
+    unsafe { libc::geteuid() == 0 }
+}
+
 /// Soft → hard recovery ladder. Safe to call from GUI / CLI / daemon watchdog.
 pub fn troubleshoot() -> FixReport {
     let mut steps = Vec::new();
@@ -306,7 +314,10 @@ pub fn troubleshoot() -> FixReport {
     // 1) Permissions — target state is udev 0660 + uaccess, not world-writable.
     if let Some(path) = &before.device_path {
         if let Some(mode) = before.permission_mode {
-            if mode & 0o060 != 0o060 {
+            if mode & 0o060 != 0o060 && !is_root() {
+                log::info!("rgb-panic: ladder 1/5 permissions skipped — not root");
+                errors.push(NEEDS_ROOT_MSG.into());
+            } else if mode & 0o060 != 0o060 {
                 log::info!(
                     "rgb-panic: ladder 1/5 permissions: mode {mode:04o} lacks group rw — fixing"
                 );
@@ -424,6 +435,13 @@ fn hardware_kick(
     relight_label: &str,
     rebind_sleep: Duration,
 ) {
+    if !is_root() {
+        log::info!("rgb-panic: USB reset skipped — not root");
+        if !errors.iter().any(|e| e == NEEDS_ROOT_MSG) {
+            errors.push(NEEDS_ROOT_MSG.into());
+        }
+        return;
+    }
     log::info!("rgb-panic: USB reset on {}", usb.display());
     match usb_reset(usb) {
         Ok(()) => {
