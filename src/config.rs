@@ -218,6 +218,51 @@ pub struct AppConfig {
     /// Legacy 4-zone RGB keyboard state (experimental write path).
     #[serde(default)]
     pub four_zone: FourZoneConfig,
+    /// Automatic power-mode switching (AC / battery / per-app). The root
+    /// service acts on ITS copy (pushed over IPC with `SetAutoMode`).
+    #[serde(default)]
+    pub auto_mode: AutoModeConfig,
+    /// Show a small on-screen popup when the power mode changes (tray).
+    #[serde(default = "default_true")]
+    pub osd_mode_change: bool,
+}
+
+/// One per-app rule: while a process whose `comm` matches `process` runs,
+/// the power mode is `mode` (a platform_profile name).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AppRule {
+    pub process: String,
+    pub mode: String,
+}
+
+/// Automatic power-mode switching. Off by default; every field has a serde
+/// default so configs written before this existed still load unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoModeConfig {
+    pub enabled: bool,
+    /// Mode applied when the charger is plugged in (any available mode).
+    pub ac_mode: String,
+    /// Mode applied on battery (`low-power`, `balanced`, or `performance`
+    /// when the firmware lists it; see `profile::auto::battery_choices`).
+    pub battery_mode: String,
+    /// Per-app rules, first match wins.
+    pub app_rules: Vec<AppRule>,
+    /// Per-app rules also apply on battery (default: plugged in only).
+    pub apps_on_battery: bool,
+}
+
+impl Default for AutoModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ac_mode: "balanced".into(),
+            battery_mode: "low-power".into(),
+            app_rules: Vec::new(),
+            apps_on_battery: false,
+        }
+    }
 }
 
 /// Persisted 4-zone keyboard state (`crate::fourzone`). Names, not codes,
@@ -398,6 +443,8 @@ impl Default for AppConfig {
             fan_curves: Default::default(),
             diagnostics: DiagnosticsConfig::default(),
             four_zone: FourZoneConfig::default(),
+            auto_mode: AutoModeConfig::default(),
+            osd_mode_change: true,
         }
     }
 }
@@ -1100,6 +1147,48 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
             None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
         }
+    }
+
+    #[test]
+    fn auto_mode_config_roundtrip_and_old_configs_load() {
+        // A config written before auto switching existed: no auto_mode /
+        // osd_mode_change keys at all.
+        let mut old = serde_json::to_value(AppConfig::default()).unwrap();
+        let obj = old.as_object_mut().unwrap();
+        obj.remove("auto_mode");
+        obj.remove("osd_mode_change");
+        let parsed: AppConfig = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.auto_mode, AutoModeConfig::default());
+        assert!(!parsed.auto_mode.enabled, "off by default");
+        assert!(parsed.osd_mode_change, "popup on by default");
+
+        // Partial auto_mode object: missing fields take defaults.
+        let partial: AutoModeConfig =
+            serde_json::from_str(r#"{"enabled":true,"ac_mode":"performance"}"#).unwrap();
+        assert!(partial.enabled);
+        assert_eq!(partial.ac_mode, "performance");
+        assert_eq!(partial.battery_mode, "low-power");
+        assert!(partial.app_rules.is_empty());
+
+        // Full round trip.
+        let cfg = AppConfig {
+            osd_mode_change: false,
+            auto_mode: AutoModeConfig {
+                enabled: true,
+                ac_mode: "performance".into(),
+                battery_mode: "balanced".into(),
+                app_rules: vec![AppRule {
+                    process: "steam".into(),
+                    mode: "performance".into(),
+                }],
+                apps_on_battery: true,
+            },
+            ..Default::default()
+        };
+        let back: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.auto_mode, cfg.auto_mode);
+        assert!(!back.osd_mode_change);
     }
 
     #[test]

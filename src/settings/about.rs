@@ -1067,6 +1067,7 @@ pub(crate) fn build_about_pages(
     });
     startup.add(&restore_sw);
     setup_page.append(&startup);
+    setup_page.append(&build_power_mode_section(toast_overlay));
     setup_page.append(&build_components_section(toast_overlay));
     let more_setup = gtk::Expander::new(Some("More options"));
     more_setup.add_css_class("section-expander");
@@ -1529,4 +1530,336 @@ pub(crate) fn amp_short_help(health: legion_core::audio::Health) -> &'static str
             "No AW88399 smart amp on this model, Gen10 Pro 7 only. Feature will be removed once kernel 7.3 ships."
         }
     }
+}
+
+// ───────────────────── Power mode: automatic switching ─────────────────────
+
+/// The chart widget lives in its own file; declared here (a module this
+/// change owns) and re-exported to the crate through `use about::*`.
+#[path = "history.rs"]
+pub(crate) mod history;
+
+use legion_core::config::{AppRule, AutoModeConfig};
+
+struct RuleRow {
+    row: adw::EntryRow,
+    mode: gtk::DropDown,
+}
+
+struct AutoUi {
+    overlay: adw::ToastOverlay,
+    /// Every mode (plugged in and app rules).
+    choices: Vec<String>,
+    /// Modes offered on battery.
+    bat_choices: Vec<String>,
+    main: adw::ExpanderRow,
+    ac: adw::ComboRow,
+    bat: adw::ComboRow,
+    apps: adw::ExpanderRow,
+    apps_on_battery: adw::SwitchRow,
+    rules: RefCell<Vec<RuleRow>>,
+    /// Programmatic updates in progress: do not save.
+    loading: Cell<bool>,
+    pending: RefCell<Option<glib::SourceId>>,
+}
+
+fn mode_labels(modes: &[String]) -> Vec<String> {
+    modes.iter().map(|m| friendly_profile(m)).collect()
+}
+
+fn mode_index(modes: &[String], m: &str) -> u32 {
+    modes.iter().position(|c| c == m).unwrap_or(0) as u32
+}
+
+const BATTERY_PERF_NOTE: &str = "The laptop may limit Performance on battery";
+
+impl AutoUi {
+    fn collect(&self) -> AutoModeConfig {
+        let pick = |modes: &[String], i: u32| modes.get(i as usize).cloned().unwrap_or_default();
+        AutoModeConfig {
+            enabled: self.main.enables_expansion(),
+            ac_mode: pick(&self.choices, self.ac.selected()),
+            battery_mode: pick(&self.bat_choices, self.bat.selected()),
+            app_rules: self
+                .rules
+                .borrow()
+                .iter()
+                .filter(|r| !r.row.text().trim().is_empty())
+                .map(|r| AppRule {
+                    process: r.row.text().trim().to_string(),
+                    mode: pick(&self.choices, r.mode.selected()),
+                })
+                .collect(),
+            apps_on_battery: self.apps_on_battery.is_active(),
+        }
+    }
+
+    fn update_bat_note(&self) {
+        let perf = self.bat_choices.get(self.bat.selected() as usize).map(String::as_str)
+            == Some("performance");
+        self.bat.set_subtitle(if perf { BATTERY_PERF_NOTE } else { "" });
+    }
+
+    fn update_apps_subtitle(&self) {
+        let n = self.rules.borrow().len();
+        self.apps.set_subtitle(&match n {
+            0 => "Use a mode while an app runs".to_string(),
+            1 => "1 app".to_string(),
+            n => format!("{n} apps"),
+        });
+    }
+
+    fn add_rule(self: &Rc<Self>, rule: &AppRule) {
+        let row = adw::EntryRow::builder().title("App name").text(&rule.process).build();
+        tip(&row, "Process name, for example steam");
+        let labels = mode_labels(&self.choices);
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let mode = gtk::DropDown::from_strings(&label_refs);
+        mode.set_valign(Align::Center);
+        mode.set_selected(mode_index(&self.choices, &rule.mode));
+        let remove = icon_button("user-trash-symbolic", "Remove rule");
+        row.add_suffix(&mode);
+        row.add_suffix(&remove);
+        self.apps.add_row(&row);
+        self.rules.borrow_mut().push(RuleRow {
+            row: row.clone(),
+            mode: mode.clone(),
+        });
+        let ui = Rc::downgrade(self);
+        row.connect_changed(move |_| {
+            if let Some(ui) = ui.upgrade() {
+                ui.save_soon();
+            }
+        });
+        let ui = Rc::downgrade(self);
+        mode.connect_selected_notify(move |_| {
+            if let Some(ui) = ui.upgrade() {
+                ui.save_soon();
+            }
+        });
+        let ui = Rc::downgrade(self);
+        let row_c = row.clone();
+        remove.connect_clicked(move |_| {
+            if let Some(ui) = ui.upgrade() {
+                ui.apps.remove(&row_c);
+                ui.rules.borrow_mut().retain(|r| r.row != row_c);
+                ui.update_apps_subtitle();
+                ui.save_soon();
+            }
+        });
+        self.update_apps_subtitle();
+    }
+
+    fn load(self: &Rc<Self>, cfg: &AutoModeConfig) {
+        self.loading.set(true);
+        self.main.set_enable_expansion(cfg.enabled);
+        self.ac.set_selected(mode_index(&self.choices, &cfg.ac_mode));
+        self.bat.set_selected(mode_index(&self.bat_choices, &cfg.battery_mode));
+        self.apps_on_battery.set_active(cfg.apps_on_battery);
+        for r in self.rules.borrow_mut().drain(..) {
+            self.apps.remove(&r.row);
+        }
+        for r in &cfg.app_rules {
+            self.add_rule(r);
+        }
+        self.update_bat_note();
+        self.update_apps_subtitle();
+        self.loading.set(false);
+    }
+
+    /// Debounced push to the service (typing a process name).
+    fn save_soon(self: &Rc<Self>) {
+        if self.loading.get() {
+            return;
+        }
+        if let Some(id) = self.pending.borrow_mut().take() {
+            id.remove();
+        }
+        let ui = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(Duration::from_millis(600), move || {
+            if let Some(ui) = ui.upgrade() {
+                ui.pending.borrow_mut().take();
+                ui.save_now();
+            }
+        });
+        self.pending.replace(Some(id));
+    }
+
+    fn save_now(self: &Rc<Self>) {
+        let cfg = self.collect();
+        let overlay = self.overlay.clone();
+        dispatch_async(
+            move || match send_command(DaemonCommand::SetAutoMode(cfg)) {
+                Ok(DaemonResponse::AutoMode(_)) => Ok(()),
+                Ok(DaemonResponse::Error(e)) => Err(e),
+                Ok(_) => Err("Update the background service to use automatic switching".into()),
+                Err(e) => Err(e),
+            },
+            "Saving automatic switching stopped without a result",
+            move |res| {
+                if let Err(e) = res {
+                    toast_error(&overlay, &e);
+                }
+            },
+        );
+    }
+}
+
+/// "Power mode" group: automatic switching (stored by the service, so it
+/// works while this window is closed) and the mode-change popup.
+pub(crate) fn build_power_mode_section(toast_overlay: &adw::ToastOverlay) -> adw::PreferencesGroup {
+    let group = pref_group("Power mode", None);
+    let mut choices = legion_core::profile::safe_choices();
+    if choices.is_empty() {
+        choices = ["low-power", "balanced", "performance"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    }
+    let bat_choices = legion_core::profile::auto::battery_choices(&choices);
+
+    let main = adw::ExpanderRow::builder()
+        .title("Switch automatically")
+        .subtitle("Pick a mode for plugged in, on battery and for apps")
+        .show_enable_switch(true)
+        .enable_expansion(false)
+        .build();
+    let ac_labels = mode_labels(&choices);
+    let ac_refs: Vec<&str> = ac_labels.iter().map(String::as_str).collect();
+    let ac = string_combo_row("Plugged in", "", &ac_refs, 0);
+    let bat_labels = mode_labels(&bat_choices);
+    let bat_refs: Vec<&str> = bat_labels.iter().map(String::as_str).collect();
+    let bat = string_combo_row("On battery", "", &bat_refs, 0);
+    let apps = adw::ExpanderRow::builder().title("App rules").build();
+    let add = secondary_button_tip("Add rule", Some("Use a mode while an app runs"));
+    apps.add_suffix(&add);
+    let apps_on_battery = adw::SwitchRow::builder()
+        .title("Also on battery")
+        .build();
+    tip(&apps_on_battery, "Off: app rules apply only while plugged in");
+    apps.add_row(&apps_on_battery);
+    main.add_row(&ac);
+    main.add_row(&bat);
+    main.add_row(&apps);
+    group.add(&main);
+
+    let ui = Rc::new(AutoUi {
+        overlay: toast_overlay.clone(),
+        choices,
+        bat_choices,
+        main: main.clone(),
+        ac: ac.clone(),
+        bat: bat.clone(),
+        apps: apps.clone(),
+        apps_on_battery: apps_on_battery.clone(),
+        rules: RefCell::new(Vec::new()),
+        loading: Cell::new(true),
+        pending: RefCell::new(None),
+    });
+    ui.update_apps_subtitle();
+    // Greyed out until the service answers with its stored settings.
+    main.set_sensitive(false);
+    if std::env::var_os("LEGION_AUTO_DEMO").is_some() {
+        // Screenshot aid: sample rules without the service; never saved.
+        ui.load(&AutoModeConfig {
+            enabled: true,
+            ac_mode: "performance".into(),
+            battery_mode: "performance".into(),
+            app_rules: vec![AppRule {
+                process: "steam".into(),
+                mode: "performance".into(),
+            }],
+            apps_on_battery: false,
+        });
+        ui.loading.set(true);
+        main.set_sensitive(true);
+        main.set_expanded(true);
+        apps.set_expanded(true);
+        let ui_c = ui.clone();
+        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+            if let Some(r) = ui_c.rules.borrow().last() {
+                r.row.grab_focus();
+            }
+        });
+    } else {
+        let ui_c = ui.clone();
+        dispatch_async(
+            || match send_command(DaemonCommand::GetAutoMode) {
+                Ok(DaemonResponse::AutoMode(st)) => Ok(st.config),
+                Ok(DaemonResponse::Error(e)) => Err(e),
+                Ok(_) => Err("unexpected reply".into()),
+                Err(e) => Err(e),
+            },
+            "Reading automatic switching stopped without a result",
+            move |res| match res {
+                Ok(cfg) => {
+                    ui_c.load(&cfg);
+                    ui_c.main.set_sensitive(true);
+                }
+                Err(e) => {
+                    log::info!("auto-mode settings unavailable: {e}");
+                    ui_c.main.set_subtitle("Needs the latest background service");
+                    ui_c.loading.set(false);
+                }
+            },
+        );
+    }
+
+    let save = {
+        let ui = Rc::downgrade(&ui);
+        move || {
+            if let Some(ui) = ui.upgrade() {
+                ui.save_soon();
+            }
+        }
+    };
+    {
+        let save = save.clone();
+        main.connect_enable_expansion_notify(move |_| save());
+    }
+    {
+        let save = save.clone();
+        ac.connect_selected_notify(move |_| save());
+    }
+    {
+        let save = save.clone();
+        let ui_w = Rc::downgrade(&ui);
+        bat.connect_selected_notify(move |_| {
+            if let Some(ui) = ui_w.upgrade() {
+                ui.update_bat_note();
+            }
+            save();
+        });
+    }
+    {
+        let save = save.clone();
+        apps_on_battery.connect_active_notify(move |_| save());
+    }
+    {
+        let ui_w = Rc::downgrade(&ui);
+        add.connect_clicked(move |_| {
+            if let Some(ui) = ui_w.upgrade() {
+                ui.add_rule(&AppRule {
+                    process: String::new(),
+                    mode: "performance".into(),
+                });
+                ui.apps.set_expanded(true);
+                if let Some(last) = ui.rules.borrow().last() {
+                    last.row.grab_focus();
+                }
+            }
+        });
+    }
+
+    let popup = adw::SwitchRow::builder()
+        .title("Show a popup when the power mode changes")
+        .active(legion_core::config::get().osd_mode_change)
+        .build();
+    popup.connect_active_notify(|row| {
+        let on = row.is_active();
+        legion_core::config::update(|c| c.osd_mode_change = on);
+    });
+    group.add(&popup);
+    crate::tray::track_window_focus();
+    group
 }

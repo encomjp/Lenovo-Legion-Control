@@ -324,6 +324,25 @@ enum Commands {
         #[arg(long, requires = "apply")]
         allow_downgrade: bool,
     },
+    /// Automatic power-mode switching: status | on | off | ac <mode> | battery <mode>
+    AutoMode {
+        #[command(subcommand)]
+        action: Option<AutoModeCmd>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AutoModeCmd {
+    /// Show the stored rules and the live charger state (default)
+    Status,
+    /// Turn automatic switching on
+    On,
+    /// Turn automatic switching off
+    Off,
+    /// Mode while plugged in (quiet, balanced, performance, max-power, custom)
+    Ac { mode: String },
+    /// Mode on battery (quiet, balanced, or performance when supported)
+    Battery { mode: String },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -1179,6 +1198,7 @@ fn main() {
             mode,
             yes_i_understand,
         } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
+        Commands::AutoMode { action } => auto_mode_cmd(action.unwrap_or(AutoModeCmd::Status)),
         Commands::CheckUpdate {
             apply,
             allow_downgrade,
@@ -1619,6 +1639,77 @@ fn cmd_label(cmd: &Commands) -> String {
             apply,
             allow_downgrade,
         } => format!("check-update apply={apply} allow_downgrade={allow_downgrade}"),
+        Commands::AutoMode { action } => match action {
+            None | Some(AutoModeCmd::Status) => "auto-mode status".into(),
+            Some(AutoModeCmd::On) => "auto-mode on".into(),
+            Some(AutoModeCmd::Off) => "auto-mode off".into(),
+            Some(AutoModeCmd::Ac { mode }) => format!("auto-mode ac {mode}"),
+            Some(AutoModeCmd::Battery { mode }) => format!("auto-mode battery {mode}"),
+        },
+    }
+}
+
+fn auto_mode_status() -> legion_core::profile::auto::AutoModeStatus {
+    match send_command(DaemonCommand::GetAutoMode) {
+        Ok(DaemonResponse::AutoMode(s)) => s,
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("the running service is too old for auto-mode: update it"),
+    }
+}
+
+fn print_auto_mode(st: &legion_core::profile::auto::AutoModeStatus) {
+    let c = &st.config;
+    println!("automatic switching: {}", if c.enabled { "on" } else { "off" });
+    println!("plugged in : {}", friendly_profile(&c.ac_mode));
+    println!("on battery : {}", friendly_profile(&c.battery_mode));
+    let power = match st.on_ac {
+        Some(true) => "plugged in",
+        Some(false) => "on battery",
+        None => "unknown",
+    };
+    println!("power now  : {power}");
+    if c.app_rules.is_empty() {
+        println!("app rules  : none");
+    } else {
+        let scope = if c.apps_on_battery { "always" } else { "plugged in only" };
+        println!("app rules  : ({scope})");
+        for r in &c.app_rules {
+            let live = if st.active_app.as_deref() == Some(r.process.as_str()) {
+                "  (running)"
+            } else {
+                ""
+            };
+            println!("  {} → {}{live}", r.process, friendly_profile(&r.mode));
+        }
+    }
+}
+
+fn auto_mode_cmd(action: AutoModeCmd) {
+    let mut cfg = match action {
+        AutoModeCmd::Status => return print_auto_mode(&auto_mode_status()),
+        _ => auto_mode_status().config,
+    };
+    match action {
+        AutoModeCmd::Status => unreachable!(),
+        AutoModeCmd::On => cfg.enabled = true,
+        AutoModeCmd::Off => cfg.enabled = false,
+        AutoModeCmd::Ac { mode } => cfg.ac_mode = normalize_profile(&mode),
+        AutoModeCmd::Battery { mode } => {
+            let mode = normalize_profile(&mode);
+            let ok = legion_core::profile::auto::battery_choices(&legion_core::profile::safe_choices());
+            if !ok.contains(&mode) {
+                usage_fail(format!(
+                    "'{mode}' is not available on battery (choose: {})",
+                    ok.join(", ")
+                ));
+            }
+            cfg.battery_mode = mode;
+        }
+    }
+    match send_command(DaemonCommand::SetAutoMode(cfg)) {
+        Ok(DaemonResponse::AutoMode(st)) => print_auto_mode(&st),
+        Ok(DaemonResponse::Error(e)) | Err(e) => fail(e),
+        _ => fail("the running service is too old for auto-mode: update it"),
     }
 }
 

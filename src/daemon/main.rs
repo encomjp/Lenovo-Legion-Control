@@ -14,6 +14,8 @@ use legion_core::{
     sensors, thermal, undervolt,
 };
 
+mod services;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -487,6 +489,22 @@ fn main() {
             log::error!("failed to start telemetry-push thread: {e}");
         } else {
             log::info!("telemetry-push thread started");
+        }
+    }
+
+    // Automatic power-mode switching (AC / battery / per-app) and the
+    // 1-hour temperature history: both run while the GUI is closed.
+    for (name, worker) in [
+        ("auto-mode", services::auto_mode_worker as fn(Arc<AtomicBool>)),
+        ("temp-history", services::temp_history_worker),
+    ] {
+        let sd = shutdown.clone();
+        match std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || worker(sd))
+        {
+            Ok(_) => log::info!("{name} thread started"),
+            Err(e) => log::error!("failed to start {name} thread: {e}"),
         }
     }
 
@@ -1248,6 +1266,18 @@ fn process_command(
             Ok(st) => DaemonResponse::GpuMode(st),
             Err(e) => DaemonResponse::Error(e),
         },
+        DaemonCommand::GetAutoMode => DaemonResponse::AutoMode(services::auto_status()),
+        DaemonCommand::SetAutoMode(cfg) => {
+            match profile::auto::validate(&cfg, &profile::safe_choices()) {
+                Ok(()) => {
+                    // The auto-mode worker re-reads the config every tick.
+                    config::update(|c| c.auto_mode = cfg);
+                    DaemonResponse::AutoMode(services::auto_status())
+                }
+                Err(e) => DaemonResponse::Error(e),
+            }
+        }
+        DaemonCommand::GetTempHistory => DaemonResponse::TempHistory(services::history()),
     };
 
     let elapsed = t0.elapsed().as_millis() as u64;

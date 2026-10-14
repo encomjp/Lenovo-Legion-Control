@@ -12,6 +12,7 @@ use ksni::menu::*;
 use ksni::Tray;
 use legion_core::comms::{send_command, DaemonCommand, DaemonResponse};
 use legion_core::device::LightingKind;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -464,6 +465,152 @@ impl Tray for LegionTray {
     }
 }
 
+// ───────────────────────── mode-change popup ─────────────────────────
+
+/// How often the local platform_profile is checked for the popup. A plain
+/// sysfs read, so Fn+Q, the GUI, the tray and auto switching all show up
+/// within half a second without asking the service.
+const OSD_POLL: Duration = Duration::from_millis(500);
+
+/// A settings window of this process has keyboard focus (GTK thread writes,
+/// the popup thread reads). The window already shows the mode, so a popup
+/// on top of it would only repeat what was just clicked.
+static WINDOW_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Last notification id, reused as `replaces_id` so popups never stack.
+static NOTIFY_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Mirror "a window of ours is focused" into [`WINDOW_ACTIVE`]. GTK thread
+/// only; installs one cheap 400 ms timer per process.
+pub fn track_window_focus() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        use gtk4::prelude::*;
+        gtk4::glib::timeout_add_local(Duration::from_millis(400), || {
+            let active = gtk4::Window::list_toplevels().iter().any(|w| {
+                w.downcast_ref::<gtk4::Window>()
+                    .is_some_and(|w| w.is_visible() && w.is_active())
+            });
+            WINDOW_ACTIVE.store(active, Ordering::Relaxed);
+            gtk4::glib::ControlFlow::Continue
+        });
+    });
+}
+
+/// Mode to announce, if the mode changed between two readings. The first
+/// reading (startup) and unreadable readings never announce anything.
+pub fn osd_due(prev: Option<&str>, now: Option<&str>) -> Option<String> {
+    match (prev, now) {
+        (Some(p), Some(n)) if p != n && !n.is_empty() && n != "unknown" => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn session_bus() -> Option<gtk4::gio::DBusConnection> {
+    static BUS: std::sync::OnceLock<Option<gtk4::gio::DBusConnection>> = std::sync::OnceLock::new();
+    BUS.get_or_init(|| {
+        gtk4::gio::bus_get_sync(gtk4::gio::BusType::Session, gtk4::gio::Cancellable::NONE)
+            .map_err(|e| log::debug!("osd: no session bus: {e}"))
+            .ok()
+    })
+    .clone()
+}
+
+fn is_kde() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .map(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("KDE")))
+        .unwrap_or(false)
+}
+
+/// Plasma's own OSD (the volume / brightness popup).
+fn plasma_osd(bus: &gtk4::gio::DBusConnection, icon: &str, text: &str) -> Result<(), String> {
+    use gtk4::glib::prelude::ToVariant;
+    bus.call_sync(
+        Some("org.kde.plasmashell"),
+        "/org/kde/osdService",
+        "org.kde.osdService",
+        "showText",
+        Some(&(icon, text).to_variant()),
+        None,
+        gtk4::gio::DBusCallFlags::NONE,
+        1000,
+        gtk4::gio::Cancellable::NONE,
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Short, transient desktop notification that replaces the previous one.
+fn mode_notification(bus: &gtk4::gio::DBusConnection, text: &str) -> Result<(), String> {
+    use gtk4::glib::{prelude::ToVariant, Variant, VariantDict};
+    let hints = VariantDict::new(None);
+    hints.insert("transient", true);
+    hints.insert("urgency", 0u8);
+    let args = Variant::tuple_from_iter([
+        "Legion Control".to_variant(),
+        NOTIFY_ID.load(Ordering::Relaxed).to_variant(),
+        ICON_DEFAULT.to_variant(),
+        text.to_variant(),
+        "Power mode".to_variant(),
+        Vec::<String>::new().to_variant(),
+        hints.end(),
+        1500i32.to_variant(),
+    ]);
+    let reply = bus
+        .call_sync(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "Notify",
+            Some(&args),
+            None,
+            gtk4::gio::DBusCallFlags::NONE,
+            1000,
+            gtk4::gio::Cancellable::NONE,
+        )
+        .map_err(|e| e.to_string())?;
+    if let Some(id) = reply.child_value(0).get::<u32>() {
+        NOTIFY_ID.store(id, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+fn show_mode_osd(profile: &str) {
+    let text = friendly_profile(profile);
+    let Some(bus) = session_bus() else {
+        return;
+    };
+    if is_kde() {
+        match plasma_osd(&bus, icon_for_profile(Some(profile)), &text) {
+            Ok(()) => return,
+            Err(e) => log::debug!("osd: Plasma OSD failed, using a notification: {e}"),
+        }
+    }
+    if let Err(e) = mode_notification(&bus, &text) {
+        log::debug!("osd: notification failed: {e}");
+    }
+}
+
+/// Watch the local platform_profile and announce changes.
+fn osd_worker(handle: ksni::blocking::Handle<LegionTray>) {
+    let mut last: Option<String> = None;
+    loop {
+        let now = legion_core::profile::current_quiet();
+        let now = (now != "unknown").then_some(now);
+        if let Some(mode) = osd_due(last.as_deref(), now.as_deref()) {
+            if legion_core::config::get().osd_mode_change && !WINDOW_ACTIVE.load(Ordering::Relaxed) {
+                show_mode_osd(&mode);
+            }
+        }
+        if now.is_some() {
+            last = now;
+        }
+        std::thread::sleep(OSD_POLL);
+        if handle.is_closed() {
+            return;
+        }
+    }
+}
+
 // ───────────────────────── workers ─────────────────────────
 
 fn notify_error(summary: &str, body: &str) {
@@ -653,6 +800,13 @@ fn start_workers(handle: ksni::blocking::Handle<LegionTray>, actions: mpsc::Rece
             }
         })
         .map_err(|e| log::warn!("tray: cannot start poll thread: {e}"))
+        .ok();
+
+    let osd_handle = handle.clone();
+    std::thread::Builder::new()
+        .name("tray-osd".into())
+        .spawn(move || osd_worker(osd_handle))
+        .map_err(|e| log::warn!("tray: cannot start popup thread: {e}"))
         .ok();
 
     // Actions: IPC can take seconds, so it never runs in a menu callback.
@@ -973,6 +1127,18 @@ mod tests {
             commands_for(&Action::FnLock(true))[..],
             [DaemonCommand::SetFnLock(true)]
         ));
+    }
+
+    #[test]
+    fn osd_only_on_real_changes() {
+        assert_eq!(osd_due(None, Some("balanced")), None, "startup is silent");
+        assert_eq!(osd_due(Some("balanced"), Some("balanced")), None);
+        assert_eq!(
+            osd_due(Some("balanced"), Some("performance")).as_deref(),
+            Some("performance")
+        );
+        assert_eq!(osd_due(Some("balanced"), None), None);
+        assert_eq!(osd_due(Some("balanced"), Some("unknown")), None);
     }
 
     #[test]
