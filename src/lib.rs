@@ -15,6 +15,7 @@ pub mod device;
 pub mod dgpu;
 pub mod diagnostics;
 pub mod fans;
+pub mod fourzone;
 pub mod gpu_ids;
 pub mod ideapad;
 pub mod intel;

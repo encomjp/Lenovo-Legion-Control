@@ -1204,13 +1204,16 @@ fn build_ui(app: &adw::Application) {
     // by "Restore last session on launch", whose tooltip promises lighting
     // too — this used to rewrite the keyboard on every launch regardless.
     let cfg = legion_core::config::get();
-    if cfg.restore_on_launch
-        && legion_core::device::detect().capabilities.lighting_kind
-            == legion_core::device::LightingKind::Spectrum
-    {
+    let lighting_kind = legion_core::device::detect().capabilities.lighting_kind;
+    if cfg.restore_on_launch && lighting_kind == legion_core::device::LightingKind::Spectrum {
         legion_core::keyboard::set_rgb_brightness_async(cfg.brightness);
         legion_core::keyboard::set_logo_async(cfg.logo_on);
         legion_core::keyboard::restore_lighting_async();
+    }
+    // Same gate for the experimental 4-zone path (only writes when a node's
+    // descriptor confirms the 33-byte 0xCC report — see legion_core::fourzone).
+    if cfg.restore_on_launch && lighting_kind == legion_core::device::LightingKind::FourZone {
+        legion_core::fourzone::restore_async();
     }
 
     show_welcome_if_needed(
