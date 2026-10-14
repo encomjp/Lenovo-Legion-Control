@@ -132,6 +132,10 @@ pub enum DaemonCommand {
     },
     GetThermalStatus,
     GetDaemonVersion,
+    /// Telemetry consent from the GUI/CLI user. The root daemon keeps its own
+    /// config, so without this an opt-out in Settings never reached it.
+    /// Appended last: bincode encodes variants by index.
+    SetTelemetry(bool),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -423,6 +427,7 @@ pub fn cmd_label(cmd: &DaemonCommand) -> String {
         DaemonCommand::FixRgbPanic => "FixRgbPanic".into(),
         DaemonCommand::GetRecentLogs(n) => format!("GetRecentLogs({n})"),
         DaemonCommand::SetLogLevel(l) => format!("SetLogLevel({})", sanitize_log(l)),
+        DaemonCommand::SetTelemetry(on) => format!("SetTelemetry({on})"),
         DaemonCommand::GetCurveOptimizer => "GetCurveOptimizer".into(),
         DaemonCommand::SetCurveOptimizer { offset, .. } => {
             format!("SetCurveOptimizer({offset})")
@@ -479,6 +484,7 @@ pub fn cmd_kind(cmd: &DaemonCommand) -> &'static str {
         DaemonCommand::FixRgbPanic => "FixRgbPanic",
         DaemonCommand::GetRecentLogs(_) => "GetRecentLogs",
         DaemonCommand::SetLogLevel(_) => "SetLogLevel",
+        DaemonCommand::SetTelemetry(_) => "SetTelemetry",
         DaemonCommand::GetCurveOptimizer => "GetCurveOptimizer",
         DaemonCommand::SetCurveOptimizer { .. } => "SetCurveOptimizer",
         DaemonCommand::ResetCurveOptimizer => "ResetCurveOptimizer",

@@ -472,6 +472,9 @@ fn build_ui(app: &adw::Application) {
         app.windows()[0].present();
         return;
     }
+    // Re-assert the user's telemetry choice on the daemon each launch: an
+    // opt-out made before the daemon learned SetTelemetry never reached it.
+    welcome::push_telemetry_to_daemon(legion_core::config::get().diagnostics.enabled);
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
