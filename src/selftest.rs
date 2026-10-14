@@ -179,10 +179,16 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             b <= 9,
             format!("brightness {b}/9"),
         )),
+        // Absent controller = model without per-key RGB: not a failure.
+        None if !keyboard::spectrum_present() => out.push(check(
+            "spectrum_controller",
+            true,
+            "not present on this model (no Spectrum RGB)",
+        )),
         None => out.push(check(
             "spectrum_controller",
             false,
-            "048d:c197 not detected (optional component)",
+            "048d:c197 present but unreadable — udev rule / permissions",
         )),
     }
     match keyboard::camera_power() {
