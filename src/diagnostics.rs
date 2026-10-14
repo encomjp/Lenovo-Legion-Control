@@ -499,6 +499,9 @@ pub struct FanLive {
     /// `readable`, `not-exposed`, `backend-unavailable`, or `unreadable`.
     #[serde(default)]
     pub state: String,
+    /// RPM comes from an EC-fallback layout not verified on this BIOS family.
+    #[serde(default)]
+    pub rpm_estimated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -683,6 +686,7 @@ pub fn collect() -> DiagnosticsReport {
     );
 
     let mut fan_list = Vec::new();
+    let rpm_estimated = fans::rpm_estimated();
     for f in fans::channels() {
         let (rpm, state) = fans::rpm_status(f.id);
         fan_list.push(FanLive {
@@ -694,6 +698,7 @@ pub fn collect() -> DiagnosticsReport {
             target: fans::read_target(f.id),
             readable: state == fans::FanRpmState::Readable,
             state: state.as_str().into(),
+            rpm_estimated: rpm_estimated && rpm.is_some(),
         });
     }
     log::debug!("diag fans: {} channel(s)", fan_list.len());

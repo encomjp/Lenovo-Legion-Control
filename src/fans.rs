@@ -1,23 +1,46 @@
 //! Fan control via lenovo_wmi_other (preferred) or legion_hwmon.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::device::{self, FanCapability};
 use crate::sensors::hwmon_by_name;
 
+/// How long a failed backend discovery is trusted before re-probing.
+const REPROBE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Pure: re-run discovery only when no miss is cached or it has expired.
+fn reprobe_due(last_miss: Option<Instant>, now: Instant) -> bool {
+    last_miss.is_none_or(|t| now.saturating_duration_since(t) >= REPROBE_INTERVAL)
+}
+
 /// Resolve the fan sysfs backend once (stable for machine uptime) instead of
 /// re-scanning `/sys/class/hwmon` on every read/write — the UI polls RPM
 /// every 2 s per fan, and each old call locked the hwmon cache mutex and
-/// cloned a `Vec<PathBuf>`.
+/// cloned a `Vec<PathBuf>`. A miss is cached too (re-probed every 60 s) so
+/// machines without any backend don't re-run discovery on every poll.
 fn fan_hwmon() -> Option<&'static (String, PathBuf)> {
     static BACKEND: OnceLock<(String, PathBuf)> = OnceLock::new();
+    static LAST_MISS: Mutex<Option<Instant>> = Mutex::new(None);
     if let Some(backend) = BACKEND.get() {
         return Some(backend);
     }
-    let discovered = discover_fan_hwmon()?;
-    let _ = BACKEND.set(discovered);
-    BACKEND.get()
+    let mut last_miss = LAST_MISS.lock().unwrap_or_else(|e| e.into_inner());
+    if !reprobe_due(*last_miss, Instant::now()) {
+        return None;
+    }
+    match discover_fan_hwmon() {
+        Some(discovered) => {
+            let _ = BACKEND.set(discovered);
+            BACKEND.get()
+        }
+        None => {
+            *last_miss = Some(Instant::now());
+            None
+        }
+    }
 }
 
 fn has_fan_inputs(hw: &std::path::Path) -> bool {
@@ -139,13 +162,23 @@ fn discover_fan_hwmon() -> Option<(String, PathBuf)> {
         return Some(("yogafan".into(), hw));
     }
     if let Some((name, _)) = ec_fallback_rpms() {
-        log::info!("fans::fan_hwmon: EC fallback {name} available");
+        log::info!(
+            "fans::fan_hwmon: EC fallback {name} available ({})",
+            if dmi_ec_layout().is_some_and(|c| c.verified) {
+                "fleet-verified layout"
+            } else {
+                "unverified layout — RPM shown as estimated"
+            }
+        );
         return Some((
             "ec-fallback".into(),
             PathBuf::from(format!("/tmp/ec-fallback-{name}")),
         ));
     }
-    log::warn!("fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan)");
+    log::warn!(
+        "fans::fan_hwmon: no RPM backend (lenovo_wmi_other / legion_hwmon / yogafan) — re-probe in {}s",
+        REPROBE_INTERVAL.as_secs()
+    );
     None
 }
 
@@ -220,6 +253,9 @@ pub fn rpm_status(fan: u8) -> (Option<u32>, FanRpmState) {
         else {
             return (None, FanRpmState::Unreadable);
         };
+        if EC_LAYOUT_REJECTED.load(Ordering::Relaxed) {
+            return (None, FanRpmState::BackendUnavailable);
+        }
         let Some(rpms) = ec_fallback_rpms_for(layout) else {
             return (None, FanRpmState::Unreadable);
         };
@@ -285,9 +321,24 @@ pub fn channels() -> Vec<FanCapability> {
 }
 
 pub fn backend_name() -> String {
-    fan_hwmon()
-        .map(|(name, _)| name.clone())
-        .unwrap_or_else(|| device::detect().capabilities.fan_backend)
+    rpm_backend_name().unwrap_or_else(|| device::detect().capabilities.fan_backend)
+}
+
+/// Live RPM backend only (no capability-profile fallback). Safe to call from
+/// `device::probe_fans` — it never re-enters `device::detect`.
+pub fn rpm_backend_name() -> Option<String> {
+    fan_hwmon().map(|(name, _)| name.clone())
+}
+
+/// True when shown RPM may come from an EC-fallback layout that has not been
+/// verified on this BIOS family. The EC debugfs path is the only non-hwmon
+/// RPM source, so this is decidable without root (the GUI cannot read
+/// debugfs itself but displays the daemon's numbers).
+pub fn rpm_estimated() -> bool {
+    let hwmon_tach = ["lenovo_wmi_other", "legion_hwmon", "yogafan"]
+        .into_iter()
+        .any(|name| hwmon_by_name(name).is_some_and(|hw| has_fan_inputs(&hw)));
+    !hwmon_tach && !dmi_ec_layout().is_some_and(|c| c.verified)
 }
 
 pub fn control_backend_name() -> Option<String> {
@@ -297,6 +348,30 @@ pub fn control_backend_name() -> Option<String> {
 /// Fan ids present on this machine (e.g. `[1, 2, 4]`).
 pub fn ids() -> Vec<u8> {
     channels().into_iter().map(|f| f.id).collect()
+}
+
+/// Pure: the third ("aux") channel among `ids`. lenovo_wmi_other exposes it
+/// as fan4, LenovoLegionLinux legion_hwmon as fan3 — prefer 4, else the
+/// first id ≥ 3.
+pub fn aux_id_from(ids: &[u8]) -> Option<u8> {
+    if ids.contains(&4) {
+        return Some(4);
+    }
+    ids.iter().copied().find(|id| *id >= 3)
+}
+
+/// Real hardware id of the third fan on this machine, if it has one.
+pub fn aux_id() -> Option<u8> {
+    aux_id_from(&ids())
+}
+
+/// Hardware ids behind the three flattened fan slots. The `fan4_*` fields in
+/// `SensorReadings`, `config::UserProfile::fan4` and the CLI's "Aux" column
+/// keep their historical names for telemetry/IPC compatibility, but mean
+/// "third fan" — fan3 on legion_hwmon, fan4 on lenovo_wmi_other. Without a
+/// third channel the slot stays 4 (absent → reads/writes are no-ops/errors).
+pub fn slot_ids() -> [u8; 3] {
+    [1, 2, aux_id().unwrap_or(4)]
 }
 
 /// Pure helper — the formatting contract for `target == 0` means "auto" on
@@ -317,9 +392,36 @@ pub fn format_rpm_label(target: u32, rpm: u32) -> String {
     label
 }
 
+/// Pure: a target above the channel's live max is not a real request —
+/// 83F6 legion_hwmon reports `fan1_target=9600` with `fan1_max=5100` while
+/// the EC drives the fan. Treat it as 0 (auto/unknown).
+pub fn effective_target(target: u32, max: Option<u32>) -> u32 {
+    match max {
+        Some(max) if max > 0 && target > max => 0,
+        _ => target,
+    }
+}
+
+/// Target for display/saving: `read_target` with out-of-range values as auto.
+pub fn display_target(fan: u8) -> u32 {
+    let raw = read_target(fan).unwrap_or(0);
+    let target = effective_target(raw, read_max(fan));
+    if target != raw {
+        log::trace!("fans::display_target: fan{fan} target {raw} above max — shown as auto");
+    }
+    target
+}
+
 /// UI-friendly RPM label. Auto mode often reports 0 on this WMI driver.
+/// Unverified EC-fallback readings are marked "(est.)".
 pub fn rpm_label(fan: u8) -> String {
-    format_rpm_label(read_target(fan).unwrap_or(0), read_rpm(fan).unwrap_or(0))
+    let rpm = read_rpm(fan).unwrap_or(0);
+    let label = format_rpm_label(display_target(fan), rpm);
+    if rpm > 0 && rpm_estimated() {
+        format!("{label} (est.)")
+    } else {
+        label
+    }
 }
 
 /// Pure: clamp a requested RPM into an explicit `min..=max` window.
@@ -411,20 +513,161 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
     }
 }
 
-/// EC direct fallback: read fan RPMs via ec_sys debugfs.
-/// Returns (sensor_name, [cpu_rpm, gpu_rpm]) if readable and plausible.
-/// Probes known EC layouts: LOQ 15IRH8 (0xE3/0xE7 16-bit LE) and
-/// IdeaPad Gaming 3 (0x06 8-bit *100). Validates 500-7500 RPM range.
-fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
-    let buf = ec_fallback_bytes()?;
-    for layout in ["loq-ec", "ideapad-ec", "legion-ec"] {
-        let rpms = ec_layout_rpms(layout, &buf)?;
+/// EC-fallback layout for a BIOS family. `verified` = fleet telemetry showed
+/// the layout tracking load on that family; anything else is best-effort and
+/// its RPM is flagged as estimated (`rpm_estimated`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EcLayoutChoice {
+    layout: &'static str,
+    verified: bool,
+}
+
+/// Pure: pick the EC layout from DMI instead of the first layout that happens
+/// to hold a plausible-looking byte pair. Fleet data showed "loq-ec" reading
+/// a constant ~3900-4300 rpm (not a tachometer) on 82K2/82MJ (H3CN), 82YA
+/// (M2CN) and 83DG (NMCN). `None` = unknown family → legacy probe order.
+fn ec_layout_for_family(bios_prefix: &str, product_version: &str) -> Option<EcLayoutChoice> {
+    let choice = |layout, verified| Some(EcLayoutChoice { layout, verified });
+    match bios_prefix {
+        // 82RF Legion 5 Pro 16IAH7H: 0x06/0x07 ×100 tracks load (400 → 4332 rpm).
+        "J2CN" => choice("ideapad-ec", true),
+        "LZCN" => choice("loq-ec", false),
+        "H3CN" | "H4CN" | "FCCN" | "JNCN" => choice("ideapad-ec", false),
+        // Legion Gen 6-8 BIOS families.
+        "EFCN" | "EUCN" | "FSCN" | "G8CN" | "G9CN" | "GKCN" | "H1CN" | "HACN" | "HHCN" | "J1CN"
+        | "JUCN" | "JVCN" | "K1CN" | "K9CN" | "KFCN" | "KHCN" | "KWCN" | "LPCN" | "M0CN"
+        | "M1CN" | "M2CN" | "M3CN" | "M6CN" | "DMCN" | "NSCN" => choice("legion-ec", false),
+        _ if product_version.contains("LOQ 15IRH8") => choice("loq-ec", false),
+        _ if product_version.contains("IdeaPad Gaming") => choice("ideapad-ec", false),
+        _ => None,
+    }
+}
+
+/// DMI-derived layout, read once (no `device::detect` — this runs inside it).
+fn dmi_ec_layout() -> Option<EcLayoutChoice> {
+    static CHOICE: OnceLock<Option<EcLayoutChoice>> = OnceLock::new();
+    *CHOICE.get_or_init(|| {
+        let bios = std::fs::read_to_string("/sys/class/dmi/id/bios_version").unwrap_or_default();
+        let version =
+            std::fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
+        let prefix: String = bios.trim().chars().take(4).collect();
+        let choice = ec_layout_for_family(&prefix, version.trim());
+        log::debug!(
+            "fans::dmi_ec_layout: bios {prefix:?} / {:?} → {choice:?}",
+            version.trim()
+        );
+        choice
+    })
+}
+
+/// Pure: try the family's layout (or the legacy order when unknown) and
+/// return the first whose values look like a tachometer (any value in
+/// 500..=ceiling).
+fn select_ec_layout(
+    choice: Option<EcLayoutChoice>,
+    buf: &[u8],
+) -> Option<(&'static str, Vec<u32>)> {
+    const LEGACY: [&str; 3] = ["loq-ec", "ideapad-ec", "legion-ec"];
+    let chosen;
+    let candidates: &[&'static str] = match choice {
+        Some(c) => {
+            chosen = [c.layout];
+            &chosen
+        }
+        None => &LEGACY,
+    };
+    for &layout in candidates {
+        let rpms = ec_layout_rpms(layout, buf)?;
         let ceiling = if layout == "ideapad-ec" { 6000 } else { 7500 };
         if rpms.iter().any(|rpm| (500..=ceiling).contains(rpm)) {
-            return Some((layout.to_string(), rpms));
+            return Some((layout, rpms));
         }
     }
     None
+}
+
+/// EC direct fallback: read fan RPMs via ec_sys debugfs.
+/// Returns (sensor_name, [cpu_rpm, gpu_rpm]) if readable and plausible.
+/// Layouts: LOQ 15IRH8 (0xE3/0xE7 16-bit LE), IdeaPad Gaming 3 (0x06 8-bit
+/// ×100) and Legion (0xE0/0xE2 16-bit LE), chosen by BIOS family.
+fn ec_fallback_rpms() -> Option<(String, Vec<u32>)> {
+    let buf = ec_fallback_bytes()?;
+    select_ec_layout(dmi_ec_layout(), &buf).map(|(layout, rpms)| (layout.to_string(), rpms))
+}
+
+/// Latched once the constant-reading detector rejects the EC layout.
+static EC_LAYOUT_REJECTED: AtomicBool = AtomicBool::new(false);
+
+/// Detects an EC-fallback layout that reads a non-tachometer constant: both
+/// fans within ±10 rpm of each other, the value itself within a 300 rpm band,
+/// across ≥3 consecutive samples while the CPU temperature moved by more than
+/// 15 °C. Real fans diverge or ramp with that much thermal change.
+#[derive(Debug, Default)]
+struct EcConstancy {
+    streak: u32,
+    temp_lo: f64,
+    temp_hi: f64,
+    rpm_lo: u32,
+    rpm_hi: u32,
+}
+
+impl EcConstancy {
+    const fn new() -> Self {
+        Self {
+            streak: 0,
+            temp_lo: 0.0,
+            temp_hi: 0.0,
+            rpm_lo: 0,
+            rpm_hi: 0,
+        }
+    }
+
+    fn restart(&mut self, lo: u32, hi: u32, cpu_temp: f64) {
+        self.streak = 1;
+        (self.temp_lo, self.temp_hi) = (cpu_temp, cpu_temp);
+        (self.rpm_lo, self.rpm_hi) = (lo, hi);
+    }
+
+    /// Feed one sample; returns true when the layout should be rejected.
+    fn observe(&mut self, fan1: u32, fan2: u32, cpu_temp: f64) -> bool {
+        let suspicious = fan1 > 0 && fan2 > 0 && fan1.abs_diff(fan2) <= 10 && cpu_temp > 0.0;
+        if !suspicious {
+            self.streak = 0;
+            return false;
+        }
+        let (lo, hi) = (fan1.min(fan2), fan1.max(fan2));
+        if self.streak == 0 || self.rpm_lo.min(lo).abs_diff(self.rpm_hi.max(hi)) > 300 {
+            // First sample, or the value is moving like a real tachometer.
+            self.restart(lo, hi, cpu_temp);
+            return false;
+        }
+        self.streak += 1;
+        self.temp_lo = self.temp_lo.min(cpu_temp);
+        self.temp_hi = self.temp_hi.max(cpu_temp);
+        self.rpm_lo = self.rpm_lo.min(lo);
+        self.rpm_hi = self.rpm_hi.max(hi);
+        self.streak >= 3 && self.temp_hi - self.temp_lo > 15.0
+    }
+}
+
+/// Feed the EC-fallback plausibility check with one sensor sample (called
+/// from `sensors::read_all`). No-op unless the RPM backend is ec-fallback.
+pub fn observe_ec_sample(fan1: u32, fan2: u32, cpu_temp: f64) {
+    static STATE: Mutex<EcConstancy> = Mutex::new(EcConstancy::new());
+    if EC_LAYOUT_REJECTED.load(Ordering::Relaxed)
+        || !fan_hwmon().is_some_and(|(name, _)| name == "ec-fallback")
+    {
+        return;
+    }
+    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if state.observe(fan1, fan2, cpu_temp) {
+        EC_LAYOUT_REJECTED.store(true, Ordering::Relaxed);
+        log::warn!(
+            "fans: EC-fallback RPM rejected — fans read {fan1}/{fan2} rpm, constant while CPU moved {:.0}–{:.0} °C (not a tachometer)",
+            state.temp_lo,
+            state.temp_hi
+        );
+    }
 }
 
 fn ec_fallback_rpms_for(layout: &str) -> Option<Vec<u32>> {
@@ -447,8 +690,13 @@ fn ec_fallback_bytes() -> Option<Vec<u8>> {
     // Try to ensure ec_sys is loaded if the file doesn't exist. Deliberately
     // WITHOUT write_support=1: this fallback only READS tachometer bytes, and
     // write_support would grant every root process EC-RAM write access
-    // system-wide — far more privilege than an RPM read needs.
+    // system-wide — far more privilege than an RPM read needs. At most one
+    // modprobe per process (Fedora ships no ec_sys; it would respawn forever).
+    static MODPROBE_TRIED: AtomicBool = AtomicBool::new(false);
     if !std::path::Path::new(EC_IO).exists() {
+        if MODPROBE_TRIED.swap(true, Ordering::Relaxed) {
+            return None;
+        }
         let _ = std::process::Command::new("modprobe")
             .args(["ec_sys"])
             .output();
@@ -484,13 +732,35 @@ fn ec_layout_rpms(layout: &str, buf: &[u8]) -> Option<Vec<u32>> {
     }
 }
 
-/// Set all discovered fans to auto mode.
+/// User-facing caveat for manual fan targets on Gen 10 EC firmware.
+pub const GEN10_MANUAL_TARGET_WARNING: &str =
+    "manual fan targets may persist until EC reset on some Gen 10 firmware";
+
+/// Pure: generations whose EC may treat a manual target as one-way. On Gen 10
+/// (83F5 / Q7CN, EC 0x5508) writing 0 reportedly does not hand the fan back
+/// to the EC curve — only a full EC reset does (VitaminDB). Unverified on
+/// other Gen 10 units, so this only drives warnings, never write behaviour.
+pub fn gen_may_latch_manual_target(gen: u8) -> bool {
+    gen >= 10
+}
+
+/// True on machines where `GEN10_MANUAL_TARGET_WARNING` applies.
+pub fn manual_target_may_persist() -> bool {
+    gen_may_latch_manual_target(device::model_gen())
+}
+
+/// Set all discovered fans to auto mode (writes target 0 to every fan).
 pub fn set_auto() -> std::io::Result<()> {
     let all_ids = ids();
     log::info!(
-        "fans::set_auto: switching to auto on {} fan(s): {all_ids:?}",
+        "fans::set_auto: switching to auto on {} fan(s): {all_ids:?} (target 0 = EC curve)",
         all_ids.len()
     );
+    if manual_target_may_persist() {
+        log::warn!(
+            "fans::set_auto: Gen 10 EC — {GEN10_MANUAL_TARGET_WARNING}; target 0 is written but the EC may not resume its own curve"
+        );
+    }
     let mut last_err = None;
     let mut errors = 0usize;
     for id in all_ids {
@@ -522,6 +792,27 @@ mod tests {
         assert_eq!(format_rpm_label(0, 1800), "Auto · 1800 RPM");
         assert_eq!(format_rpm_label(1500, 0), "~1500 RPM");
         assert_eq!(format_rpm_label(1500, 1400), "1400 RPM");
+    }
+
+    #[test]
+    fn target_above_max_is_auto() {
+        assert_eq!(effective_target(9600, Some(5100)), 0); // 83F6 garbage
+        assert_eq!(effective_target(5100, Some(5100)), 5100);
+        assert_eq!(effective_target(3000, Some(5100)), 3000);
+        assert_eq!(effective_target(9600, None), 9600, "no live max → keep");
+        assert_eq!(effective_target(9600, Some(0)), 9600, "bogus max → keep");
+        assert_eq!(
+            format_rpm_label(effective_target(9600, Some(5100)), 2200),
+            "Auto · 2200 RPM"
+        );
+    }
+
+    #[test]
+    fn manual_target_warning_is_gen10_and_newer() {
+        assert!(!gen_may_latch_manual_target(0));
+        assert!(!gen_may_latch_manual_target(9));
+        assert!(gen_may_latch_manual_target(10));
+        assert!(gen_may_latch_manual_target(11));
     }
 
     #[test]
@@ -564,6 +855,106 @@ mod tests {
         assert_eq!(clamp_target_with(5500, 1200, 3000), 3000);
         assert_eq!(clamp_target_with(5500, 1200, 100), 1200);
         assert_eq!(clamp_target_with(5500, 1200, 9999), 5500);
+    }
+
+    #[test]
+    fn aux_id_resolves_third_channel_per_backend() {
+        assert_eq!(aux_id_from(&[1, 2, 4]), Some(4)); // lenovo_wmi_other
+        assert_eq!(aux_id_from(&[1, 2, 3]), Some(3)); // legion_hwmon (83F6)
+        assert_eq!(aux_id_from(&[1, 2, 3, 4]), Some(4));
+        assert_eq!(aux_id_from(&[1, 2]), None);
+        assert_eq!(aux_id_from(&[]), None);
+    }
+
+    #[test]
+    fn negative_discovery_is_cached_for_the_reprobe_interval() {
+        let now = Instant::now();
+        assert!(reprobe_due(None, now));
+        assert!(!reprobe_due(Some(now), now));
+        assert!(!reprobe_due(Some(now), now + Duration::from_secs(59)));
+        assert!(reprobe_due(Some(now), now + REPROBE_INTERVAL));
+    }
+
+    #[test]
+    fn ec_layout_follows_bios_family() {
+        let pick = |b, v| ec_layout_for_family(b, v).map(|c| (c.layout, c.verified));
+        assert_eq!(pick("J2CN", ""), Some(("ideapad-ec", true)));
+        assert_eq!(pick("LZCN", ""), Some(("loq-ec", false)));
+        assert_eq!(
+            pick("H3CN", "IdeaPad Gaming 3 15ACH6"),
+            Some(("ideapad-ec", false))
+        );
+        assert_eq!(pick("M2CN", ""), Some(("legion-ec", false)));
+        assert_eq!(pick("KWCN", ""), Some(("legion-ec", false)));
+        assert_eq!(pick("XXCN", "LOQ 15IRH8"), Some(("loq-ec", false)));
+        assert_eq!(
+            pick("XXCN", "IdeaPad Gaming 3 15IHU6"),
+            Some(("ideapad-ec", false))
+        );
+        assert_eq!(pick("NMCN", "Legion Y7000P IRX9"), None);
+    }
+
+    #[test]
+    fn family_layout_never_falls_through_to_loq_bytes() {
+        // loq-ec bytes hold a plausible ~3900 pair; ideapad-ec bytes are 0.
+        let mut buf = vec![0u8; 256];
+        buf[0xe3..0xe5].copy_from_slice(&3900u16.to_le_bytes());
+        buf[0xe7..0xe9].copy_from_slice(&3905u16.to_le_bytes());
+        let ideapad = Some(EcLayoutChoice {
+            layout: "ideapad-ec",
+            verified: false,
+        });
+        assert_eq!(select_ec_layout(ideapad, &buf), None);
+        // Unknown family keeps the legacy first-plausible probe.
+        assert_eq!(
+            select_ec_layout(None, &buf),
+            Some(("loq-ec", vec![3900, 3905]))
+        );
+        buf[0x06] = 25;
+        assert_eq!(
+            select_ec_layout(ideapad, &buf),
+            Some(("ideapad-ec", vec![2500, 2500]))
+        );
+    }
+
+    #[test]
+    fn constant_ec_pair_is_rejected_when_temperature_moves() {
+        let mut d = EcConstancy::default();
+        assert!(!d.observe(3921, 3925, 40.0));
+        assert!(!d.observe(3930, 3926, 50.0));
+        assert!(
+            d.observe(3918, 3920, 70.0),
+            "3 samples, 30 °C swing, flat pair"
+        );
+    }
+
+    #[test]
+    fn constant_ec_pair_needs_temperature_swing_and_streak() {
+        let mut d = EcConstancy::default();
+        for _ in 0..10 {
+            assert!(!d.observe(3900, 3900, 45.0), "steady temp is not evidence");
+        }
+        let mut d = EcConstancy::default();
+        assert!(!d.observe(3900, 3900, 40.0));
+        assert!(!d.observe(3900, 3900, 70.0));
+        assert!(
+            !d.observe(2400, 4000, 75.0),
+            "diverging fans reset the streak"
+        );
+        assert!(!d.observe(3900, 3900, 40.0));
+        assert!(!d.observe(3900, 3900, 70.0));
+    }
+
+    #[test]
+    fn ramping_or_idle_fans_are_not_rejected() {
+        let mut d = EcConstancy::default();
+        assert!(!d.observe(1900, 1900, 40.0));
+        assert!(!d.observe(2900, 2900, 60.0));
+        assert!(!d.observe(3900, 3900, 80.0), "value ramps with temperature");
+        let mut d = EcConstancy::default();
+        for t in [40.0, 60.0, 80.0, 95.0] {
+            assert!(!d.observe(0, 0, t), "fan-stop zero is not a constant pair");
+        }
     }
 
     #[test]

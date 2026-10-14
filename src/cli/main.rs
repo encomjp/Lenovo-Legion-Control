@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 use legion_core::{
     comms::{send_command, DaemonCommand, DaemonResponse},
-    diagnostics, selftest,
+    diagnostics, fans, selftest,
 };
 
 /// Print an operational-failure banner to stderr and exit 1 (stdout stays empty).
@@ -91,7 +91,7 @@ enum Commands {
     Fan,
     /// Set fan target RPM (0 = auto)
     SetFan {
-        /// Fan number: 1 (CPU), 2 (GPU), or 4 (Aux)
+        /// Fan number: 1 (CPU), 2 (GPU), or 3/4 (Aux — fan3 on legion_hwmon)
         fan: u8,
         /// Target RPM (0 for auto)
         rpm: u32,
@@ -308,7 +308,8 @@ fn main() {
             println!("profile → {}", friendly_profile(&name));
         }
         Commands::Fan => {
-            for (fan, name) in [(1u8, "CPU"), (2, "GPU"), (4, "Aux")] {
+            let [f1, f2, aux] = fans::slot_ids();
+            for (fan, name) in [(f1, "CPU"), (f2, "GPU"), (aux, "Aux")] {
                 match send_command(DaemonCommand::GetFanRpm(fan)) {
                     Ok(DaemonResponse::FanRpm(r)) => println!("{name:>3} fan: {r:>5} RPM"),
                     Ok(DaemonResponse::Error(e)) => eprintln!("{name} fan: {e}"),
@@ -318,9 +319,9 @@ fn main() {
             }
         }
         Commands::SetFan { fan, rpm } => {
-            if !matches!(fan, 1 | 2 | 4) {
+            if !matches!(fan, 1..=4) {
                 usage_fail(format!(
-                    "invalid fan index '{fan}'. Valid fan channels: 1 (CPU), 2 (GPU), 4 (Aux)"
+                    "invalid fan index '{fan}'. Valid fan channels: 1 (CPU), 2 (GPU), 3 or 4 (Aux)"
                 ));
             }
             if rpm > 8000 {
@@ -333,11 +334,14 @@ fn main() {
                 println!("fan {fan} → auto");
             } else {
                 println!("fan {fan} → {rpm} RPM");
+                if fans::manual_target_may_persist() {
+                    eprintln!("warning: {}", fans::GEN10_MANUAL_TARGET_WARNING);
+                }
             }
         }
         Commands::FanAuto => {
             let mut errors: Vec<String> = Vec::new();
-            for fan in [1u8, 2, 4] {
+            for fan in fans::slot_ids() {
                 log::debug!("fan-auto: fan {fan} → auto (attempt)");
                 match send_command(DaemonCommand::SetFanTarget(fan, 0)) {
                     Ok(DaemonResponse::Ok) => log::debug!("fan-auto: fan {fan} ok"),
@@ -1291,6 +1295,9 @@ fn print_sensors(resp: Result<DaemonResponse, String>) {
                 "│  CPU {:>5}   GPU {:>5}   Aux {:>5} rpm             │",
                 s.fan1_rpm, s.fan2_rpm, s.fan4_rpm
             );
+            if fans::rpm_estimated() && s.fan1_rpm.max(s.fan2_rpm).max(s.fan4_rpm) > 0 {
+                println!("│  (estimated — unverified EC fallback layout)       │");
+            }
             log::trace!(
                 "sensors: fans cpu {} gpu {} aux {} rpm",
                 s.fan1_rpm,

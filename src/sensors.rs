@@ -49,9 +49,12 @@ pub struct SensorReadings {
     pub ethernet_temp: f64,
     pub fan1_rpm: u32,
     pub fan2_rpm: u32,
+    /// Third ("aux") fan — hardware fan3 on legion_hwmon, fan4 on
+    /// lenovo_wmi_other (`fans::slot_ids`). Name kept for IPC/telemetry.
     pub fan4_rpm: u32,
     pub fan1_target: u32,
     pub fan2_target: u32,
+    /// Target of the third fan; same slot mapping as `fan4_rpm`.
     pub fan4_target: u32,
     pub profile: String,
     pub battery_pct: u32,
@@ -178,6 +181,25 @@ pub fn find_hwmon(name: &str) -> Vec<PathBuf> {
     *guard = Some((fresh, std::time::Instant::now()));
     result
 }
+
+/// EC temperature slot in `SensorReadings` (legion_hwmon labels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EcTemp {
+    Cpu,
+    Gpu,
+}
+
+/// Pure: legion_hwmon temperature label → EC slot. Older LenovoLegionLinux
+/// builds label them "EC CPU"/"EC GPU"; current ones use "CPU Temperature" /
+/// "GPU Temperature" (82RC, 82WQ, 82WS, 83F6 fleet dumps).
+fn ec_temp_slot(label: &str) -> Option<EcTemp> {
+    match label {
+        "EC CPU" | "CPU Temperature" => Some(EcTemp::Cpu),
+        "EC GPU" | "GPU Temperature" => Some(EcTemp::Gpu),
+        _ => None,
+    }
+}
+
 /// Get the first hwmon device matching a name.
 pub fn hwmon_by_name(name: &str) -> Option<PathBuf> {
     find_hwmon(name).into_iter().next()
@@ -412,17 +434,17 @@ pub fn read_all() -> SensorReadings {
                     let input_path = hw.join(fname.replace("_label", "_input"));
                     if let Some(val) = read_int(&input_path) {
                         let temp = val as f64 / 1000.0;
-                        match label.as_str() {
-                            "EC CPU" => {
-                                log::debug!("sensors::read_all: EC CPU → ec_cpu={temp}");
+                        match ec_temp_slot(&label) {
+                            Some(EcTemp::Cpu) => {
+                                log::debug!("sensors::read_all: {label} → ec_cpu={temp}");
                                 s.ec_cpu = temp;
                             }
-                            "EC GPU" => {
-                                log::debug!("sensors::read_all: EC GPU → ec_gpu={temp}");
+                            Some(EcTemp::Gpu) => {
+                                log::debug!("sensors::read_all: {label} → ec_gpu={temp}");
                                 s.ec_gpu = temp;
                             }
-                            other => log::trace!(
-                                "sensors::read_all: legion_hwmon label '{other}' not mapped"
+                            None => log::trace!(
+                                "sensors::read_all: legion_hwmon label '{label}' not mapped"
                             ),
                         }
                     }
@@ -650,11 +672,13 @@ pub fn read_all() -> SensorReadings {
     );
 
     // Fans -- via fans:: backend so 83JG yogafan is honored (reconciles flattened fields with FanLive)
+    // The third slot follows the real aux id (fan3 on legion_hwmon, fan4 on WMI).
     let active_fan_ids = crate::fans::ids();
+    let aux_id = crate::fans::aux_id_from(&active_fan_ids).unwrap_or(4);
     for (fan_num, dst_rpm, dst_target) in [
         (1u8, &mut s.fan1_rpm, &mut s.fan1_target),
         (2u8, &mut s.fan2_rpm, &mut s.fan2_target),
-        (4u8, &mut s.fan4_rpm, &mut s.fan4_target),
+        (aux_id, &mut s.fan4_rpm, &mut s.fan4_target),
     ] {
         if !active_fan_ids.contains(&fan_num) {
             continue;
@@ -667,12 +691,14 @@ pub fn read_all() -> SensorReadings {
         }
     }
     log::debug!(
-        "sensors::read_all: fans via fans:: backend {} (rpm {} {} {})",
+        "sensors::read_all: fans via fans:: backend {} (rpm {} {} {}, aux=fan{aux_id})",
         crate::fans::backend_name(),
         s.fan1_rpm,
         s.fan2_rpm,
         s.fan4_rpm
     );
+    // EC-fallback only: reject a layout that reads a constant, not a tach.
+    crate::fans::observe_ec_sample(s.fan1_rpm, s.fan2_rpm, s.cpu_temp);
 
     // ─── Platform profile ───
     s.profile = read_file(Path::new("/sys/firmware/acpi/platform_profile"))
@@ -870,6 +896,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn ec_temp_labels_cover_both_legion_hwmon_spellings() {
+        assert_eq!(ec_temp_slot("EC CPU"), Some(EcTemp::Cpu));
+        assert_eq!(ec_temp_slot("CPU Temperature"), Some(EcTemp::Cpu));
+        assert_eq!(ec_temp_slot("EC GPU"), Some(EcTemp::Gpu));
+        assert_eq!(ec_temp_slot("GPU Temperature"), Some(EcTemp::Gpu));
+        assert_eq!(ec_temp_slot("IC Temperature"), None);
+        assert_eq!(ec_temp_slot("Fan 1"), None);
+    }
 
     #[test]
     fn compute_cpu_usage_zero_and_clamp() {
