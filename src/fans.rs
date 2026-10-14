@@ -299,6 +299,30 @@ pub fn ids() -> Vec<u8> {
     channels().into_iter().map(|f| f.id).collect()
 }
 
+/// Pure: the third ("aux") channel among `ids`. lenovo_wmi_other exposes it
+/// as fan4, LenovoLegionLinux legion_hwmon as fan3 — prefer 4, else the
+/// first id ≥ 3.
+pub fn aux_id_from(ids: &[u8]) -> Option<u8> {
+    if ids.contains(&4) {
+        return Some(4);
+    }
+    ids.iter().copied().find(|id| *id >= 3)
+}
+
+/// Real hardware id of the third fan on this machine, if it has one.
+pub fn aux_id() -> Option<u8> {
+    aux_id_from(&ids())
+}
+
+/// Hardware ids behind the three flattened fan slots. The `fan4_*` fields in
+/// `SensorReadings`, `config::UserProfile::fan4` and the CLI's "Aux" column
+/// keep their historical names for telemetry/IPC compatibility, but mean
+/// "third fan" — fan3 on legion_hwmon, fan4 on lenovo_wmi_other. Without a
+/// third channel the slot stays 4 (absent → reads/writes are no-ops/errors).
+pub fn slot_ids() -> [u8; 3] {
+    [1, 2, aux_id().unwrap_or(4)]
+}
+
 /// Pure helper — the formatting contract for `target == 0` means "auto" on
 /// this WMI driver. Used by `rpm_label`; exported so tests pin the contract.
 pub fn format_rpm_label(target: u32, rpm: u32) -> String {
@@ -558,6 +582,15 @@ mod tests {
         assert_eq!(clamp_target_with(5500, 1200, 3000), 3000);
         assert_eq!(clamp_target_with(5500, 1200, 100), 1200);
         assert_eq!(clamp_target_with(5500, 1200, 9999), 5500);
+    }
+
+    #[test]
+    fn aux_id_resolves_third_channel_per_backend() {
+        assert_eq!(aux_id_from(&[1, 2, 4]), Some(4)); // lenovo_wmi_other
+        assert_eq!(aux_id_from(&[1, 2, 3]), Some(3)); // legion_hwmon (83F6)
+        assert_eq!(aux_id_from(&[1, 2, 3, 4]), Some(4));
+        assert_eq!(aux_id_from(&[1, 2]), None);
+        assert_eq!(aux_id_from(&[]), None);
     }
 
     #[test]

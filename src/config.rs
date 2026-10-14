@@ -90,6 +90,7 @@ pub struct UserProfile {
     pub fan1: u32,
     #[serde(default)]
     pub fan2: u32,
+    /// Third ("aux") fan slot — hardware fan3 or fan4, see `fans::slot_ids`.
     #[serde(default)]
     pub fan4: u32,
     #[serde(default = "default_brightness")]
@@ -823,7 +824,8 @@ pub fn remember_fan(fan: u8, rpm: u32) {
     update(|cfg| match fan {
         1 => cfg.last_session.fan1 = rpm,
         2 => cfg.last_session.fan2 = rpm,
-        4 => cfg.last_session.fan4 = rpm,
+        // Third-fan slot: fan4 (lenovo_wmi_other) or fan3 (legion_hwmon).
+        3 | 4 => cfg.last_session.fan4 = rpm,
         _ => log::debug!("config::remember_fan — unknown fan id {fan}, ignored"),
     });
 }

@@ -34,7 +34,10 @@ pub(crate) fn apply_profile_blocking(
         }
     }
 
-    for (fan, rpm) in [(1u8, p.fan1), (2, p.fan2), (4, p.fan4)] {
+    // `fan4` is the third-fan slot; resolve it to the real id (fan3 on
+    // legion_hwmon) so the write lands on an existing channel.
+    let [f1, f2, aux] = legion_core::fans::slot_ids();
+    for (fan, rpm) in [(f1, p.fan1), (f2, p.fan2), (aux, p.fan4)] {
         match send_command(DaemonCommand::SetFanTarget(fan, rpm)) {
             Ok(DaemonResponse::Error(e)) => errors.push(format!("fan {fan}: {e}")),
             Err(e) => errors.push(format!("fan {fan}: {e}")),
@@ -222,7 +225,7 @@ pub(crate) fn build_profiles_page(
         for lim in legion_core::profile::ppt_limits() {
             legion_core::config::remember_ppt(lim.id, lim.current);
         }
-        for fan in [1u8, 2, 4] {
+        for fan in legion_core::fans::slot_ids() {
             legion_core::config::remember_fan(
                 fan,
                 legion_core::fans::read_target(fan).unwrap_or(0),
