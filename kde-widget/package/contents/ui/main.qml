@@ -53,10 +53,10 @@ PlasmoidItem {
 
     // Power modes: label, legion-cli argument and accent colour.
     readonly property var modes: [
-        { label: "Quiet",       cli: "quiet",       color: "#3A7BD5" },
-        { label: "Balanced",    cli: "balanced",    color: "#C8102E" },
-        { label: "Performance", cli: "performance", color: "#E0892B" },
-        { label: "Extreme",     cli: "max-power",   color: "#8E5BD6" }
+        { label: "Quiet",       short: "Quiet",    cli: "quiet",       color: "#3A7BD5" },
+        { label: "Balanced",    short: "Balanced", cli: "balanced",    color: "#C8102E" },
+        { label: "Performance", short: "Perf.",    cli: "performance", color: "#E0892B" },
+        { label: "Extreme",     short: "Extreme",  cli: "max-power",   color: "#8E5BD6" }
     ]
     readonly property string profileKey: profileKeyOf(profile)
     readonly property int modeIndex: {
@@ -347,7 +347,9 @@ PlasmoidItem {
                             Layout.fillHeight: true
                             radio: true
                             radiusPx: 7
-                            text: modelData.label
+                            // Short text fits the 4-up segment; full name for a11y.
+                            text: modelData.short
+                            Accessible.name: modelData.label
                             checked: root.modeIndex === index
                             activeColor: modelData.color
                             enabled: root.daemonOnline
