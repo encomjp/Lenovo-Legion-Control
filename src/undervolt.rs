@@ -254,7 +254,7 @@ fn validate_driver() -> Result<(u32, String, String), String> {
     }
     if !Path::new(DRIVER).is_dir() {
         return Err(
-            "ryzen_smu driver is not loaded — open About → Setup and press 'Install' for AMD ryzen_smu (needs dkms + kernel headers)".into(),
+            "ryzen_smu driver is not loaded — open Settings → Setup and press 'Install' for AMD ryzen_smu (needs dkms + kernel headers)".into(),
         );
     }
     let codename = read_trimmed(&format!("{DRIVER}/codename"))

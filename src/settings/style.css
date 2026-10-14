@@ -317,11 +317,11 @@ headerbar windowtitle .subtitle {
 }
 
 .metric-chip .label {
-    font-size: 0.60rem;
+    font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    opacity: 0.44;
+    color: alpha(@card_fg_color, 0.75);
 }
 
 .metric-chip .value {
