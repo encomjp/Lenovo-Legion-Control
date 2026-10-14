@@ -1,6 +1,6 @@
 [package]
 name = "lenovo-legion-tool"
-version = "0.2.16"
+version = "0.2.17"
 edition = "2021"
 description = "Lenovo Legion laptop control — fans, profiles, keyboard RGB, sensors"
 license = "GPL-2.0-only"
@@ -36,6 +36,8 @@ signal-hook = "0.3"
 libc = "0.2"
 
 flate2 = "1"
+sha2 = "0.10"
+minisign-verify = "=0.3.0"
 
 # ─── Async utilities ───
 

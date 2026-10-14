@@ -469,6 +469,8 @@ pub(crate) fn build_cpu_features_page(
     let features = build_cpu_features(toast_overlay);
     gate.track(&features);
     page.append(&features);
+    // GPU working mode (MUX) — hidden unless the firmware supports it.
+    page.append(&build_gpu_mode_group(toast_overlay, gate));
     page
 }
 

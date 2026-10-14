@@ -234,6 +234,19 @@ fn boot_baseline(current: &[i16]) -> Vec<i16> {
         .clone()
 }
 
+/// True when this exact machine is one Curve Optimizer writes are validated
+/// on (AMD Legion Pro 7 16AFR10H / 83RU with Ryzen 9 9955HX3D). Needs no
+/// driver, so first-run setup can decide whether offering the ryzen_smu
+/// DKMS build makes sense at all.
+pub fn machine_validated() -> bool {
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let product_name = read_trimmed("/sys/class/dmi/id/product_name").unwrap_or_default();
+    let product_version = read_trimmed("/sys/class/dmi/id/product_version").unwrap_or_default();
+    product_name == "83RU"
+        && product_version.contains("Legion Pro 7 16AFR10H")
+        && cpuinfo.contains("AMD Ryzen 9 9955HX3D")
+}
+
 fn validate_driver() -> Result<(u32, String, String), String> {
     let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
     if cpuinfo.contains("GenuineIntel") || cpuinfo.contains("Intel(R)") {

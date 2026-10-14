@@ -212,6 +212,55 @@ pub struct AppConfig {
     /// the user disables it in Settings.
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
+    /// Legacy 4-zone RGB keyboard state (experimental write path).
+    #[serde(default)]
+    pub four_zone: FourZoneConfig,
+}
+
+/// Persisted 4-zone keyboard state (`crate::fourzone`). Names, not codes,
+/// so an unknown value falls back to a safe default on load.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FourZoneConfig {
+    /// static | breath | wave | smooth
+    pub effect: String,
+    /// 1..=4
+    pub speed: u8,
+    /// 0 = off, 1 = low, 2 = high
+    pub brightness: u8,
+    /// Zone colours left → right.
+    pub colors: [[u8; 3]; 4],
+    /// right | left (wave only)
+    pub direction: String,
+}
+
+impl Default for FourZoneConfig {
+    fn default() -> Self {
+        Self::from_state(&crate::fourzone::FourZoneState::default())
+    }
+}
+
+impl FourZoneConfig {
+    pub fn from_state(s: &crate::fourzone::FourZoneState) -> Self {
+        Self {
+            effect: s.effect.name().into(),
+            speed: s.speed.clamp(1, 4),
+            brightness: s.brightness.min(2),
+            colors: s.colors,
+            direction: s.direction.name().into(),
+        }
+    }
+
+    pub fn to_state(&self) -> crate::fourzone::FourZoneState {
+        use crate::fourzone::{FzEffect, WaveDir};
+        crate::fourzone::FourZoneState {
+            effect: FzEffect::from_name(&self.effect).unwrap_or(FzEffect::Static),
+            speed: self.speed.clamp(1, 4),
+            brightness: self.brightness.min(2),
+            colors: self.colors,
+            direction: WaveDir::from_name(&self.direction).unwrap_or(WaveDir::Right),
+        }
+    }
 }
 
 /// Alpha telemetry settings. Enabled by default (opt-out): one anonymized
@@ -344,6 +393,7 @@ impl Default for AppConfig {
             welcome_seen: false,
             thermal: ThermalConfig::default(),
             diagnostics: DiagnosticsConfig::default(),
+            four_zone: FourZoneConfig::default(),
         }
     }
 }
@@ -1046,6 +1096,36 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
             None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
         }
+    }
+
+    #[test]
+    fn four_zone_config_roundtrip_and_defaults() {
+        use crate::fourzone::{FourZoneState, FzEffect, WaveDir};
+        let st = FourZoneState {
+            effect: FzEffect::Wave,
+            speed: 3,
+            brightness: 0,
+            colors: [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]],
+            direction: WaveDir::Left,
+        };
+        let json = serde_json::to_string(&FourZoneConfig::from_state(&st)).unwrap();
+        let back: FourZoneConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.to_state(), st);
+        // Settings written before this field existed → defaults.
+        let mut v = serde_json::to_value(AppConfig::default()).unwrap();
+        v.as_object_mut().unwrap().remove("four_zone");
+        let old: AppConfig = serde_json::from_value(v).unwrap();
+        assert_eq!(old.four_zone, FourZoneConfig::default());
+        // Junk values clamp / fall back instead of reaching the packet.
+        let junk: FourZoneConfig = serde_json::from_str(
+            r#"{"effect":"bogus","speed":99,"brightness":7,"direction":"up"}"#,
+        )
+        .unwrap();
+        let s = junk.to_state();
+        assert_eq!(
+            (s.effect, s.speed, s.brightness, s.direction),
+            (FzEffect::Static, 4, 2, WaveDir::Right)
+        );
     }
 
     #[test]

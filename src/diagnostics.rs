@@ -91,6 +91,11 @@ pub struct DiagnosticsReport {
     /// Pseudonymous machine ID (UUID v4). Stable per installation; lets the
     /// operator correlate reports from the same machine over time.
     pub machine_id: String,
+    /// Migration link, present in exactly ONE report: the install's old
+    /// random id, sent once after the switch to the hardware-derived id so
+    /// the server can merge history. Absent in every other report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_machine_id: Option<String>,
 
     pub device: device::DeviceInfo,
     pub os: OsInfo,
@@ -99,6 +104,14 @@ pub struct DiagnosticsReport {
     /// Actual RPM reader selected for this report, exposed at top level for
     /// fleet queries. Device capability discovery remains nested in `device`.
     pub fan_backend: String,
+    /// Shown RPM is an unverified EC-fallback estimate ("(est.)" in the UI).
+    /// Additive in schema v4.
+    #[serde(default)]
+    pub fan_rpm_estimated: bool,
+    /// Active EC-fallback layout ("loq-ec" | "ideapad-ec" | "legion-ec"),
+    /// "none" for every other backend. Additive in schema v4.
+    #[serde(default)]
+    pub fan_layout: String,
     /// Separate writable target backend; null for read-only fan hardware.
     pub fan_control_backend: Option<String>,
     pub fans: Vec<FanLive>,
@@ -188,6 +201,91 @@ pub struct DeepReport {
     /// Discovered WMI devices/GUIDs
     #[serde(default)]
     pub wmi_devices: Vec<String>,
+    /// Read-only evidence for verifying the "(est.)" EC-fallback fan
+    /// readings across the fleet (additive, schema stays v4).
+    #[serde(default)]
+    pub fan_evidence: Option<FanEvidence>,
+}
+
+/// One EC layout decoded from the same raw EC snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LayoutCandidate {
+    pub layout: String,
+    /// Raw decoded [fan1, fan2] RPM, no plausibility filtering.
+    pub rpm: Vec<u32>,
+}
+
+/// Why the fan RPM shown on this machine is (not) trustworthy.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FanEvidence {
+    pub backend: String,
+    pub rpm_estimated: bool,
+    /// Chosen EC layout, "none" unless the EC fallback is the backend.
+    pub layout: String,
+    /// `bios-family:<prefix>:verified|unverified`, `product-version:unverified`,
+    /// `probe:legacy-order`, or "n/a".
+    pub layout_reason: String,
+    /// The constant-reading detector rejected the layout this session.
+    pub layout_rejected: bool,
+    /// Raw RPM of EVERY known layout; only present when the EC fallback is
+    /// the active backend and the EC is readable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<Vec<LayoutCandidate>>,
+    /// CPU temperature at the same instant, so the server can tell which
+    /// candidate tracks thermals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_temp_c: Option<f64>,
+}
+
+/// Pure assembly (unit-tested); `candidates`/`cpu_temp` are dropped unless
+/// the EC fallback is the active backend.
+pub fn build_fan_evidence(
+    backend: &str,
+    rpm_estimated: bool,
+    layout: Option<&str>,
+    layout_reason: &str,
+    layout_rejected: bool,
+    candidates: Option<Vec<(&str, Vec<u32>)>>,
+    cpu_temp: f64,
+) -> FanEvidence {
+    let ec = layout.is_some();
+    let candidates = candidates
+        .filter(|_| ec)
+        .filter(|c| !c.is_empty())
+        .map(|c| {
+            c.into_iter()
+                .map(|(l, rpm)| LayoutCandidate {
+                    layout: l.to_string(),
+                    rpm,
+                })
+                .collect::<Vec<_>>()
+        });
+    FanEvidence {
+        backend: backend.to_string(),
+        rpm_estimated,
+        layout: layout.unwrap_or("none").to_string(),
+        layout_reason: if ec { layout_reason } else { "n/a" }.to_string(),
+        layout_rejected: ec && layout_rejected,
+        cpu_temp_c: candidates
+            .as_ref()
+            .and(Some(cpu_temp))
+            .filter(|t| t.is_finite() && *t > 0.0),
+        candidates,
+    }
+}
+
+fn collect_fan_evidence(cpu_temp: f64) -> FanEvidence {
+    let layout = fans::ec_layout_name();
+    let candidates = layout.as_ref().and_then(|_| fans::ec_candidate_rpms());
+    build_fan_evidence(
+        &fans::backend_name(),
+        fans::rpm_estimated(),
+        layout.as_deref(),
+        &fans::ec_layout_reason(),
+        fans::ec_layout_rejected(),
+        candidates,
+        cpu_temp,
+    )
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -649,19 +747,7 @@ pub fn collect() -> DiagnosticsReport {
         s.ram_temps.len()
     );
     let app_cfg = config::get();
-    let mut machine_id = app_cfg.diagnostics.machine_id.clone();
-    if machine_id.is_empty() {
-        let mut dc = app_cfg.diagnostics.clone();
-        dc.ensure_machine_id();
-        let minted = dc.machine_id.clone();
-        // Persist minted ID atomically (flock held inside update); re-read winner to avoid TOCTOU race.
-        config::update(|c| {
-            if c.diagnostics.machine_id.is_empty() {
-                c.diagnostics.machine_id = minted.clone();
-            }
-        });
-        machine_id = config::get().diagnostics.machine_id;
-    }
+    let machine_id = ensure_machine_id();
 
     let battery_summary = BatterySummary {
         capacity_pct: battery::capacity(),
@@ -776,11 +862,14 @@ pub fn collect() -> DiagnosticsReport {
         generated_at,
         app_version: env!("CARGO_PKG_VERSION"),
         machine_id,
+        previous_machine_id: peek_previous_machine_id(),
         device: device::detect(),
         os: read_os_release(),
         sensors: s,
         battery: battery_summary,
         fan_backend: fans::backend_name(),
+        fan_rpm_estimated: rpm_estimated,
+        fan_layout: fans::ec_layout_name().unwrap_or_else(|| "none".into()),
         fan_control_backend: fans::control_backend_name(),
         fans: fan_list,
         thermal: thermal_digest,
@@ -885,11 +974,13 @@ pub fn capability_digest() -> String {
 /// detail, battery detail, installed-software detection. Heavier than
 /// `collect()` (subprocess + sysfs walk) — only called at launch / hourly /
 /// capability change / explicit send.
-fn collect_deep(reason: &str) -> DeepReport {
+fn collect_deep(reason: &str, cpu_temp: f64) -> DeepReport {
     let mut deep = DeepReport {
         reason: reason.to_string(),
         ..Default::default()
     };
+
+    deep.fan_evidence = Some(collect_fan_evidence(cpu_temp));
 
     // ─── GPU detailed: nvidia-smi -q, else amdgpu sysfs walk ───
     deep.gpu_detailed = crate::dgpu::detailed_query();
@@ -2312,33 +2403,7 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     LAST_SEND_MS.store(now_ms, Ordering::Relaxed);
 
     let cfg = config::get().diagnostics;
-    let machine_id = if cfg.machine_id.is_empty() {
-        // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
-        // (bounded read — never unbounded EOF on this char device).
-        let mut b = [0u8; 16];
-        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-            use std::io::Read as _;
-            let _ = f.read_exact(&mut b);
-        } else {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            let pid = std::process::id() as u128;
-            b = (now ^ (pid << 64)).to_be_bytes();
-        }
-        b[6] = (b[6] & 0x0F) | 0x40;
-        b[8] = (b[8] & 0x3F) | 0x80;
-        let id = format!(
-            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-        );
-        config::update(|c| c.diagnostics.machine_id = id.clone());
-        id
-    } else {
-        cfg.machine_id.clone()
-    };
+    let machine_id = ensure_machine_id();
     let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
     log::debug!("diagnostics send → endpoint {endpoint}");
     let mut report = collect();
@@ -2347,10 +2412,21 @@ pub fn collect_and_send(override_url: Option<&str>) -> Result<String, String> {
     // scheduler stamps `deep` on launch/hourly/change; manual sends from
     // CLI/GUI always carry deep data (they are explicit diagnostics runs).
     let resp = send(&report, &endpoint)?;
+    if report.previous_machine_id.is_some() {
+        consume_previous_machine_id();
+    }
     config::update(|c| {
         c.diagnostics.last_sent = Some(chrono::Utc::now().to_rfc3339());
     });
     Ok(resp)
+}
+
+/// `collect()` plus the deep block, for `legion-cli diagnose dump --deep`
+/// (read-only, nothing is sent).
+pub fn collect_with_deep(reason: &str) -> DiagnosticsReport {
+    let mut report = collect();
+    report.deep = Some(collect_deep(reason, report.sensors.cpu_temp));
+    report
 }
 
 /// Collect + send with a deep block attached (launch / hourly /
@@ -2370,131 +2446,67 @@ pub fn collect_and_send_deep(override_url: Option<&str>, reason: &str) -> Result
     LAST_SEND_MS.store(now_ms, Ordering::Relaxed);
 
     let cfg = config::get().diagnostics;
-    let machine_id = if cfg.machine_id.is_empty() {
-        ensure_machine_id()
-    } else {
-        cfg.machine_id.clone()
-    };
+    let machine_id = ensure_machine_id();
     let endpoint = resolve_endpoint(override_url, &cfg.endpoint);
     log::debug!("diagnostics send (deep, {reason}) → endpoint {endpoint}");
     let mut report = collect();
     report.machine_id = machine_id.clone();
-    report.deep = Some(collect_deep(reason));
+    report.deep = Some(collect_deep(reason, report.sensors.cpu_temp));
     let resp = send(&report, &endpoint)?;
+    if report.previous_machine_id.is_some() {
+        consume_previous_machine_id();
+    }
     config::update(|c| {
         c.diagnostics.last_sent = Some(chrono::Utc::now().to_rfc3339());
     });
     Ok(resp)
 }
 
-/// Shared system-wide machine-id store. The GUI (user) and daemon (root)
-/// historically kept separate settings.json copies (different $HOME), so
-/// each minted its own id — one laptop appeared as multiple fleet hosts.
-/// A file in /var/lib is shared by both contexts; the DMI product UUID is
-/// the last-resort fallback (root-readable only, but the daemon is root and
-/// the GUI reads the shared file).
-const MACHINE_ID_FILE: &str = "/var/lib/legion-control/machine-id";
-
-fn read_machine_id_file() -> Option<String> {
-    std::fs::read_to_string(MACHINE_ID_FILE)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| s.len() == 36)
-}
-
-fn write_machine_id_file(id: &str) {
-    let path = std::path::Path::new(MACHINE_ID_FILE);
-    if let Some(dir) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            log::debug!("machine-id store: create_dir_all failed: {e}");
-            return;
-        }
-    }
-    if let Err(e) = std::fs::write(path, id) {
-        log::debug!("machine-id store: write failed: {e}");
-    }
-}
-
-/// DMI product UUID — stable per-machine firmware identity (root-readable).
-/// None on machines that don't expose it or when unreadable (non-root).
-fn dmi_product_uuid() -> Option<String> {
-    std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_uuid")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| s.len() >= 36)
-}
-fn hash_to_pseudonym(salt: &str, input: &str) -> String {
-    // 128-bit FNV-1a hash for deterministic, irreversible pseudonymization
-    const FNV_OFFSET_BASIS: u128 = 0x6c62272e07bb014262b821756295c58d;
-    const FNV_PRIME: u128 = 0x000000000100000000000000000001b3;
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in salt.as_bytes().iter().chain(input.as_bytes()) {
-        hash ^= *byte as u128;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    let mut b = hash.to_be_bytes();
-    b[6] = (b[6] & 0x0F) | 0x40; // UUID v4 format
-    b[8] = (b[8] & 0x3F) | 0x80; // UUID variant 1
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-    )
-}
-
-/// Mint-or-load the pseudonymous machine id (shared by both send paths).
-/// Resolution order (converges daemon + GUI which have different $HOME):
-///   1. shared store /var/lib/legion-control/machine-id (canonical, survives
-///      reinstalls, shared between root daemon and user GUI)
-///   2. settings.json (legacy, for existing installs — backfills the store)
-///   3. DMI product UUID (pseudonymized deterministically, survives wipes)
-///   4. fresh random UUID v4 (persisted to both the store and settings)
+/// Mint-or-load the pseudonymous machine id (shared by all send paths).
+///
+/// The id is derived from the hardware (see [`crate::telemetry_id`]) by the
+/// ROOT process only (it alone can read DMI `product_uuid`) and published in
+/// `/var/lib/legion-control/machine-id`; unprivileged GUI/CLI processes read
+/// that file so every process reports the same id. A one-time migration from
+/// the old random id parks it in `previous-machine-id` for
+/// [`take_previous_machine_id`].
 fn ensure_machine_id() -> String {
-    // Canonical shared store wins — daemon and GUI converge here.
-    if let Some(id) = read_machine_id_file() {
-        let cfg = config::get().diagnostics;
-        if cfg.machine_id != id {
-            config::update(|c| c.diagnostics.machine_id = id.clone());
-        }
-        return id;
-    }
-    let cfg = config::get().diagnostics;
-    if !cfg.machine_id.is_empty() {
-        // Legacy path: no shared file yet — promote settings.json id.
-        write_machine_id_file(&cfg.machine_id);
-        return cfg.machine_id.clone();
-    }
-    if let Some(raw_uuid) = dmi_product_uuid() {
-        let id = hash_to_pseudonym("legion-control-machine-id:", &raw_uuid);
-        write_machine_id_file(&id);
-        config::update(|c| c.diagnostics.machine_id = id.clone());
-        log::info!("machine-id: derived pseudonym from DMI product UUID");
-        return id;
-    }
-    // Generate a fresh UUID v4 from exactly 16 bytes of /dev/urandom
-    // (bounded read — never unbounded EOF on this char device).
-    let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read as _;
-        let _ = f.read_exact(&mut b);
+    use crate::telemetry_id as tid;
+    static ROOT_HW: std::sync::OnceLock<Option<(String, tid::Source)>> = std::sync::OnceLock::new();
+    // SAFETY: geteuid has no preconditions.
+    let is_root = unsafe { libc::geteuid() } == 0;
+    let store = tid::Store::system();
+    let settings_id = config::get().diagnostics.machine_id;
+    let hw = if is_root {
+        ROOT_HW.get_or_init(tid::hardware_id_from_system).clone()
     } else {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let pid = std::process::id() as u128;
-        b = (now ^ (pid << 64)).to_be_bytes();
+        None
+    };
+    let res = tid::resolve(is_root, store.read(), Some(&settings_id), hw, tid::random_id);
+    if let Some(src) = res.write_shared {
+        if let Some(old) = &res.previous {
+            // Park first: if we crash between the writes, the link survives.
+            store.record_previous(old);
+            log::info!("machine-id: migrated to hardware-derived id ({})", src.as_str());
+        }
+        store.write(&res.id, src);
     }
-    b[6] = (b[6] & 0x0F) | 0x40;
-    b[8] = (b[8] & 0x3F) | 0x80;
-    let id = format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-    );
-    write_machine_id_file(&id);
-    config::update(|c| c.diagnostics.machine_id = id.clone());
-    id
+    if settings_id != res.id {
+        let id = res.id.clone();
+        config::update(|c| c.diagnostics.machine_id = id);
+    }
+    res.id
+}
+
+/// One-shot `previous_machine_id` for the next report, if this process can
+/// also consume it (see [`crate::telemetry_id::Store::pending_previous`]).
+fn peek_previous_machine_id() -> Option<String> {
+    crate::telemetry_id::Store::system().pending_previous()
+}
+
+/// Mark the previous id as delivered (call after the report was sent).
+fn consume_previous_machine_id() {
+    crate::telemetry_id::Store::system().clear_previous();
 }
 
 #[cfg(test)]
@@ -2571,6 +2583,89 @@ mod tests {
             assert!(!msg.contains("/home/"), "last_error leaked home path");
             assert!(!msg.contains("/run/user/"), "last_error leaked uid path");
         }
+
+        // Raw hardware identifiers behind the telemetry id must never be sent,
+        // in the minute report or the deep (hourly) one.
+        let deep_json = serde_json::to_string(&collect_with_deep("test")).expect("serializable");
+        for raw_file in [
+            "/sys/class/dmi/id/product_uuid",
+            "/sys/class/dmi/id/product_serial",
+            "/sys/class/dmi/id/board_serial",
+            "/etc/machine-id",
+        ] {
+            if let Ok(raw) = std::fs::read_to_string(raw_file) {
+                let raw = raw.trim();
+                if raw.len() >= 8 {
+                    for (name, doc) in [("minute", &json), ("deep", &deep_json)] {
+                        assert!(
+                            !doc.to_lowercase().contains(&raw.to_lowercase()),
+                            "{raw_file} leaked into the {name} report"
+                        );
+                    }
+                }
+            }
+        }
+        // The id is a well-formed UUID and the fan fields are present.
+        assert!(crate::telemetry_id::is_uuid_shaped(&report.machine_id));
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["fan_rpm_estimated"].is_boolean());
+        assert!(v["fan_layout"].is_string());
+        assert!(v["deep"].is_null(), "minute report carries no deep block");
+        let dv: serde_json::Value = serde_json::from_str(&deep_json).unwrap();
+        assert!(dv["deep"]["fan_evidence"]["backend"].is_string());
+        // Raw EC candidates are numbers only: no strings beyond layout names.
+        assert_eq!(REPORT_SCHEMA_VERSION, 4, "fan/id fields are additive");
+    }
+
+    #[test]
+    fn previous_machine_id_is_omitted_unless_pending() {
+        let mut report = collect();
+        report.previous_machine_id = None;
+        let v = serde_json::to_value(&report).unwrap();
+        assert!(v.get("previous_machine_id").is_none());
+        report.previous_machine_id = Some("11111111-1111-4111-8111-111111111111".into());
+        let v = serde_json::to_value(&report).unwrap();
+        assert_eq!(v["previous_machine_id"], "11111111-1111-4111-8111-111111111111");
+    }
+
+    #[test]
+    fn fan_evidence_lists_every_layout_only_for_ec_fallback() {
+        let cands = || {
+            Some(vec![
+                ("loq-ec", vec![4100, 4100]),
+                ("ideapad-ec", vec![900, 900]),
+                ("legion-ec", vec![0, 2400]),
+            ])
+        };
+        let ev = build_fan_evidence(
+            "ec-fallback", true, Some("legion-ec"), "bios-family:M2CN:unverified", false, cands(), 61.0,
+        );
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["layout"], "legion-ec");
+        assert_eq!(v["layout_reason"], "bios-family:M2CN:unverified");
+        assert_eq!(v["rpm_estimated"], true);
+        assert_eq!(v["cpu_temp_c"], 61.0);
+        let names: Vec<&str> = v["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["layout"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["loq-ec", "ideapad-ec", "legion-ec"]);
+        assert_eq!(v["candidates"][2]["rpm"], serde_json::json!([0, 2400]));
+
+        // Hwmon backend: no layout, no candidates, no temperature.
+        let ev = build_fan_evidence("legion_hwmon", false, None, "bios-family:X:verified", true, cands(), 61.0);
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["layout"], "none");
+        assert_eq!(v["layout_reason"], "n/a");
+        assert_eq!(v["layout_rejected"], false);
+        assert!(v.get("candidates").is_none() && v.get("cpu_temp_c").is_none());
+
+        // EC fallback but unreadable EC: layout known, no candidates.
+        let ev = build_fan_evidence("ec-fallback", true, Some("loq-ec"), "probe:legacy-order", false, None, 50.0);
+        let v = serde_json::to_value(&ev).unwrap();
+        assert!(v.get("candidates").is_none() && v.get("cpu_temp_c").is_none());
     }
 
     #[test]

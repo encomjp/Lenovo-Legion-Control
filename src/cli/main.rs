@@ -62,6 +62,86 @@ fn ideapad_toggle(
     }
 }
 
+/// Fetch the GPU working-mode status from the daemon (exit 1 on failure).
+fn fetch_gpu_mode() -> legion_core::gpu_mode::GpuModeStatus {
+    match send_command(DaemonCommand::GetGpuMode) {
+        Ok(DaemonResponse::GpuMode(st)) => st,
+        Ok(DaemonResponse::Error(e)) => fail(e),
+        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+            fail("the running legion-control service is too old for gpu-mode; restart/update it")
+        }
+        Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
+fn print_gpu_mode(st: &legion_core::gpu_mode::GpuModeStatus) {
+    use legion_core::gpu_mode::GpuMode;
+    let name = |m: Option<GpuMode>| m.map_or("unknown", |m| m.label());
+    println!("GPU mode (MUX)");
+    println!(
+        "  supported      {}",
+        if st.supported { "yes" } else { "no" }
+    );
+    println!("  backend        {}", st.backend);
+    println!("  model          {}", st.model_note);
+    println!("  active (boot)  {}", name(st.active));
+    println!("  firmware       {}", name(st.configured));
+    if st.reboot_pending {
+        println!(
+            "  pending        reboot required to apply {}",
+            name(st.configured)
+        );
+    }
+    println!(
+        "  iGPU driver    {}",
+        st.igpu_driver.as_deref().unwrap_or("none bound")
+    );
+    if !st.detail.is_empty() {
+        println!("  note           {}", st.detail);
+    }
+}
+
+/// `legion-cli gpu-mode [hybrid|dgpu] [--yes-i-understand]`.
+fn gpu_mode_cmd(mode: Option<&str>, ack: bool) {
+    use legion_core::gpu_mode::GpuMode;
+    let Some(raw) = mode else {
+        print_gpu_mode(&fetch_gpu_mode());
+        return;
+    };
+    let Some(target) = GpuMode::parse(raw) else {
+        usage_fail(format!("unknown GPU mode '{raw}' (use hybrid|dgpu)"));
+    };
+    if !ack {
+        eprintln!("{}", legion_core::gpu_mode::RISK_TEXT);
+        eprintln!();
+        eprintln!(
+            "error: re-run with --yes-i-understand to switch to {} (nothing was changed)",
+            target.label()
+        );
+        std::process::exit(2);
+    }
+    match send_command(DaemonCommand::SetGpuMode {
+        mode: target,
+        acknowledge: true,
+    }) {
+        Ok(DaemonResponse::GpuMode(st)) => {
+            print_gpu_mode(&st);
+            println!();
+            println!(
+                "GPU mode set to {}. Reboot to apply. If the screen stays black, enter BIOS setup (F2) and change the GPU mode back.",
+                target.label()
+            );
+        }
+        Ok(DaemonResponse::Error(e)) => fail(e),
+        Err(e) if e.contains("variant index") || e.contains("Parse:") => {
+            fail("the running legion-control service is too old for gpu-mode; restart/update it")
+        }
+        Err(e) => fail(e),
+        _ => fail("unexpected response from service"),
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "legion-cli",
@@ -126,6 +206,11 @@ enum Commands {
     },
     /// Spectrum brightness 0-9
     Brightness { level: u8 },
+    /// 4-zone RGB keyboard (Legion 5 2020-2024, IdeaPad Gaming, LOQ) — experimental
+    Zones {
+        #[command(subcommand)]
+        action: ZonesCmd,
+    },
     /// Show battery info
     Battery,
     /// Set charge limit: 60, 80, or 100
@@ -213,18 +298,69 @@ enum Commands {
         #[command(subcommand)]
         action: DiagAction,
     },
+    /// Show or set the GPU working mode (MUX): no argument shows, hybrid|dgpu sets.
+    /// A change takes effect after a reboot; BIOS setup (F2) is the way back.
+    GpuMode {
+        /// hybrid (iGPU drives the panel, dGPU on demand) or dgpu (dGPU only)
+        mode: Option<String>,
+        /// Confirm you understand: reboot required, a wrong mode can leave the
+        /// internal panel black, and the fix is BIOS setup (F2) → GPU mode
+        #[arg(long)]
+        yes_i_understand: bool,
+    },
     /// Check GitHub for new releases of Legion Control
     CheckUpdate {
         /// Download and install the matching release (AppImage, deb, rpm, Arch, tarball)
         #[arg(long)]
         apply: bool,
+        /// With --apply: install the latest release even if it is not newer
+        /// than the running version (reinstall / roll back). Signatures are
+        /// still required.
+        #[arg(long, requires = "apply")]
+        allow_downgrade: bool,
     },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+enum ZonesCmd {
+    /// Show the detected 4-zone controller and the saved state (no write)
+    Status,
+    /// Static colours, zones left → right (#RRGGBB or RRGGBB)
+    Static {
+        c1: String,
+        c2: String,
+        c3: String,
+        c4: String,
+        /// 1 = low, 2 = high
+        #[arg(long, default_value_t = 2)]
+        brightness: u8,
+    },
+    /// Animated effect: breath (uses saved zone colours), wave, smooth
+    Effect {
+        /// breath, wave, smooth
+        name: String,
+        /// 1 (slowest) - 4 (fastest)
+        #[arg(long, default_value_t = 2)]
+        speed: u8,
+        /// Wave direction: left or right
+        #[arg(long, default_value = "right")]
+        dir: String,
+        /// 1 = low, 2 = high
+        #[arg(long, default_value_t = 2)]
+        brightness: u8,
+    },
+    /// Turn the 4-zone backlight off
+    Off,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 enum DiagAction {
     /// Print the full ANONYMOUS diagnostics JSON (no upload)
-    Dump,
+    Dump {
+        /// Include the deep block (hourly-report content, e.g. fan_evidence)
+        #[arg(long)]
+        deep: bool,
+    },
     /// Run read-only self-health checks and print a pass/fail table
     Selfcheck,
     /// Scan for active machine anomalies (fan stalls, hot NVMe, limiter
@@ -442,6 +578,7 @@ fn main() {
                 Err(e) => fail(format!("{e}. Run as root or ensure udev rules are loaded.")),
             }
         }
+        Commands::Zones { action } => zones_cmd(action),
         Commands::Battery => match send_command(DaemonCommand::GetBattery) {
             Ok(DaemonResponse::Battery {
                 capacity,
@@ -628,6 +765,19 @@ fn main() {
             }
         }
         Commands::AudioFix => {
+            {
+                let pre = legion_core::audio::diagnose();
+                if pre.health == legion_core::audio::Health::DriverMissing
+                    && pre.amp_acpi
+                    && !pre.firmware_ok
+                {
+                    println!("AW88399 firmware missing; installing via PolicyKit helper...");
+                    match legion_core::amp_firmware::install_via_helper() {
+                        Ok(msg) => println!("ok  {msg}"),
+                        Err(e) => eprintln!("err firmware install: {e}"),
+                    }
+                }
+            }
             let report = legion_core::audio::troubleshoot();
             for s in &report.steps {
                 println!("ok  {s}");
@@ -923,8 +1073,13 @@ fn main() {
                     _ => fail("daemon not updated: unexpected response"),
                 }
             }
-            DiagAction::Dump => {
-                let json = serde_json::to_string_pretty(&diagnostics::collect())
+            DiagAction::Dump { deep } => {
+                let report = if deep {
+                    diagnostics::collect_with_deep("dump")
+                } else {
+                    diagnostics::collect()
+                };
+                let json = serde_json::to_string_pretty(&report)
                     .unwrap_or_else(|e| fail(format!("serialize diagnostics report: {e}")));
                 log::debug!("diagnose dump: {} bytes", json.len());
                 println!("{json}");
@@ -994,7 +1149,14 @@ fn main() {
                 }
             }
         },
-        Commands::CheckUpdate { apply } => match legion_core::update::check_latest_release() {
+        Commands::GpuMode {
+            mode,
+            yes_i_understand,
+        } => gpu_mode_cmd(mode.as_deref(), yes_i_understand),
+        Commands::CheckUpdate {
+            apply,
+            allow_downgrade,
+        } => match legion_core::update::check_latest_release() {
             Ok(info) => {
                 println!("current version: {}", legion_core::update::CURRENT_VERSION);
                 println!("latest release:  {} ({})", info.version, info.name);
@@ -1003,27 +1165,44 @@ fn main() {
                 } else if let Some(asset) = &info.appimage {
                     println!("appimage:        {} ({} bytes)", asset.name, asset.size);
                 }
-                if info.is_newer {
-                    println!(
-                        "\nA new version of Legion Control is available: v{}",
-                        info.version
-                    );
+                if info.is_newer || (apply && allow_downgrade) {
+                    if info.is_newer {
+                        println!(
+                            "\nA new version of Legion Control is available: v{}",
+                            info.version
+                        );
+                    } else {
+                        println!(
+                            "\n--allow-downgrade: installing v{} over v{}",
+                            info.version,
+                            legion_core::update::CURRENT_VERSION
+                        );
+                    }
                     if apply {
-                        match legion_core::update::apply_update(&info, |phase, bytes, total| {
-                            let label = match phase {
-                                legion_core::update::UpdatePhase::Downloading => "downloading",
-                                legion_core::update::UpdatePhase::Verifying => "verifying",
-                                legion_core::update::UpdatePhase::Building
-                                | legion_core::update::UpdatePhase::BuildingLog(_) => "building",
-                                legion_core::update::UpdatePhase::Installing => "installing",
-                            };
-                            if let Some(t) = total.filter(|t| *t > 0) {
-                                eprint!("\r{label}: {bytes}/{t} bytes");
-                            } else {
-                                eprint!("\r{label}…");
-                            }
-                            let _ = std::io::Write::flush(&mut std::io::stderr());
-                        }) {
+                        let opts = legion_core::update::UpdateOptions { allow_downgrade };
+                        let kind = legion_core::update::detect_install_kind();
+                        match legion_core::update::apply_update_with_options(
+                            &info,
+                            kind,
+                            opts,
+                            |phase, bytes, total| {
+                                let label = match phase {
+                                    legion_core::update::UpdatePhase::Downloading => "downloading",
+                                    legion_core::update::UpdatePhase::Verifying => "verifying",
+                                    legion_core::update::UpdatePhase::Building
+                                    | legion_core::update::UpdatePhase::BuildingLog(_) => {
+                                        "building"
+                                    }
+                                    legion_core::update::UpdatePhase::Installing => "installing",
+                                };
+                                if let Some(t) = total.filter(|t| *t > 0) {
+                                    eprint!("\r{label}: {bytes}/{t} bytes");
+                                } else {
+                                    eprint!("\r{label}…");
+                                }
+                                let _ = std::io::Write::flush(&mut std::io::stderr());
+                            },
+                        ) {
                             Ok(outcome) => {
                                 eprintln!();
                                 println!("installed: {}", outcome.relaunch.display());
@@ -1370,6 +1549,7 @@ fn cmd_label(cmd: &Commands) -> String {
             zone,
         } => format!("effect name={name} rgb=#{r:02X}{g:02X}{b:02X} speed={speed} zone={zone}"),
         Commands::Brightness { level } => format!("brightness level={level}"),
+        Commands::Zones { action } => format!("zones {action:?}"),
         Commands::Battery => "battery".into(),
         Commands::ChargeLimit { pct } => format!("charge-limit pct={pct}"),
         Commands::Conservation { state } => format!("conservation state={state}"),
@@ -1399,7 +1579,104 @@ fn cmd_label(cmd: &Commands) -> String {
         } => format!("reset-undervolt ack={i_understand_instability_risk}"),
         Commands::Thermal { command } => format!("thermal {}", thermal_cmd_label(command)),
         Commands::Diagnose { action } => format!("diagnose {}", diag_action_label(action)),
-        Commands::CheckUpdate { apply } => format!("check-update apply={apply}"),
+        Commands::GpuMode {
+            mode,
+            yes_i_understand,
+        } => format!("gpu-mode mode={mode:?} ack={yes_i_understand}"),
+        Commands::CheckUpdate {
+            apply,
+            allow_downgrade,
+        } => format!("check-update apply={apply} allow_downgrade={allow_downgrade}"),
+    }
+}
+
+/// `legion-cli zones …` — 4-zone RGB (experimental). Writes go straight to
+/// the hidraw node (udev uaccess), like the Spectrum commands.
+fn zones_cmd(action: ZonesCmd) {
+    use legion_core::fourzone::{self, FzEffect, WaveDir};
+    let check_bri = |b: u8| {
+        if !(1..=2).contains(&b) {
+            usage_fail(format!(
+                "brightness '{b}' out of range (1-2; use `zones off` for off)"
+            ));
+        }
+        b
+    };
+    let mut state = legion_core::config::get().four_zone.to_state();
+    let summary = match action {
+        ZonesCmd::Status => {
+            match fourzone::find_hidraw() {
+                Some(p) => println!("controller   {} (4-zone, 33-byte report 0xCC)", p.display()),
+                None => {
+                    println!("controller   not found (no 048d hidraw with a 4-zone descriptor)")
+                }
+            }
+            let c = legion_core::config::get().four_zone;
+            let cols: Vec<String> = c
+                .colors
+                .iter()
+                .map(|[r, g, b]| format!("#{r:02X}{g:02X}{b:02X}"))
+                .collect();
+            println!(
+                "saved        effect={} speed={} brightness={} dir={} colours={}",
+                c.effect,
+                c.speed,
+                c.brightness,
+                c.direction,
+                cols.join(" ")
+            );
+            println!(
+                "report       {:02X?}",
+                fourzone::build_report(&c.to_state())
+            );
+            return;
+        }
+        ZonesCmd::Static {
+            c1,
+            c2,
+            c3,
+            c4,
+            brightness,
+        } => {
+            for (i, c) in [c1, c2, c3, c4].iter().enumerate() {
+                state.colors[i] = fourzone::parse_color(c).unwrap_or_else(|| {
+                    usage_fail(format!("zone {} colour '{c}' is not #RRGGBB", i + 1))
+                });
+            }
+            state.effect = FzEffect::Static;
+            state.brightness = check_bri(brightness);
+            "static".to_string()
+        }
+        ZonesCmd::Effect {
+            name,
+            speed,
+            dir,
+            brightness,
+        } => {
+            let fx = match FzEffect::from_name(&name) {
+                Some(fx) if fx != FzEffect::Static => fx,
+                _ => usage_fail(format!(
+                    "unknown effect '{name}'. Try: breath, wave, smooth (or `zones static …`)"
+                )),
+            };
+            if !(1..=4).contains(&speed) {
+                usage_fail(format!("speed '{speed}' out of range (1-4)"));
+            }
+            state.effect = fx;
+            state.speed = speed;
+            state.direction = WaveDir::from_name(&dir)
+                .unwrap_or_else(|| usage_fail(format!("unknown direction '{dir}' (left|right)")));
+            state.brightness = check_bri(brightness);
+            fx.name().to_string()
+        }
+        ZonesCmd::Off => {
+            state.brightness = 0;
+            "off".to_string()
+        }
+    };
+    match fourzone::apply_and_save(&state) {
+        Ok(()) => println!("zones → {summary} (experimental 4-zone)"),
+        Err(e) => fail(e),
     }
 }
 
@@ -1421,7 +1698,7 @@ fn thermal_cmd_label(cmd: &ThermalCmd) -> String {
 /// Dispatch descriptor for `diagnose` subactions.
 fn diag_action_label(action: &DiagAction) -> String {
     match action {
-        DiagAction::Dump => "dump".into(),
+        DiagAction::Dump { .. } => "dump".into(),
         DiagAction::Selfcheck => "selfcheck".into(),
         DiagAction::Faults => "faults".into(),
         DiagAction::Enable => "enable".into(),

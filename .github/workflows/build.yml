@@ -223,13 +223,60 @@ jobs:
     # create a stray "master" release.
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - run: ls -R artifacts
+      # Every asset gets a detached minisign signature (<asset>.minisig) whose
+      # trusted comment is "file:<asset name> version:<tag>". The in-app
+      # updater refuses anything unsigned, so this step must never be skipped:
+      # a missing secret or a placeholder public key fails the release.
+      # Key handling: see docs/SIGNING.md. MINISIGN_PASSWORD is fed on stdin
+      # when set; leave it unset only for a key generated with `-W`.
+      - name: Sign release assets (minisign)
+        shell: bash
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set; refusing to publish an unsigned release (see docs/SIGNING.md)"
+            exit 1
+          fi
+          if grep -q 'REPLACE_WITH_MINISIGN_PUBLIC_KEY' data/release-signing.pub; then
+            echo "::error::data/release-signing.pub is still the placeholder; clients could not verify this release (see docs/SIGNING.md)"
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign >/dev/null
+          umask 077
+          KEY="$RUNNER_TEMP/legion-control.minisign.key"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$KEY"
+          count=0
+          while IFS= read -r -d '' f; do
+            name=$(basename "$f")
+            case "$name" in *.minisig) continue ;; esac
+            if [ -n "${MINISIGN_PASSWORD:-}" ]; then
+              printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$KEY" -m "$f" -t "file:$name version:$TAG"
+            else
+              minisign -S -s "$KEY" -m "$f" -t "file:$name version:$TAG" </dev/null
+            fi
+            # Verify against the public key the app embeds, so a secret key
+            # that does not match data/release-signing.pub fails the release.
+            minisign -V -q -p data/release-signing.pub -m "$f" -x "$f.minisig"
+            echo "signed $name"
+            count=$((count + 1))
+          done < <(find artifacts -type f -print0)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no release assets found to sign"
+            exit 1
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*

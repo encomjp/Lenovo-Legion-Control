@@ -3,6 +3,17 @@
 //! Queries the GitHub releases API via `curl` (no extra HTTP crate), compares
 //! semver tags, and installs the matching asset for this copy: AppImage,
 //! `.deb`, `.rpm`, Arch `.pkg.tar.zst`, or a portable `x86_64` tarball.
+//!
+//! Every downloaded asset must carry a minisign signature (`<asset>.minisig`)
+//! made with the release key embedded from `data/release-signing.pub`. The
+//! signed trusted comment binds the file name and version
+//! (`file:<name> version:<tag>`), so a validly signed asset cannot be swapped
+//! for another one or for an older release. There is no unsigned fallback:
+//! a missing or bad signature, or an unconfigured (placeholder) key, aborts
+//! the update. Root-side installs never read the user-writable download
+//! directly: the pkexec'd script copies it into a fresh root-owned 0700
+//! directory, re-checks the sha256 computed over the verified bytes, and only
+//! then installs.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -16,14 +27,35 @@ pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const USER_AGENT: &str = concat!("legion-control-updater/", env!("CARGO_PKG_VERSION"));
 const MIN_DOWNLOAD_BYTES: u64 = 64 * 1024;
+const MAX_SIGNATURE_BYTES: u64 = 4096;
+
+/// Minisign public key that every release asset must be signed with.
+/// Kept in a separate file so key changes are easy to review.
+const RELEASE_SIGNING_PUBKEY: &str = include_str!("../data/release-signing.pub");
+/// Marker in the shipped placeholder key file. While present, updates fail closed.
+const PUBKEY_PLACEHOLDER: &str = "REPLACE_WITH_MINISIGN_PUBLIC_KEY";
+
+/// curl flags that pin every request to HTTPS (also across redirects).
+const CURL_SECURE_ARGS: [&str; 5] = ["--proto", "=https", "--proto-redir", "=https", "--tlsv1.2"];
+
+/// Knobs for [`apply_update_with_options`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UpdateOptions {
+    /// Install even when the release is not newer than the running version.
+    pub allow_downgrade: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReleaseAsset {
     pub name: String,
     pub url: String,
     pub size: u64,
-    /// Lowercase hex, no `sha256:` prefix.
+    /// Lowercase hex, no `sha256:` prefix. Informational only: it comes
+    /// from the same unauthenticated API response as `url`.
     pub sha256: Option<String>,
+    /// Download URL of the detached `<name>.minisig` signature, if published.
+    #[serde(default)]
+    pub minisig_url: Option<String>,
 }
 
 pub type AppImageAsset = ReleaseAsset;
@@ -432,11 +464,18 @@ where
             best = Some(asset);
         }
     }
-    best.map(|a| ReleaseAsset {
-        name: a.asset_name().to_string(),
-        url: a.asset_url().to_string(),
-        size: a.asset_size(),
-        sha256: parse_sha256_digest(a.asset_digest()),
+    best.map(|a| {
+        let sig_name = format!("{}.minisig", a.asset_name());
+        ReleaseAsset {
+            name: a.asset_name().to_string(),
+            url: a.asset_url().to_string(),
+            size: a.asset_size(),
+            sha256: parse_sha256_digest(a.asset_digest()),
+            minisig_url: assets
+                .iter()
+                .find(|s| s.asset_name() == sig_name)
+                .map(|s| s.asset_url().to_string()),
+        }
     })
 }
 
@@ -521,8 +560,38 @@ fn parse_sha256_digest(digest: Option<&str>) -> Option<String> {
 pub fn apply_update_for_kind(
     info: &ReleaseInfo,
     kind: InstallKind,
+    progress: impl FnMut(UpdatePhase, u64, Option<u64>),
+) -> Result<ApplyOutcome, String> {
+    apply_update_with_options(info, kind, UpdateOptions::default(), progress)
+}
+
+/// Refuse to install `target` unless it is strictly newer than `current`
+/// (or the caller explicitly allowed a downgrade / reinstall).
+pub fn check_not_downgrade(
+    target: &str,
+    current: &str,
+    allow_downgrade: bool,
+) -> Result<(), String> {
+    if allow_downgrade || is_version_newer(target, current) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Refusing to install v{} because it is not newer than the running v{}. \
+             Use `legion-cli check-update --apply --allow-downgrade` to override.",
+            target.trim_start_matches('v'),
+            current.trim_start_matches('v')
+        ))
+    }
+}
+
+/// Like [`apply_update_for_kind`], with explicit [`UpdateOptions`].
+pub fn apply_update_with_options(
+    info: &ReleaseInfo,
+    kind: InstallKind,
+    opts: UpdateOptions,
     mut progress: impl FnMut(UpdatePhase, u64, Option<u64>),
 ) -> Result<ApplyOutcome, String> {
+    check_not_downgrade(&info.version, CURRENT_VERSION, opts.allow_downgrade)?;
     match kind {
         InstallKind::AppImage => {
             let path = apply_appimage_update(info, &mut progress)?;
@@ -577,11 +646,18 @@ pub fn apply_appimage_update(
 
     let partial = dir.join(format!(".{}.partial", safe_filename(&asset.name)?));
     let _ = fs::remove_file(&partial);
+    let sig_text = fetch_signature(asset)?;
     progress(UpdatePhase::Downloading, 0, Some(asset.size));
     download_file(&asset.url, &partial, asset.size, &mut progress)?;
 
     progress(UpdatePhase::Verifying, asset.size, Some(asset.size));
-    verify_download(&partial, asset, InstallKind::AppImage)?;
+    verify_download(
+        &partial,
+        asset,
+        InstallKind::AppImage,
+        &info.version,
+        &sig_text,
+    )?;
 
     progress(UpdatePhase::Installing, asset.size, Some(asset.size));
     chmod_755(&partial)?;
@@ -607,11 +683,13 @@ fn apply_package_update(
 ) -> Result<ApplyOutcome, String> {
     let asset = selected_asset(info)
         .ok_or_else(|| format!("This release has no {} for this install", kind.label()))?;
-    let dest = download_verified(asset, kind, &mut progress)?;
+    let install = package_install_script(kind)?;
+    let (dest, sha256) = download_verified(asset, kind, &info.version, &mut progress)?;
     progress(UpdatePhase::Installing, asset.size, Some(asset.size));
-    let script = package_install_script(kind)?;
-    pkexec_with_file(script, &dest)?;
+    let script = format!("{ROOT_STAGE_PRELUDE}\n{install}\n");
+    let result = pkexec_staged(&script, &dest, &sha256);
     let _ = fs::remove_file(&dest);
+    result?;
     // Permanent fix for v0.2.6 daemon-stale telemetry (83RU CachyOS):
     // Package hooks (Arch post_upgrade try-restart, Debian postinst) are
     // unreliable under pkexec's minimal env / when the service was idle.
@@ -631,23 +709,56 @@ fn apply_package_update(
     })
 }
 
+/// Root-side prelude shared by every pkexec install of a downloaded asset.
+///
+/// Arguments (never interpolated into the script text):
+///   `$1` the verified download in the user's cache dir,
+///   `$2` the sha256 the unprivileged side computed over the bytes whose
+///        minisign signature it verified.
+///
+/// The file is copied into a fresh root-owned 0700 directory under /run and
+/// re-hashed there, so swapping the user-writable copy while the PolicyKit
+/// prompt is open cannot change what gets installed. Sets `$stage` and
+/// `$pkg` (the staged copy, keeping the asset's file name so apt/pacman/dnf
+/// recognise the format).
+const ROOT_STAGE_PRELUDE: &str = r#"set -eu
+umask 077
+src=$1
+want=$2
+case $want in
+    *[!0-9a-f]*|'') echo "legion-update: bad expected sha256" >&2; exit 1 ;;
+esac
+if [ ${#want} -ne 64 ]; then echo "legion-update: bad expected sha256" >&2; exit 1; fi
+stage=$(mktemp -d /run/legion-control-update.XXXXXXXXXX)
+trap 'rm -rf -- "$stage"' EXIT
+trap 'exit 1' HUP INT TERM
+chmod 0700 "$stage"
+name=$(basename -- "$src")
+pkg="$stage/$name"
+cat -- "$src" > "$pkg"
+got=$(sha256sum -- "$pkg" | cut -d' ' -f1)
+if [ "$got" != "$want" ]; then
+    echo "legion-update: staged copy does not match the verified sha256; refusing to install" >&2
+    exit 1
+fi"#;
+
 fn package_install_script(kind: InstallKind) -> Result<&'static str, String> {
     match kind {
-        InstallKind::Deb => Ok("DEBIAN_FRONTEND=noninteractive apt-get install -y \"$1\""),
+        InstallKind::Deb => Ok("DEBIAN_FRONTEND=noninteractive apt-get install -y \"$pkg\""),
         InstallKind::Rpm => {
             if Path::new("/usr/bin/dnf").is_file() {
-                Ok("dnf upgrade -y \"$1\" || dnf install -y \"$1\"")
+                Ok("dnf upgrade -y \"$pkg\" || dnf install -y \"$pkg\"")
             } else if Path::new("/usr/bin/zypper").is_file() {
-                Ok("zypper --non-interactive install \"$1\"")
+                Ok("zypper --non-interactive install \"$pkg\"")
             } else if Path::new("/usr/bin/rpm").is_file() {
-                Ok("rpm -Uvh \"$1\"")
+                Ok("rpm -Uvh \"$pkg\"")
             } else {
                 Err("No RPM installer found (dnf, zypper, or rpm)".into())
             }
         }
         InstallKind::Arch => {
             if Path::new("/usr/bin/pacman").is_file() {
-                Ok("pacman -U --noconfirm \"$1\"")
+                Ok("pacman -U --noconfirm \"$pkg\"")
             } else {
                 Err("pacman not found".into())
             }
@@ -664,59 +775,16 @@ fn apply_tarball_update(
         .tarball
         .as_ref()
         .ok_or_else(|| "This release has no x86_64 tarball to download".to_string())?;
-    let archive = download_verified(asset, InstallKind::Tarball, &mut progress)?;
+    let (archive, sha256) =
+        download_verified(asset, InstallKind::Tarball, &info.version, &mut progress)?;
     progress(UpdatePhase::Installing, asset.size, Some(asset.size));
 
-    let work = archive.with_extension("extract");
-    let _ = fs::remove_dir_all(&work);
-    fs::create_dir_all(&work).map_err(|e| format!("Cannot create extract dir: {e}"))?;
-    let status = Command::new("tar")
-        .args(["-xzf"])
-        .arg(&archive)
-        .arg("-C")
-        .arg(&work)
-        .status()
-        .map_err(|e| format!("Cannot run tar: {e}"))?;
-    if !status.success() {
-        let _ = fs::remove_dir_all(&work);
-        let _ = fs::remove_file(&archive);
-        return Err("Failed to extract the binary archive".into());
-    }
-
-    let cli = find_named(&work, "legion-cli");
-    let daemon = find_named(&work, "legion-daemon");
-    let settings = find_named(&work, "legion-settings");
-    let helper = find_named(&work, "legion-control-setup");
-    let (Some(cli), Some(daemon), Some(settings)) = (cli, daemon, settings) else {
-        let _ = fs::remove_dir_all(&work);
-        let _ = fs::remove_file(&archive);
-        return Err("Archive is missing legion-cli, legion-daemon, or legion-settings".into());
-    };
-
-    // Fixed script: $1 cli, $2 daemon, $3 settings, $4 optional helper.
-    let script = "install -Dm755 \"$1\" /usr/local/bin/legion-cli \
-                  && install -Dm755 \"$2\" /usr/local/bin/legion-daemon \
-                  && install -Dm755 \"$3\" /usr/local/bin/legion-settings \
-                  && if [ -n \"$4\" ]; then install -Dm755 \"$4\" /usr/local/libexec/legion-control-setup; fi \
-                  && systemctl try-restart legion-control.service >/dev/null 2>&1 || true";
-    let mut cmd = Command::new("pkexec");
-    cmd.args(["/bin/sh", "-c", script, "legion-update"])
-        .arg(&cli)
-        .arg(&daemon)
-        .arg(&settings);
-    if let Some(helper) = helper {
-        cmd.arg(&helper);
-    } else {
-        cmd.arg("");
-    }
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Cannot start PolicyKit install: {e}"))?;
-    let _ = fs::remove_dir_all(&work);
+    // Extraction happens root-side, inside the root-owned staging dir, so no
+    // user-writable file is ever installed.
+    let script = format!("{ROOT_STAGE_PRELUDE}\n{TARBALL_INSTALL_SCRIPT}\n");
+    let result = pkexec_staged(&script, &archive, &sha256);
     let _ = fs::remove_file(&archive);
-    if !output.status.success() {
-        return Err(pkexec_error(&output));
-    }
+    result?;
 
     let relaunch = PathBuf::from("/usr/local/bin/legion-settings");
     Ok(ApplyOutcome {
@@ -724,6 +792,25 @@ fn apply_tarball_update(
         needs_daemon_restage: false,
     })
 }
+
+/// Runs after [`ROOT_STAGE_PRELUDE`]; `$pkg` is the staged, re-hashed archive.
+const TARBALL_INSTALL_SCRIPT: &str = r#"x="$stage/extract"
+mkdir -- "$x"
+tar -xzf "$pkg" -C "$x" --no-same-owner --no-same-permissions
+find_one() { find "$x" -maxdepth 5 -type f -name "$1" -print -quit; }
+cli=$(find_one legion-cli)
+daemon=$(find_one legion-daemon)
+settings=$(find_one legion-settings)
+helper=$(find_one legion-control-setup)
+if [ -z "$cli" ] || [ -z "$daemon" ] || [ -z "$settings" ]; then
+    echo "legion-update: archive is missing legion-cli, legion-daemon, or legion-settings" >&2
+    exit 1
+fi
+install -Dm755 "$cli" /usr/local/bin/legion-cli
+install -Dm755 "$daemon" /usr/local/bin/legion-daemon
+install -Dm755 "$settings" /usr/local/bin/legion-settings
+if [ -n "$helper" ]; then install -Dm755 "$helper" /usr/local/libexec/legion-control-setup; fi
+systemctl try-restart legion-control.service >/dev/null 2>&1 || true"#;
 
 fn apply_source_update(
     info: &ReleaseInfo,
@@ -878,19 +965,116 @@ fn run_in_tree(
     }
 }
 
+/// Download `asset` and its signature, verify both. Returns the download
+/// path and the sha256 of the exact bytes whose signature was verified.
 fn download_verified(
     asset: &ReleaseAsset,
     kind: InstallKind,
+    version: &str,
     progress: &mut impl FnMut(UpdatePhase, u64, Option<u64>),
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, String), String> {
     let dir = cache_updates_dir()?;
     let dest = dir.join(safe_filename(&asset.name)?);
     let _ = fs::remove_file(&dest);
+    let sig_text = fetch_signature(asset)?;
     progress(UpdatePhase::Downloading, 0, Some(asset.size));
     download_file(&asset.url, &dest, asset.size, progress)?;
     progress(UpdatePhase::Verifying, asset.size, Some(asset.size));
-    verify_download(&dest, asset, kind)?;
-    Ok(dest)
+    let sha256 = verify_download(&dest, asset, kind, version, &sig_text)?;
+    Ok((dest, sha256))
+}
+
+/// Fail closed before downloading anything when the build has no real key
+/// or the release did not publish a signature for this asset.
+fn fetch_signature(asset: &ReleaseAsset) -> Result<String, String> {
+    release_public_key(RELEASE_SIGNING_PUBKEY)?;
+    let url = asset.minisig_url.as_deref().ok_or_else(|| {
+        format!(
+            "Release asset {} has no {}.minisig signature. Unsigned updates are refused.",
+            asset.name, asset.name
+        )
+    })?;
+    let bytes = curl_fetch_small(url, MAX_SIGNATURE_BYTES)?;
+    String::from_utf8(bytes).map_err(|_| "Release signature is not valid text".to_string())
+}
+
+/// True when this build embeds a real release signing key.
+pub fn signing_configured() -> bool {
+    release_public_key(RELEASE_SIGNING_PUBKEY).is_ok()
+}
+
+fn release_public_key(text: &str) -> Result<minisign_verify::PublicKey, String> {
+    if text.contains(PUBKEY_PLACEHOLDER) {
+        return Err(
+            "This build has no release signing key configured (placeholder in \
+                    data/release-signing.pub), so in-app updates are disabled. \
+                    Download the new release manually from GitHub."
+                .into(),
+        );
+    }
+    let b64 = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("untrusted comment:"))
+        .ok_or_else(|| "Release signing key is empty".to_string())?;
+    minisign_verify::PublicKey::from_base64(b64)
+        .map_err(|e| format!("Release signing key is invalid: {e}"))
+}
+
+/// Verify a minisign signature over `data` and check that the signed
+/// trusted comment names exactly `expected_file` and `expected_version`.
+pub fn verify_release_signature(
+    pubkey_text: &str,
+    data: &[u8],
+    sig_text: &str,
+    expected_file: &str,
+    expected_version: &str,
+) -> Result<(), String> {
+    let pk = release_public_key(pubkey_text)?;
+    let sig = minisign_verify::Signature::decode(sig_text)
+        .map_err(|e| format!("Release signature for {expected_file} is malformed: {e}"))?;
+    // allow_legacy = false: only prehashed (Ed25519 over BLAKE2b) signatures,
+    // the default for minisign >= 0.10 and rsign2.
+    pk.verify(data, &sig, false)
+        .map_err(|e| format!("Release signature check failed for {expected_file}: {e}"))?;
+    check_trusted_comment(sig.trusted_comment(), expected_file, expected_version)
+}
+
+/// The trusted comment is covered by the signature; it must read
+/// `file:<asset name> version:<tag>` for this exact asset and release.
+fn check_trusted_comment(
+    comment: &str,
+    expected_file: &str,
+    expected_version: &str,
+) -> Result<(), String> {
+    let mut file = None;
+    let mut version = None;
+    for tok in comment.split_whitespace() {
+        let (slot, value) = if let Some(v) = tok.strip_prefix("file:") {
+            (&mut file, v)
+        } else if let Some(v) = tok.strip_prefix("version:") {
+            (&mut version, v)
+        } else {
+            continue;
+        };
+        if slot.replace(value).is_some() {
+            return Err("Release signature has an ambiguous trusted comment".into());
+        }
+    }
+    let norm = |v: &str| v.trim().trim_start_matches('v').to_string();
+    if file != Some(expected_file) {
+        return Err(format!(
+            "Release signature was made for a different file ({}), not {expected_file}",
+            file.unwrap_or("none")
+        ));
+    }
+    match version {
+        Some(v) if !v.is_empty() && norm(v) == norm(expected_version) => Ok(()),
+        other => Err(format!(
+            "Release signature was made for version {}, not {expected_version}",
+            other.unwrap_or("none")
+        )),
+    }
 }
 
 fn cache_updates_dir() -> Result<PathBuf, String> {
@@ -954,31 +1138,16 @@ fn chmod_755(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn find_named(root: &Path, name: &str) -> Option<PathBuf> {
-    fn walk(dir: &Path, name: &str, depth: u8) -> Option<PathBuf> {
-        if depth == 0 {
-            return None;
-        }
-        let entries = fs::read_dir(dir).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(found) = walk(&path, name, depth - 1) {
-                    return Some(found);
-                }
-            } else if path.file_name().is_some_and(|n| n == name) {
-                return Some(path);
-            }
-        }
-        None
+/// Run a root script built on [`ROOT_STAGE_PRELUDE`] with the file and its
+/// verified sha256 passed as positional arguments (no interpolation).
+fn pkexec_staged(script: &str, file: &Path, sha256: &str) -> Result<(), String> {
+    if !is_sha256_hex(sha256) {
+        return Err("Internal error: invalid sha256 for staged install".into());
     }
-    walk(root, name, 5)
-}
-
-fn pkexec_with_file(script: &str, file: &Path) -> Result<(), String> {
     let output = Command::new("pkexec")
         .args(["/bin/sh", "-c", script, "legion-update"])
         .arg(file)
+        .arg(sha256)
         .output()
         .map_err(|e| format!("Cannot start PolicyKit install: {e}"))?;
     if output.status.success() {
@@ -1003,21 +1172,9 @@ fn download_file(
     expected: u64,
     progress: &mut impl FnMut(UpdatePhase, u64, Option<u64>),
 ) -> Result<(), String> {
+    require_https(url)?;
     let mut child = Command::new("curl")
-        .args([
-            "-fL",
-            "--retry",
-            "2",
-            "--retry-delay",
-            "1",
-            "--max-time",
-            "180",
-            "-A",
-            USER_AGENT,
-            "-o",
-        ])
-        .arg(dest)
-        .arg(url)
+        .args(curl_download_args(url, dest))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -1074,26 +1231,46 @@ fn download_file(
     Ok(())
 }
 
-fn verify_download(path: &Path, asset: &ReleaseAsset, kind: InstallKind) -> Result<(), String> {
-    let mut magic = [0u8; 8];
-    let n = File::open(path)
-        .and_then(|mut f| f.read(&mut magic))
-        .map_err(|e| format!("Cannot read download: {e}"))?;
-    if !magic_ok(&magic[..n], kind) {
-        let _ = fs::remove_file(path);
-        return Err(format!("Downloaded file is not a valid {}", kind.label()));
-    }
-    if let Some(expected) = asset.sha256.as_deref() {
-        let got = sha256_file(path)?;
-        if got != expected {
-            let _ = fs::remove_file(path);
-            return Err("Checksum mismatch (sha256). The download was discarded.".into());
+/// Verify a downloaded asset: magic bytes, minisign signature + trusted
+/// comment, and (if GitHub supplied one) the API digest. Returns the sha256
+/// of the verified bytes. Deletes the file on any failure.
+fn verify_download(
+    path: &Path,
+    asset: &ReleaseAsset,
+    kind: InstallKind,
+    version: &str,
+    sig_text: &str,
+) -> Result<String, String> {
+    let result = (|| {
+        // Read once: the signature and the sha256 handed to the root side
+        // are computed over the same in-memory bytes.
+        let data = fs::read(path).map_err(|e| format!("Cannot read download: {e}"))?;
+        if !magic_ok(&data[..data.len().min(8)], kind) {
+            return Err(format!("Downloaded file is not a valid {}", kind.label()));
         }
-        log::debug!("update: sha256 verified ({got})");
-    } else {
-        log::warn!("update: release asset has no sha256 digest — magic + size check only");
+        verify_release_signature(
+            RELEASE_SIGNING_PUBKEY,
+            &data,
+            sig_text,
+            &asset.name,
+            version,
+        )?;
+        let got = sha256_bytes(&data)?;
+        if let Some(expected) = asset.sha256.as_deref() {
+            if got != expected {
+                return Err("Checksum mismatch (sha256). The download was discarded.".into());
+            }
+        }
+        log::info!(
+            "update: minisign signature verified for {} (sha256 {got})",
+            asset.name
+        );
+        Ok(got)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(path);
     }
-    Ok(())
+    result
 }
 
 fn magic_ok(bytes: &[u8], kind: InstallKind) -> bool {
@@ -1107,53 +1284,129 @@ fn magic_ok(bytes: &[u8], kind: InstallKind) -> bool {
     }
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let output = Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .or_else(|_| {
-            Command::new("openssl")
-                .args(["dgst", "-sha256"])
-                .arg(path)
-                .output()
-        })
-        .map_err(|e| format!("Need sha256sum or openssl to verify the download: {e}"))?;
+fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// sha256 of in-memory bytes via coreutils `sha256sum` (no extra crate).
+fn sha256_bytes(data: &[u8]) -> Result<String, String> {
+    let mut child = Command::new("sha256sum")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Need sha256sum to verify the download: {e}"))?;
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Cannot write to sha256sum".to_string())?;
+        stdin
+            .write_all(data)
+            .map_err(|e| format!("Cannot write to sha256sum: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("sha256sum failed: {e}"))?;
     if !output.status.success() {
         return Err("Checksum command failed".into());
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    let hex = text
-        .split_whitespace()
-        .find(|tok| tok.len() == 64 && tok.bytes().all(|b| b.is_ascii_hexdigit()))
-        .or_else(|| {
-            text.split('=')
-                .next_back()
-                .map(str::trim)
-                .filter(|tok| tok.len() == 64)
-        })
-        .ok_or_else(|| "Could not parse checksum output".to_string())?
-        .to_ascii_lowercase();
-    Ok(hex)
+    text.split_whitespace()
+        .next()
+        .map(str::to_ascii_lowercase)
+        .filter(|tok| is_sha256_hex(tok))
+        .ok_or_else(|| "Could not parse checksum output".to_string())
+}
+
+fn require_https(url: &str) -> Result<(), String> {
+    if url.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!("Refusing non-HTTPS update URL: {url}"))
+    }
+}
+
+fn curl_get_args(url: &str, timeout_secs: u64) -> Vec<String> {
+    let mut args: Vec<String> = CURL_SECURE_ARGS.iter().map(|s| s.to_string()).collect();
+    args.extend([
+        "-sL".into(),
+        "-S".into(),
+        "--max-time".into(),
+        timeout_secs.to_string(),
+        "-A".into(),
+        USER_AGENT.into(),
+        "-H".into(),
+        "Accept: application/vnd.github+json".into(),
+        url.into(),
+    ]);
+    args
+}
+
+fn curl_download_args(url: &str, dest: &Path) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = CURL_SECURE_ARGS.iter().map(Into::into).collect();
+    for a in [
+        "-fL",
+        "--retry",
+        "2",
+        "--retry-delay",
+        "1",
+        "--max-time",
+        "180",
+        "-A",
+        USER_AGENT,
+        "-o",
+    ] {
+        args.push(a.into());
+    }
+    args.push(dest.into());
+    args.push(url.into());
+    args
 }
 
 fn curl_get(url: &str, timeout_secs: u64) -> Result<Vec<u8>, String> {
+    require_https(url)?;
     let output = Command::new("curl")
-        .args([
-            "-sL",
-            "-S",
-            "--max-time",
-            &timeout_secs.to_string(),
-            "-A",
-            USER_AGENT,
-            "-H",
-            "Accept: application/vnd.github+json",
-            url,
-        ])
+        .args(curl_get_args(url, timeout_secs))
+        .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("Failed to spawn curl: {e}"))?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(format!("curl error (exit {}): {err}", output.status));
+    }
+    Ok(output.stdout)
+}
+
+/// HTTPS GET of a small file (signatures); fails on HTTP errors.
+fn curl_fetch_small(url: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+    require_https(url)?;
+    let output = Command::new("curl")
+        .args(CURL_SECURE_ARGS)
+        .args([
+            "-fsSL",
+            "--max-time",
+            "30",
+            "-A",
+            USER_AGENT,
+            "--max-filesize",
+        ])
+        .arg(max_bytes.to_string())
+        .arg(url)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Failed to spawn curl: {e}"))?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "Cannot download the release signature (curl {}): {}",
+            output.status,
+            err.trim()
+        ));
+    }
+    if output.stdout.len() as u64 > max_bytes {
+        return Err("Release signature is too large".into());
     }
     Ok(output.stdout)
 }
@@ -1264,6 +1517,12 @@ mod tests {
                 name: "legion-control_0.2.0_amd64.deb",
                 url: "https://example/deb",
                 size: 11,
+                digest: None,
+            },
+            GhAssetRef {
+                name: "legion-control_0.2.0_amd64.deb.minisig",
+                url: "https://example/deb.minisig",
+                size: 300,
                 digest: None,
             },
             GhAssetRef {
@@ -1422,6 +1681,255 @@ mod tests {
     fn changelog_headline_skips_heading_noise() {
         let body = "# Changelog - 0.2.3 (2026-08-30)\n\n## Fixes\n\n### LOQ / IdeaPad fan RPM at idle\n\n- Prefer yogafan\n";
         assert_eq!(changelog_headline(body), "LOQ / IdeaPad fan RPM at idle");
+    }
+
+    // ── Signed updates ────────────────────────────────────────────────
+    // Fixtures were made with rsign2 and a throwaway, test-only key
+    // (secret key discarded). See tests/fixtures/update-signing/.
+    const TEST_PUB: &str = include_str!("../tests/fixtures/update-signing/test-signing.pub");
+    const PAYLOAD: &[u8] = include_bytes!("../tests/fixtures/update-signing/payload-9.9.9.bin");
+    // trusted comment: "file:legion-control_9.9.9_amd64.deb version:v9.9.9"
+    const PAYLOAD_SIG: &str =
+        include_str!("../tests/fixtures/update-signing/payload-9.9.9.minisig");
+    const OLD_PAYLOAD: &[u8] = include_bytes!("../tests/fixtures/update-signing/payload-0.0.1.bin");
+    // trusted comment: "file:legion-control_0.0.1_amd64.deb version:v0.0.1"
+    const OLD_PAYLOAD_SIG: &str =
+        include_str!("../tests/fixtures/update-signing/payload-0.0.1.minisig");
+    const NAME: &str = "legion-control_9.9.9_amd64.deb";
+
+    #[test]
+    fn signature_happy_path() {
+        verify_release_signature(TEST_PUB, PAYLOAD, PAYLOAD_SIG, NAME, "9.9.9").unwrap();
+        verify_release_signature(TEST_PUB, PAYLOAD, PAYLOAD_SIG, NAME, "v9.9.9").unwrap();
+    }
+
+    #[test]
+    fn signature_rejects_tampered_file() {
+        let mut tampered = PAYLOAD.to_vec();
+        tampered[0] ^= 1;
+        assert!(verify_release_signature(TEST_PUB, &tampered, PAYLOAD_SIG, NAME, "9.9.9").is_err());
+        let mut longer = PAYLOAD.to_vec();
+        longer.push(b'x');
+        assert!(verify_release_signature(TEST_PUB, &longer, PAYLOAD_SIG, NAME, "9.9.9").is_err());
+    }
+
+    #[test]
+    fn signature_rejects_wrong_trusted_comment() {
+        // Valid signature, but for a different file name or version.
+        let err = verify_release_signature(
+            TEST_PUB,
+            PAYLOAD,
+            PAYLOAD_SIG,
+            "legion-control-9.9.9-x86_64.AppImage",
+            "9.9.9",
+        )
+        .unwrap_err();
+        assert!(err.contains("different file"), "{err}");
+        let err =
+            verify_release_signature(TEST_PUB, PAYLOAD, PAYLOAD_SIG, NAME, "9.9.10").unwrap_err();
+        assert!(err.contains("version"), "{err}");
+
+        // Editing the trusted comment breaks the global signature.
+        let forged = PAYLOAD_SIG.replace("version:v9.9.9", "version:v9.9.8");
+        assert_ne!(forged, PAYLOAD_SIG);
+        assert!(verify_release_signature(TEST_PUB, PAYLOAD, &forged, NAME, "9.9.8").is_err());
+    }
+
+    #[test]
+    fn signature_rejects_swapped_older_signed_asset() {
+        // An attacker serving a genuine, older signed release under the
+        // newer name/version must be rejected via the trusted comment.
+        assert!(
+            verify_release_signature(TEST_PUB, OLD_PAYLOAD, OLD_PAYLOAD_SIG, NAME, "9.9.9")
+                .is_err()
+        );
+        // Signature for one payload over another payload's bytes.
+        assert!(
+            verify_release_signature(TEST_PUB, OLD_PAYLOAD, PAYLOAD_SIG, NAME, "9.9.9").is_err()
+        );
+    }
+
+    #[test]
+    fn signature_rejects_wrong_key_and_garbage() {
+        // Real key id differs: use the minisign-verify crate's own test key.
+        let other =
+            "untrusted comment: other\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3\n";
+        assert!(verify_release_signature(other, PAYLOAD, PAYLOAD_SIG, NAME, "9.9.9").is_err());
+        assert!(
+            verify_release_signature(TEST_PUB, PAYLOAD, "not a signature", NAME, "9.9.9").is_err()
+        );
+        assert!(verify_release_signature(TEST_PUB, PAYLOAD, "", NAME, "9.9.9").is_err());
+    }
+
+    #[test]
+    fn placeholder_key_fails_closed() {
+        let placeholder = format!("untrusted comment: placeholder\n{PUBKEY_PLACEHOLDER}\n");
+        let err = release_public_key(&placeholder).unwrap_err();
+        assert!(err.contains("no release signing key"), "{err}");
+        // Even a perfectly valid signature is refused under the placeholder.
+        assert!(
+            verify_release_signature(&placeholder, PAYLOAD, PAYLOAD_SIG, NAME, "9.9.9").is_err()
+        );
+    }
+
+    #[test]
+    fn embedded_key_is_placeholder_or_valid() {
+        let res = release_public_key(RELEASE_SIGNING_PUBKEY);
+        if RELEASE_SIGNING_PUBKEY.contains(PUBKEY_PLACEHOLDER) {
+            assert!(res.is_err());
+            assert!(!signing_configured());
+        } else {
+            res.expect("data/release-signing.pub must be a valid minisign public key");
+            assert!(signing_configured());
+        }
+    }
+
+    #[test]
+    fn trusted_comment_parsing_is_strict() {
+        assert!(check_trusted_comment("file:a.deb version:v1.0.0", "a.deb", "1.0.0").is_ok());
+        assert!(check_trusted_comment("version:1.0.0 file:a.deb", "a.deb", "v1.0.0").is_ok());
+        assert!(check_trusted_comment("file:a.deb", "a.deb", "1.0.0").is_err());
+        assert!(check_trusted_comment("version:1.0.0", "a.deb", "1.0.0").is_err());
+        assert!(check_trusted_comment("file:a.deb version:", "a.deb", "").is_err());
+        assert!(
+            check_trusted_comment("file:a.deb file:b.deb version:1.0.0", "a.deb", "1.0.0").is_err()
+        );
+        assert!(check_trusted_comment("file:a.deb.x version:1.0.0", "a.deb", "1.0.0").is_err());
+    }
+
+    #[test]
+    fn downgrade_refused_unless_allowed() {
+        assert!(check_not_downgrade("0.2.17", "0.2.16", false).is_ok());
+        let err = check_not_downgrade("0.2.15", "0.2.16", false).unwrap_err();
+        assert!(err.contains("--allow-downgrade"), "{err}");
+        assert!(check_not_downgrade("0.2.16", "0.2.16", false).is_err());
+        assert!(check_not_downgrade("v0.2.16", "0.2.16", false).is_err());
+        assert!(check_not_downgrade("0.2.15", "0.2.16", true).is_ok());
+    }
+
+    #[test]
+    fn apply_refuses_downgrade_before_any_download() {
+        let mut info = empty_release("0.0.1");
+        info.deb = pick_asset(&sample_assets(), AssetKind::Deb);
+        let err = apply_update_with_options(
+            &info,
+            InstallKind::Deb,
+            UpdateOptions::default(),
+            |_, _, _| panic!("must not start downloading"),
+        )
+        .unwrap_err();
+        assert!(err.contains("not newer"), "{err}");
+    }
+
+    #[test]
+    fn curl_args_force_https() {
+        fn has_pair<S: AsRef<std::ffi::OsStr>>(args: &[S], a: &str, b: &str) -> bool {
+            args.windows(2)
+                .any(|w| w[0].as_ref() == a && w[1].as_ref() == b)
+        }
+        let get = curl_get_args("https://api.github.com/x", 8);
+        assert!(has_pair(&get, "--proto", "=https"));
+        assert!(has_pair(&get, "--proto-redir", "=https"));
+        assert!(get.iter().any(|a| a == "--tlsv1.2"));
+        let dl = curl_download_args("https://github.com/x", Path::new("/tmp/x"));
+        assert!(has_pair(&dl, "--proto", "=https"));
+        assert!(has_pair(&dl, "--proto-redir", "=https"));
+        assert!(dl.iter().any(|a| a == "--tlsv1.2"));
+        assert!(require_https("http://github.com/x").is_err());
+        assert!(require_https("file:///etc/passwd").is_err());
+        assert!(require_https("https://github.com/x").is_ok());
+    }
+
+    #[test]
+    fn pick_asset_finds_detached_signature() {
+        let assets = sample_assets();
+        let deb = pick_asset(&assets, AssetKind::Deb).unwrap();
+        assert_eq!(
+            deb.minisig_url.as_deref(),
+            Some("https://example/deb.minisig")
+        );
+        // The .minisig itself is never picked as a package.
+        assert_eq!(deb.name, "legion-control_0.2.0_amd64.deb");
+        assert!(pick_asset(&assets, AssetKind::Rpm)
+            .unwrap()
+            .minisig_url
+            .is_none());
+    }
+
+    #[test]
+    fn sha256_bytes_matches_known_vector() {
+        assert_eq!(
+            sha256_bytes(b"abc").unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    /// Runs the real root prelude unprivileged, with /run swapped for a temp
+    /// dir, to check it stages a private copy and enforces the sha256.
+    #[test]
+    fn root_stage_prelude_rehashes_staged_copy() {
+        let base = std::env::temp_dir().join(format!("legion-stage-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let src = base.join("legion-control_9.9.9_amd64.deb");
+        fs::write(&src, PAYLOAD).unwrap();
+        let good = sha256_bytes(PAYLOAD).unwrap();
+        let prelude = ROOT_STAGE_PRELUDE.replace("/run/", &format!("{}/", base.to_string_lossy()));
+        assert_ne!(prelude, ROOT_STAGE_PRELUDE);
+        let script =
+            format!("{prelude}\nstat -c %a \"$stage\"; basename -- \"$pkg\"; cat -- \"$pkg\"");
+        let run = |sha: &str| {
+            Command::new("/bin/sh")
+                .args(["-c", &script, "legion-update"])
+                .arg(&src)
+                .arg(sha)
+                .output()
+                .unwrap()
+        };
+        let ok = run(&good);
+        assert!(
+            ok.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ok.stderr)
+        );
+        let out = String::from_utf8_lossy(&ok.stdout);
+        assert!(
+            out.starts_with("700\nlegion-control_9.9.9_amd64.deb\n"),
+            "{out}"
+        );
+        assert!(out.ends_with(std::str::from_utf8(PAYLOAD).unwrap()));
+
+        let bad = run(&"0".repeat(64));
+        assert!(!bad.status.success());
+        assert!(String::from_utf8_lossy(&bad.stderr).contains("refusing to install"));
+        // Shell metacharacters in the expected hash are rejected outright.
+        assert!(!run("$(id)").status.success());
+        // Staging dirs are cleaned up on exit.
+        let leftovers = fs::read_dir(&base)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("legion-control-update.")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn root_scripts_parse() {
+        let deb = package_install_script(InstallKind::Deb).unwrap();
+        for body in [deb, TARBALL_INSTALL_SCRIPT] {
+            let script = format!("{ROOT_STAGE_PRELUDE}\n{body}\n");
+            let ok = Command::new("/bin/sh")
+                .args(["-n", "-c", &script])
+                .status()
+                .unwrap();
+            assert!(ok.success(), "script failed to parse:\n{script}");
+        }
     }
 
     #[test]

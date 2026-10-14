@@ -341,6 +341,63 @@ pub fn rpm_estimated() -> bool {
     !hwmon_tach && !dmi_ec_layout().is_some_and(|c| c.verified)
 }
 
+/// Active EC-fallback layout name ("loq-ec" …), `None` for any other backend.
+pub fn ec_layout_name() -> Option<String> {
+    let (name, hw) = fan_hwmon()?;
+    if name != "ec-fallback" {
+        return None;
+    }
+    hw.file_name()?
+        .to_str()?
+        .strip_prefix("ec-fallback-")
+        .map(str::to_string)
+}
+
+/// True once the constant-reading detector latched and rejected the layout.
+pub fn ec_layout_rejected() -> bool {
+    EC_LAYOUT_REJECTED.load(Ordering::Relaxed)
+}
+
+/// Pure: why a layout was chosen, as a short token for fleet queries.
+/// `bios-family:<prefix>:verified|unverified`, `product-version:unverified`
+/// or `probe:legacy-order` (unknown family, first plausible layout wins).
+fn ec_layout_reason_for(bios_prefix: &str, product_version: &str) -> String {
+    match ec_layout_for_family(bios_prefix, product_version) {
+        Some(c) => {
+            let verdict = if c.verified { "verified" } else { "unverified" };
+            if ec_layout_for_family(bios_prefix, "").is_some() {
+                format!("bios-family:{bios_prefix}:{verdict}")
+            } else {
+                format!("product-version:{verdict}")
+            }
+        }
+        None => "probe:legacy-order".to_string(),
+    }
+}
+
+/// Why the active EC layout was chosen (see [`ec_layout_reason_for`]).
+pub fn ec_layout_reason() -> String {
+    let bios = std::fs::read_to_string("/sys/class/dmi/id/bios_version").unwrap_or_default();
+    let version = std::fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
+    let prefix: String = bios.trim().chars().take(4).collect();
+    ec_layout_reason_for(&prefix, version.trim())
+}
+
+/// Every known layout decoded from one EC snapshot, unfiltered: no plausibility
+/// ceiling and no rejection, so the server can see which layout tracks CPU
+/// temperature. Read-only; `None` when the EC debugfs is not readable.
+pub fn ec_candidate_rpms() -> Option<Vec<(&'static str, Vec<u32>)>> {
+    let buf = ec_fallback_bytes()?;
+    Some(ec_candidates_from(&buf))
+}
+
+fn ec_candidates_from(buf: &[u8]) -> Vec<(&'static str, Vec<u32>)> {
+    ["loq-ec", "ideapad-ec", "legion-ec"]
+        .into_iter()
+        .filter_map(|l| ec_layout_rpms(l, buf).map(|r| (l, r)))
+        .collect()
+}
+
 pub fn control_backend_name() -> Option<String> {
     fan_control_hwmon().map(|(name, _)| name.clone())
 }
@@ -993,5 +1050,33 @@ mod tests {
             "WMI/yogafan idle 0 must not count as a live tachometer"
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn layout_reason_tokens() {
+        assert_eq!(ec_layout_reason_for("J2CN", ""), "bios-family:J2CN:verified");
+        assert_eq!(ec_layout_reason_for("H3CN", ""), "bios-family:H3CN:unverified");
+        assert_eq!(
+            ec_layout_reason_for("ZZZZ", "LOQ 15IRH8"),
+            "product-version:unverified"
+        );
+        assert_eq!(ec_layout_reason_for("ZZZZ", "x"), "probe:legacy-order");
+    }
+
+    #[test]
+    fn candidates_cover_every_layout_unfiltered() {
+        let mut buf = vec![0u8; 256];
+        buf[0xe0] = 0x10;
+        buf[0xe1] = 0x0e; // legion fan1 = 3600
+        buf[0xe3] = 0xff;
+        buf[0xe4] = 0xff; // loq fan1 = 65535, must NOT be filtered out
+        buf[0x06] = 40; // ideapad = 4000
+        let c = ec_candidates_from(&buf);
+        let names: Vec<_> = c.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, ["loq-ec", "ideapad-ec", "legion-ec"]);
+        assert_eq!(c[0].1[0], 65535);
+        assert_eq!(c[1].1, vec![4000, 4000]);
+        assert_eq!(c[2].1[0], 3600);
+        assert!(ec_candidates_from(&buf[..16]).is_empty(), "short buffer");
     }
 }

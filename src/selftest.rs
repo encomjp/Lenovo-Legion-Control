@@ -13,7 +13,8 @@
 //! daemon unit enabled, udev rule applied, socket permissions, binary path.
 
 use crate::{
-    battery, comms, config, device, fans, ideapad, keyboard, profile, sensors, thermal, undervolt,
+    battery, comms, config, device, fans, gpu_mode, ideapad, keyboard, profile, sensors, thermal,
+    undervolt,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -272,6 +273,11 @@ pub fn run_self_checks() -> Vec<SelfCheck> {
             },
         ));
     }
+
+    // GPU working mode (MUX): passive only — never calls ACPI.
+    let gpu = gpu_mode::status_passive();
+    let (gpu_ok, gpu_detail) = gpu_mode::self_check(&gpu);
+    out.push(check("gpu_mode", gpu_ok, gpu_detail));
 
     // Platform profile.
     let current = profile::current();

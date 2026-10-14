@@ -31,15 +31,15 @@ pub struct DeviceInfo {
 
 /// Structured lighting capability — derived from the HID probe.
 /// Drives the Lighting UI: `Spectrum` gets every tab (incl. per-key),
-/// `FourZone` gets keyboard-only, `White` collapses to the notice page.
+/// `FourZone` gets the 4-zone page (`crate::fourzone`), `White` the notice page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LightingKind {
     /// Spectrum RGB (960-byte report; 048d:c197 and any ITE c1xx/c6xx/c9xx
     /// whose report descriptor confirms it) — per-key painting + 4 zones + logo.
     Spectrum,
-    /// Legacy 4-zone RGB HID (33-byte report, e.g. 048d:c965). The write path
-    /// (`SpectrumDevice::open`) only speaks Spectrum, so these boards get a
-    /// notice page until the 4-zone protocol lands. 048d:c193 ("Lenovo
+    /// Legacy 4-zone RGB HID (33-byte report, e.g. 048d:c965). Driven by
+    /// `crate::fourzone` (experimental), which re-checks the descriptor
+    /// before every write. 048d:c193 ("Lenovo
     /// Lighting") is a separate, undocumented device and is NOT classed here.
     FourZone,
     /// No RGB HID — white backlight via fn+Q / kbd_backlight sysfs.
@@ -53,8 +53,8 @@ impl LightingKind {
     }
 
     /// Lighting tab names this hardware should show, in order.
-    /// FourZone returns an empty list: the Spectrum write path can't drive
-    /// those HIDs yet, so the UI collapses to a notice page (same as White).
+    /// FourZone returns an empty list: it is a single page (no tabs), driven
+    /// by `crate::fourzone` rather than the Spectrum write path.
     pub fn tabs(&self) -> &'static [&'static str] {
         match self {
             LightingKind::Spectrum => &["keyboard", "front", "rear", "logo", "more"],
@@ -66,7 +66,7 @@ impl LightingKind {
     pub fn nav_subtitle(&self) -> &'static str {
         match self {
             LightingKind::Spectrum => "Keyboard, front and rear bars, logo, per-key",
-            LightingKind::FourZone => "4-zone RGB keyboard detected — control coming soon",
+            LightingKind::FourZone => "4-zone RGB keyboard (experimental)",
             LightingKind::White => "White backlight brightness",
         }
     }

@@ -122,55 +122,72 @@ All 17 images in [`docs/assets/screenshots/`](docs/assets/screenshots/) are prod
 
 |  |  |  |
 |---|---|---|
-| **▸ Observe** — Home chips cross-fade on 2s polls, thermal governor 70–98°C, per-fan cards with reset | **▸ Tune** — Curve Optimizer -30..0 with live SMT/boost toggles and 5-min stability test | **▸ Light** — Spectrum 048d:c197: Keyboard / Front / Rear / Logo / More + per-key painter |
-| **▸ Endure** — Battery health, 60/80/100 % limiter, charge_types vs conservation_mode reconciliation | **▸ Repair** — Fix hub: Speakers (amp), RGB panic (HID soft → USB reset → hid-generic rebind + **permanent udev**), Logs | **▸ Persist** — Profiles, autostart, `~/.config/legion-control/settings.json`, optional Plasma 6 widget |
+| **▸ Observe** — Home chips on 2 s polls, per-fan cards, thermal governor 70–98 °C, self-checks for every subsystem | **▸ Tune** — power modes, fan targets, PPT limits, Curve Optimizer -30..0 (validated models), SMT/boost, **GPU mode (MUX)** | **▸ Light** — Spectrum per-key RGB (Keyboard / Front / Rear / Logo + painter) and **4-zone RGB** keyboards (experimental) |
+| **▸ Endure** — battery health, 60/80/100 % charge limit, **Always-on USB charging**, **Fn Lock** | **▸ Repair** — Fix hub: speakers (one-click AW88399 amp firmware), RGB panic recovery, udev, logs | **▸ Trust** — authorised daemon, **signed in-app updates**, opt-out anonymous telemetry |
 
 ---
 
 ## Features
 
-- **Monitor** CPU, GPU, battery, fans, and hwmon telemetry — chips on top, details below, hover tips, `--hidden` tray autostart.
-- **Control** profiles, fan targets, CPU boost, SMT, charge limits, and **CPU Tuning** — thermal throttle + Curve Optimizer undervolt + stability test on one tab.
-- **Configure** Gen 10 Spectrum RGB zones, effects, brightness, logo, and per-key colors — 5 tabs + painter window.
-- **Save** profiles, automate with `legion-cli`, optional Plasma 6 widget — polling via `legion-poll.sh`.
+- **Monitor** CPU, GPU, battery, fans, NVMe/RAM temperatures and hwmon data — without waking a sleeping NVIDIA GPU.
+- **Control** power modes, fan targets, CPU boost, SMT, charge limit, PPT power limits, thermal throttle and Curve Optimizer undervolt (with stability test). Known-dangerous modes are blocked per model.
+- **Switch GPU mode** between Hybrid and dGPU-only (MUX) on verified models (`legion-cli gpu-mode`, Settings → CPU → Features). Takes effect after a reboot; refuses Hybrid when the iGPU driver is missing (black-screen guard).
+- **Light** Gen 10 Spectrum keyboards (zones, effects, brightness, logo, per-key painter) and — new, experimental — 4-zone keyboards (`legion-cli zones …`). Lighting controllers are identified from their HID descriptor, never by product ID alone.
+- **Keyboard & USB**: Fn Lock and Always-on USB charging toggles where the firmware exposes them.
+- **Fix speakers** on Gen 10 laptops with the AW88399 smart amp: the app downloads the amp firmware from its upstream source, verifies a pinned SHA-256 and installs it (`legion-cli audio-fix`).
+- **Save** profiles, automate with `legion-cli`, optional Plasma 6 widget.
 
 ---
 
 ## Get started
 
-**Recommended — the AppImage.** One file, no dependencies, works on every x86_64 Linux distribution (Ubuntu, Fedora, Arch/CachyOS, openSUSE, Debian, …). Download it from the [latest release](https://github.com/encomjp/Lenovo-Legion-Control/releases/latest), make it executable, and run:
+**Recommended — the AppImage.** One file, works on x86_64 distributions with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch/CachyOS, openSUSE). Download it from the [latest release](https://github.com/encomjp/Lenovo-Legion-Control/releases/latest), make it executable, and run:
 
 ```bash
-chmod +x legion-control-0.1.1-x86_64.AppImage
-./legion-control-0.1.1-x86_64.AppImage
+chmod +x legion-control-*-x86_64.AppImage
+./legion-control-*-x86_64.AppImage
 ```
 
-The first-launch walkthrough can enable the privileged daemon (one PolicyKit prompt), set up start-on-boot, and install the AMD undervolt backend for you — see [Installation](docs/INSTALLATION.md).
+The first-launch walkthrough enables the privileged daemon (one PolicyKit prompt), sets up start-on-boot and, on models where Curve Optimizer is validated, offers the AMD tuning backend. That backend is built with DKMS, so it needs `dkms` and your kernel's headers — the walkthrough shows the exact install command for your distribution when they are missing. See [Installation](docs/INSTALLATION.md).
 
 <details>
 <summary><b>Alternative install methods</b></summary>
 
-The source installer supports **Ubuntu 24.04+, Fedora 40+, Arch, openSUSE Tumbleweed**. GUI needs Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config`, C toolchain.
+Native packages for **Arch**, **Fedora** and **Debian/Ubuntu** are attached to every [release](https://github.com/encomjp/Lenovo-Legion-Control/releases/latest).
+
+The source installer supports **Ubuntu 24.04+, Fedora 40+, Arch/CachyOS, openSUSE Tumbleweed**. It needs Rust 1.87+, GTK 4.14+, libadwaita 1.5+, `libudev`, `pkg-config` and a C toolchain.
 
 ```bash
 git clone https://github.com/encomjp/Lenovo-Legion-Control.git
-cd lenovo-legion-tool
+cd Lenovo-Legion-Control
 ./install.sh
 # variants: ./install.sh -y | --user | --widget | --help
 # do not mix native package + source installer — see docs/INSTALLATION.md
 ```
 
-Native `.deb` / `.rpm` / Arch packages are built via `./packaging/build-all.sh` into `packaging/out/`.
-
 </details>
 
-After installation:
+After installation, **log out and back in once** so your user's new `legion` group membership is active (needed for keyboard lighting), then:
 
 ```bash
 systemctl status legion-control
 legion-cli status
-legion-cli info
+legion-cli diagnose selfcheck
 ```
+
+---
+
+## Security & permissions
+
+- **Daemon**: `legion-daemon` runs as root. Any local user can *read* sensors; *changing* hardware (power mode, fans, PPT, undervolt, SMT, charge limit, GPU mode, Fn Lock, USB charging, log level, telemetry) requires root, membership of group `legion`, or being the user at the active local seat — the same rule polkit and udev use.
+- **Keyboard lighting**: udev grants the ITE lighting controllers (`048d:c1xx/c6xx/c9xx`) to group `legion` plus the active seat, never world-writable.
+- **Signed updates**: every release file is signed with [minisign](https://jedisct1.github.io/minisign/). The in-app updater only installs files whose signature matches the public key built into the app (`data/release-signing.pub`, key `BFB503AB2424D545`) and whose signed comment names that exact file and version. It refuses unsigned files, downgrades and plain-HTTP downloads, and re-checks the file in a root-only staging directory right before installing. Verify a download yourself with:
+
+  ```bash
+  minisign -Vm legion-control-<version>-x86_64.AppImage -P RWRF1SQkqwO1v0/g5UpWYAQ0elpeDOj6mOSOKqRbhdNyO6Wbx/fqR4mn
+  ```
+
+  Releases up to and including 0.2.16 were not signed; maintainers see [docs/SIGNING.md](docs/SIGNING.md).
 
 ---
 
@@ -186,7 +203,11 @@ GUI, CLI, and widget talk to `legion-daemon` for privileged ops. Daemon merges s
 
 ## Alpha telemetry (opt-out)
 
-One anonymized JSON per minute — model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/CO, settings digest, sanitized log tail, self-check — over HTTPS to private `legion-telemetry`. **On by default**; opt-out in `Setup → Alpha diagnostics` or first launch. Never: hostname, username, serials, MAC/IP. Self-hosters can set `LEGION_TELEMETRY_URL` + `LEGION_TELEMETRY_KEY`.
+One anonymized JSON per minute — model/type/BIOS/CPU/GPU/EC, distro+kernel, sensors, fans, battery health, thermal/CO, settings digest, sanitized log tail, self-check — over HTTPS to private `legion-telemetry`. **On by default**; turn it off at first launch, in `Setup → Alpha diagnostics`, or with `legion-cli diagnose disable` — this also stops the background daemon from sending (`legion-cli diagnose dump` shows exactly what would be sent). Never: hostname, username, serials, MAC/IP. Self-hosters can set `LEGION_TELEMETRY_URL` + `LEGION_TELEMETRY_KEY`.
+
+**Device id.** Reports carry a pseudonymous `machine_id` so one laptop is counted once. It is a one-way SHA-256 hash (formatted as a UUID) of a fixed app salt, your firmware's DMI `product_uuid` and the product name; if the firmware UUID is missing or a placeholder, `/etc/machine-id` is hashed instead, and only if neither exists a random id is used. Honest properties: the id is **stable across reinstalls and config resets** (that is the point), so it is a persistent per-device identifier, not an anonymous per-session one; it cannot be reversed to the UUID, but anyone who already knows your device's `product_uuid` could confirm a match. The raw `product_uuid` and `/etc/machine-id` are never sent. The root daemon computes it and shares it with the GUI/CLI through `/var/lib/legion-control/machine-id`. When an older install switches from its random id, the next single report also carries `previous_machine_id` so history can be linked; it is not sent again. Turning telemetry off stops all reporting.
+
+**Fan diagnostics.** Reports include `fan_backend`, `fan_rpm_estimated` and `fan_layout`; the hourly report adds `fan_evidence` (chosen EC layout and why, and, only when the EC fallback is active, the raw RPM of each known layout next to the CPU temperature) to verify the "(est.)" fan readings. Numbers only, read-only.
 
 ---
 
