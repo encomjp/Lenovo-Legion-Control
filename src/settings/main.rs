@@ -1200,10 +1200,13 @@ fn build_ui(app: &adw::Application) {
         glib::ControlFlow::Continue
     });
 
-    // Restore Spectrum from disk (HID path — independent of daemon).
+    // Restore Spectrum from disk (HID path — independent of daemon). Gated
+    // by "Restore last session on launch", whose tooltip promises lighting
+    // too — this used to rewrite the keyboard on every launch regardless.
     let cfg = legion_core::config::get();
-    if legion_core::device::detect().capabilities.lighting_kind
-        == legion_core::device::LightingKind::Spectrum
+    if cfg.restore_on_launch
+        && legion_core::device::detect().capabilities.lighting_kind
+            == legion_core::device::LightingKind::Spectrum
     {
         legion_core::keyboard::set_rgb_brightness_async(cfg.brightness);
         legion_core::keyboard::set_logo_async(cfg.logo_on);
