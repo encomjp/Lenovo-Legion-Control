@@ -438,6 +438,12 @@ if [[ "$PREFIX" == /usr ]]; then
 fi
 info "Installing PolicyKit setup helper to ${SETUP_PREFIX}/libexec …"
 sudo_run install -Dm755 "$BIN_SETUP" "${SETUP_PREFIX}/libexec/legion-control-setup"
+# ryzen_smu source is always shipped so Settings → Setup can build it later;
+# the DKMS build itself stays opt-in (--with-ryzen-smu).
+if [[ -f "$ROOT/third_party/ryzen_smu/Makefile" && -f "$ROOT/third_party/ryzen_smu/dkms.conf" ]]; then
+  sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
+  sudo_run cp -a "$ROOT/third_party/ryzen_smu/." "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
+fi
 sudo_run install -Dm644 "$ROOT/data/polkit/com.encomjp.legion-control.policy" \
   /usr/share/polkit-1/actions/com.encomjp.legion-control.policy
 ok "PolicyKit helper installed"
@@ -602,9 +608,6 @@ if [[ "$DO_RYZEN_SMU" -eq 1 ]]; then
   if [[ ! -f "$SMU_SRC/Makefile" || ! -f "$SMU_SRC/dkms.conf" ]]; then
     die "Bundled ryzen_smu source is missing under third_party/ryzen_smu/"
   fi
-  sudo_run mkdir -p "${SETUP_PREFIX}/lib/legion-control/ryzen_smu"
-  sudo_run cp -a "$ROOT/third_party/ryzen_smu/." \
-    "${SETUP_PREFIX}/lib/legion-control/ryzen_smu/"
   sudo_run "${SETUP_PREFIX}/libexec/legion-control-setup" install-ryzen-smu
   if [[ -d /sys/kernel/ryzen_smu_drv ]]; then
     ok "ryzen_smu loaded — no tuning value was written"
