@@ -231,19 +231,26 @@ row.action > box.header > box.title label.subtitle {
     background: alpha(@window_fg_color, 0.08);
 }
 
+/* Pill text is darkened in light mode so it reaches 4.5:1 on its tint. */
 .status-ok {
-    color: @success_color;
-    background: alpha(@success_color, 0.14);
+    color: shade(@success_color, 0.72);
+    background: alpha(@success_color, 0.16);
 }
 
 .status-warn {
-    color: @warning_color;
-    background: alpha(@warning_color, 0.16);
+    color: shade(@warning_color, 0.62);
+    background: alpha(@warning_color, 0.20);
 }
 
 .status-bad {
-    color: @error_color;
+    color: shade(@error_color, 0.80);
     background: alpha(@error_color, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+    .status-ok { color: @success_color; background: alpha(@success_color, 0.16); }
+    .status-warn { color: @warning_color; background: alpha(@warning_color, 0.16); }
+    .status-bad { color: @error_color; background: alpha(@error_color, 0.14); }
 }
 
 .status-muted {
@@ -271,22 +278,27 @@ button.pill-btn {
     font-size: 0.9rem;
     color: @window_fg_color;
     background: alpha(@window_fg_color, 0.07);
-    border: 1px solid alpha(@window_fg_color, 0.16);
+    border: 1px solid alpha(@window_fg_color, 0.40);
     box-shadow: none;
     transition: background 120ms ease-out, border-color 120ms ease-out;
 }
 
 button.pill-btn:hover {
     background: alpha(@window_fg_color, 0.12);
-    border-color: alpha(@window_fg_color, 0.24);
+    border-color: alpha(@window_fg_color, 0.55);
 }
 
 button.pill-btn:active {
     background: alpha(@window_fg_color, 0.16);
 }
 
+/* Disabled: still a button (faint fill and outline), just muted. No
+ * opacity, so the outline never vanishes. */
 button.pill-btn:disabled {
-    opacity: 0.45;
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+    background: alpha(@window_fg_color, 0.035);
+    border-color: alpha(@window_fg_color, 0.16);
 }
 
 /* Primary: at most one per view */
@@ -306,14 +318,23 @@ button.pill-btn.suggested-action:active {
 }
 
 button.pill-btn.suggested-action:disabled {
-    opacity: 0.45;
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+    background: alpha(@window_fg_color, 0.07);
+    border-color: alpha(@window_fg_color, 0.16);
 }
 
 /* Destructive: quiet until hovered */
 button.pill-btn.destructive-action {
-    color: @error_color;
+    color: shade(@error_color, 0.80);
     background: alpha(@error_color, 0.10);
-    border-color: alpha(@error_color, 0.35);
+    border-color: alpha(@error_color, 0.45);
+}
+
+button.pill-btn.destructive-action:disabled {
+    color: alpha(@error_color, 0.45);
+    background: alpha(@error_color, 0.04);
+    border-color: alpha(@error_color, 0.20);
 }
 
 button.pill-btn.destructive-action:hover {
@@ -327,12 +348,19 @@ button.icon-btn {
     padding: 5px;
     border-radius: 8px;
     background: alpha(@window_fg_color, 0.07);
-    border: 1px solid alpha(@window_fg_color, 0.16);
+    border: 1px solid alpha(@window_fg_color, 0.40);
     box-shadow: none;
 }
 
 button.icon-btn:hover {
     background: alpha(@window_fg_color, 0.12);
+}
+
+button.icon-btn:disabled {
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+    background: alpha(@window_fg_color, 0.035);
+    border-color: alpha(@window_fg_color, 0.16);
 }
 
 /* Plain adw buttons placed in rows (ActionRow suffixes, banners) */
@@ -343,8 +371,23 @@ row button:not(.flat):not(.circle):not(.suggested-action):not(.destructive-actio
     border-radius: 8px;
     font-weight: 500;
     background: alpha(@window_fg_color, 0.07);
-    border: 1px solid alpha(@window_fg_color, 0.16);
+    border: 1px solid alpha(@window_fg_color, 0.40);
     box-shadow: none;
+}
+
+.page button:disabled:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker):not(.image-button),
+row button:disabled:not(.flat):not(.circle):not(.suggested-action):not(.destructive-action):not(.icon-btn):not(.toggle):not(.pill-btn):not(.swatch):not(.colour-picker) {
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+    background: alpha(@window_fg_color, 0.035);
+    border-color: alpha(@window_fg_color, 0.16);
+}
+
+row button.suggested-action:disabled {
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+    background: alpha(@window_fg_color, 0.07);
+    border-color: alpha(@window_fg_color, 0.16);
 }
 
 row button.suggested-action {
@@ -359,7 +402,7 @@ row button.suggested-action {
 /* Segmented control: linked toggle group for exclusive choices */
 .segmented {
     background: alpha(@window_fg_color, 0.06);
-    border: 1px solid alpha(@window_fg_color, 0.12);
+    border: 1px solid alpha(@window_fg_color, 0.30);
     border-radius: 9px;
     padding: 2px;
 }
@@ -372,24 +415,33 @@ row button.suggested-action {
     border-radius: 7px;
     font-weight: 500;
     font-size: 0.9rem;
-    background: transparent;
-    border: 1px solid transparent;
+    background: alpha(@window_fg_color, 0.04);
+    border: 1px solid alpha(@window_fg_color, 0.14);
     box-shadow: none;
     margin: 0;
 }
 
 .segmented button:hover:not(:checked) {
-    background: alpha(@window_fg_color, 0.08);
+    background: alpha(@window_fg_color, 0.09);
+    border-color: alpha(@window_fg_color, 0.24);
 }
 
 .segmented button:checked {
     background: @accent_bg_color;
     color: @accent_fg_color;
+    border-color: @accent_bg_color;
     font-weight: 600;
 }
 
 .segmented button:disabled {
-    opacity: 0.45;
+    opacity: 1;
+    color: alpha(@window_fg_color, 0.42);
+}
+
+.segmented button:checked:disabled {
+    background: alpha(@window_fg_color, 0.16);
+    border-color: alpha(@window_fg_color, 0.16);
+    color: alpha(@window_fg_color, 0.6);
 }
 
 /* Reset spacing libadwaita's .linked adds between our own rounded segments */
@@ -443,7 +495,7 @@ row button.suggested-action {
 
 .scale-marks {
     font-size: 0.72rem;
-    opacity: 0.5;
+    opacity: 0.65;
 }
 
 .fan-rpm {
@@ -527,6 +579,28 @@ row button.suggested-action {
 /* ── Toasts ───────────────────────────────────────────────────────── */
 toast label.toast-error {
     font-weight: 700;
+}
+
+/* ── Switches: the off track must read on both themes ─────────────── */
+switch {
+    background: alpha(@window_fg_color, 0.26);
+    border: 1px solid alpha(@window_fg_color, 0.32);
+    box-shadow: none;
+}
+
+switch:checked {
+    background: @accent_bg_color;
+    border-color: @accent_bg_color;
+}
+
+switch:disabled {
+    opacity: 1;
+    background: alpha(@window_fg_color, 0.10);
+    border-color: alpha(@window_fg_color, 0.16);
+}
+
+switch:checked:disabled {
+    background: alpha(@window_fg_color, 0.30);
 }
 
 /* ── Scales: bar track, accent fill ───────────────────────────────── */
@@ -635,21 +709,38 @@ scale slider {
 .live-row.hot .value { color: @error_color; }
 
 .live-row progressbar.card-bar trough,
-.live-row progressbar.card-bar progress {
+.live-row progressbar.card-bar progress,
+.fan-card progressbar.card-bar trough,
+.fan-card progressbar.card-bar progress {
     min-height: 4px;
     border-radius: 99px;
 }
 
-.live-row progressbar.card-bar trough {
+.live-row progressbar.card-bar trough,
+.fan-card progressbar.card-bar trough {
     background-color: alpha(@window_fg_color, 0.12);
 }
 
-.live-row progressbar.card-bar progress {
+.live-row progressbar.card-bar progress,
+.fan-card progressbar.card-bar progress {
     background-color: @accent_bg_color;
 }
 
 .live-row.warm progressbar.card-bar progress {
     background-color: @warning_color;
+}
+
+/* Temperature bars: amber by default, deeper amber then red as it heats up */
+.live-row progressbar.temp-bar progress {
+    background-color: alpha(@warning_color, 0.85);
+}
+
+.live-row.warm progressbar.temp-bar progress {
+    background-color: shade(@warning_color, 0.92);
+}
+
+.live-row.hot progressbar.temp-bar progress {
+    background-color: @error_color;
 }
 
 .section-expander title {

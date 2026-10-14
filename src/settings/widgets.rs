@@ -332,7 +332,7 @@ pub fn profile_tooltip(name: &str) -> &'static str {
         "low-power" | "quiet" => "Quiet (blue LED): lower power and cooler fans",
         "balanced" => "Balanced (white LED): default mixed mode",
         "performance" => "Performance (red LED): higher CPU and GPU power",
-        "max-power" => "Max Power (purple LED): highest firmware limits",
+        "max-power" => "Max power (purple LED): highest firmware limits",
         "custom" => "Custom (purple LED): manual CPU and GPU limits",
         _ => "Changes how hard the laptop pushes CPU and GPU",
     }

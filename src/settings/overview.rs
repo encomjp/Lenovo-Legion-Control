@@ -42,7 +42,7 @@ fn live_card(
     let name = gtk::Label::new(Some(title));
     name.add_css_class("live-name");
     name.set_xalign(0.0);
-    name.set_width_chars(10);
+    name.set_width_request(150);
     let bar = gtk::ProgressBar::new();
     bar.add_css_class("card-bar");
     bar.set_hexpand(true);
@@ -69,14 +69,6 @@ fn live_card(
     row.append(&bar);
     row.append(&value);
     (row, name, value, detail, bar)
-}
-
-fn section_label(text: &str) -> gtk::Label {
-    let l = gtk::Label::new(Some(text));
-    l.add_css_class("section-title");
-    l.set_halign(Align::Start);
-    l.set_xalign(0.0);
-    l
 }
 
 /// Issue count from the read-only self-checks plus non-info faults.
@@ -152,6 +144,11 @@ fn fan_readings(ids: &[u8], s: &legion_core::sensors::SensorReadings) -> Vec<(u8
         .collect()
 }
 
+/// Temperature bar fill: 30 °C empty, 100 °C full.
+fn temp_fraction(c: f64) -> f64 {
+    ((c - 30.0) / 70.0).clamp(0.0, 1.0)
+}
+
 fn fan_short_name(id: u8, aux: Option<u8>) -> String {
     match id {
         1 => "CPU".into(),
@@ -161,10 +158,10 @@ fn fan_short_name(id: u8, aux: Option<u8>) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn build_overview(
     toast_overlay: &adw::ToastOverlay,
-    apply_queue: &ApplyQueue,
+    _apply_queue: &ApplyQueue,
     gate: &DaemonGate,
     nav: &NavFn,
     mode_drop_slot: &Rc<RefCell<Option<adw::ComboRow>>>,
@@ -206,9 +203,25 @@ pub(crate) fn build_overview(
     *mode_drop_slot.borrow_mut() = Some(drop.clone());
 
     let power_box = gtk::Box::new(Orientation::Horizontal, 12);
-    let power_title = section_label("Power mode");
+    let power_title = gtk::Label::new(Some("Power mode"));
+    power_title.add_css_class("row-title");
+    power_title.set_halign(Align::Start);
+    power_title.set_xalign(0.0);
     power_title.set_hexpand(true);
     power_box.append(&power_title);
+    // The power-limit sliders live on Performance; Home only links to them
+    // while Custom is active.
+    let edit_limits = secondary_button_tip(
+        "Edit power limits",
+        Some("Opens Performance, where the Custom power limits are set"),
+    );
+    edit_limits.set_valign(Align::Center);
+    edit_limits.set_visible(current == "custom");
+    {
+        let nav = nav.clone();
+        edit_limits.connect_clicked(move |_| nav("cpu", "Performance"));
+    }
+    power_box.append(&edit_limits);
     let (seg_box, seg_buttons) = segmented(&labels, active);
     seg_box.set_halign(Align::End);
     tip(
@@ -248,8 +261,10 @@ pub(crate) fn build_overview(
         let seg_guard = seg_guard.clone();
         let choices = choices.clone();
         let hint = mode_hint.clone();
+        let edit_limits = edit_limits.clone();
         drop.connect_selected_notify(move |d| {
             let idx = d.selected() as usize;
+            edit_limits.set_visible(choices.get(idx).is_some_and(|c| c == "custom"));
             seg_guard.set(true);
             if let Some(b) = seg_buttons.get(idx) {
                 b.set_active(true);
@@ -316,7 +331,7 @@ pub(crate) fn build_overview(
             }
         };
 
-        // Max Power and Custom ask for confirmation; declining restores the
+        // Max power and Custom ask for confirmation; declining restores the
         // previous selection (which re-syncs the segmented control).
         let confirm_kind = match name.as_str() {
             "max-power" => Some(true),
@@ -357,20 +372,6 @@ pub(crate) fn build_overview(
         last_ok_n.set(idx as u32);
     });
 
-    // Custom PPT / GPU sliders — appear here while the mode is Custom.
-    attach_custom_ppt_group(
-        &page,
-        toast_overlay,
-        apply_queue,
-        gate,
-        &drop,
-        &choices,
-        &current,
-        ppt_group_slot,
-        ppt_scales_slot,
-        ppt_suppress_slot,
-    );
-
     // ── Live cards: CPU · GPU · Fans · Battery ──────────────────────────
     let cards = gtk::Box::new(Orientation::Vertical, 0);
     cards.add_css_class("panel");
@@ -398,6 +399,8 @@ pub(crate) fn build_overview(
             }
         ),
     );
+    cpu_bar.add_css_class("temp-bar");
+    gpu_bar.add_css_class("temp-bar");
     let fan_channels = legion_core::fans::channels();
     let fan_ids: Vec<u8> = fan_channels.iter().map(|c| c.id).collect();
     let aux_fan = legion_core::fans::aux_id_from(&fan_ids);
@@ -409,7 +412,7 @@ pub(crate) fn build_overview(
         .unwrap_or(6000) as f64;
     let (fan_card, fan_t, fan_v, fan_d, fan_bar) = live_card(
         "Fans",
-        "Fastest fan · Idle means the firmware has stopped the fans until it warms up",
+        "Fastest fan. Idle means the fans are off until the laptop warms up",
     );
     let (bat_card, bat_t, bat_v, bat_d, bat_bar) =
         live_card("Battery", "Charge level and state");
@@ -434,7 +437,7 @@ pub(crate) fn build_overview(
         "CPU (red) and GPU (amber) temperature, sampled every 2 s",
     );
     let area = gtk::DrawingArea::new();
-    area.set_height_request(90);
+    area.set_height_request(110);
     area.set_hexpand(true);
     let area_hist = history.clone();
     area.set_draw_func(move |area, cr, w, h| {
@@ -445,7 +448,7 @@ pub(crate) fn build_overview(
         }
         let fg = area.color();
         let (fr, fg_g, fb) = (fg.red() as f64, fg.green() as f64, fg.blue() as f64);
-        let left = 34.0;
+        let left = 42.0;
         let plot_w = (w - left).max(1.0);
         let y_of = |t: f64| h - ((t.clamp(MIN_T, MAX_T) - MIN_T) / (MAX_T - MIN_T)) * h;
         cr.select_font_face(
@@ -463,7 +466,7 @@ pub(crate) fn build_overview(
             let _ = cr.stroke();
             cr.set_source_rgba(fr, fg_g, fb, 0.55);
             cr.move_to(2.0, y + 3.5);
-            let _ = cr.show_text(&format!("{t:.0}°"));
+            let _ = cr.show_text(&format!("{t:.0} °C"));
         }
 
         let hist = area_hist.borrow();
@@ -496,7 +499,7 @@ pub(crate) fn build_overview(
             cr.set_source_rgba(fr, fg_g, fb, 0.55);
             cr.set_font_size(12.0);
             cr.move_to(left + 10.0, h / 2.0 + 4.0);
-            let _ = cr.show_text("Collecting temperature...");
+            let _ = cr.show_text("Collecting temperature…");
         }
     });
     chart_card.append(&area);
@@ -553,7 +556,6 @@ pub(crate) fn build_overview(
         }
     }
     let quick_wrap = gtk::Box::new(Orientation::Vertical, 6);
-    quick_wrap.append(&section_label("Quick toggles"));
     quick_wrap.append(&quick_grid);
     quick_wrap.set_visible(false);
     page.append(&quick_wrap);
@@ -673,7 +675,7 @@ pub(crate) fn build_overview(
         let guard = fnl_guard.clone();
         fnl_sw.connect_active_notify(move |sw| {
             if !guard.get() {
-                daemon_switch(&overlay, sw, &guard, "Fn Lock", DaemonCommand::SetFnLock);
+                daemon_switch(&overlay, sw, &guard, "Fn lock", DaemonCommand::SetFnLock);
             }
         });
         let overlay = toast_overlay.clone();
@@ -842,7 +844,7 @@ pub(crate) fn build_overview(
                     let shown = st.configured.or(st.active);
                     gpu_mode_l.set_text(shown.map(|m| m.label()).unwrap_or("Unknown"));
                     gpu_sub.set_text(if st.reboot_pending {
-                        "Applies after reboot"
+                        "Applies after restart"
                     } else {
                         "Active this boot"
                     });
@@ -1036,10 +1038,10 @@ pub(crate) fn build_overview(
                     cpu_v.set_text(&format!("{c:.0} °C"));
                     tint_temp(&cpu_card_c, c);
                 }
-                cpu_bar.set_fraction((poll.cpu_pct / 100.0).clamp(0.0, 1.0));
+                cpu_bar.set_fraction(temp_fraction(c));
                 cpu_d.set_text(&match poll.cpu_w {
-                    Some(w) => format!("{w:.0} W · load {:.0} %", poll.cpu_pct),
-                    None => format!("load {:.0} %", poll.cpu_pct),
+                    Some(w) => format!("{w:.0} W · load {:.0}%", poll.cpu_pct),
+                    None => format!("load {:.0}%", poll.cpu_pct),
                 });
 
                 let mut g = if s.dgpu_temp < 0.0 {
@@ -1070,21 +1072,21 @@ pub(crate) fn build_overview(
                     });
                     tint_temp(&gpu_card_c, 0.0);
                 }
-                gpu_bar.set_fraction((poll.gpu_pct / 100.0).clamp(0.0, 1.0));
+                gpu_bar.set_fraction(temp_fraction(g));
                 gpu_d.set_text(&if gpu_power >= 0.0 {
-                    format!("{gpu_power:.0} W · load {:.0} %", poll.gpu_pct)
+                    format!("{gpu_power:.0} W · load {:.0}%", poll.gpu_pct)
                 } else {
-                    format!("load {:.0} %", poll.gpu_pct)
+                    format!("load {:.0}%", poll.gpu_pct)
                 });
 
                 let fans = fan_readings(&fan_ids, s);
                 if !fans.is_empty() {
                     let top = fans.iter().map(|f| f.1).max().unwrap_or(0);
                     let manual = fans.iter().any(|f| f.2 > 0);
-                    // Firmware "fan stop": the EC idles every fan at 0 rpm until it
-                    // is warm (≈73 °C in Balanced on 83RU). Say so — a bare
-                    // "0 rpm" next to a hot CPU reads like broken fans.
-                    let stopped = !manual && top == 0;
+                    // Zero rpm is either the firmware's fan stop or a manual
+                    // target that has not spun up yet; both read as "Idle",
+                    // never as a bare "0 rpm" that looks like a broken fan.
+                    let stopped = top == 0;
                     fan_t.set_text(if manual { "Fans (manual)" } else { "Fans" });
                     fan_v.set_text(&if stopped {
                         "Idle".to_string()
@@ -1092,6 +1094,7 @@ pub(crate) fn build_overview(
                         format!("{top} rpm")
                     });
                     fan_bar.set_fraction((top as f64 / fan_max_rpm).clamp(0.0, 1.0));
+                    fan_bar.set_opacity(if stopped { 0.0 } else { 1.0 });
                     let mut d = fans
                         .iter()
                         .map(|(id, rpm, _)| format!("{} {rpm}", fan_short_name(*id, aux_fan)))
@@ -1101,7 +1104,7 @@ pub(crate) fn build_overview(
                         d.push_str(" · est.");
                     }
                     if stopped {
-                        d = "Quiet fan stop · spins up automatically when warm".into();
+                        d = "Fans are off and start automatically when warm".into();
                     }
                     fan_d.set_text(&d);
                 }
@@ -1116,202 +1119,6 @@ pub(crate) fn build_overview(
     });
 
     page
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn attach_custom_ppt_group(
-    page: &gtk::Box,
-    toast_overlay: &adw::ToastOverlay,
-    apply_queue: &ApplyQueue,
-    gate: &DaemonGate,
-    drop: &adw::ComboRow,
-    choices: &[String],
-    current: &str,
-    ppt_group_slot: &Rc<RefCell<Option<adw::PreferencesGroup>>>,
-    ppt_scales_slot: &PptScales,
-    ppt_suppress_slot: &Rc<Cell<bool>>,
-) {
-    let caps = legion_core::device::detect().capabilities;
-    let peak_tgp = caps.peak_gpu_w.unwrap_or(175);
-    let peak_src = caps.peak_gpu_source;
-    let ppt_group = pref_group("Custom power limits", None);
-    tip(
-        &ppt_group,
-        &format!(
-            "CPU PPT + GPU AC processing-power target. Peak GPU TGP is {peak_tgp} W ({peak_src}) in Performance/Max — \
-             the AC offset attribute max is set by the BIOS (often 130 W), not the absolute TGP."
-        ),
-    );
-
-    let peak_row = adw::ActionRow::builder()
-        .title("Peak GPU TGP (this laptop)")
-        .subtitle(format!("{peak_tgp} W · {peak_src}"))
-        .activatable(false)
-        .build();
-    tip(
-        &peak_row,
-        &format!(
-            "Detected peak is {peak_tgp} W ({peak_src}). Performance and Max Power unlock that ceiling. \
-             Custom mode uses separate firmware attributes; the AC power target max is BIOS-limited."
-        ),
-    );
-    ppt_group.add(&peak_row);
-
-    ppt_scales_slot.borrow_mut().clear();
-    for lim in legion_core::profile::all_ppt_limits() {
-        let row = adw::ActionRow::builder()
-            .title(lim.label)
-            .activatable(false)
-            .build();
-        let ppt_tip = match lim.id {
-            "ppt_pl1_spl" => format!(
-                "Sustained power limit (SPL) — long-term CPU watts · range {}",
-                lim.range_label()
-            ),
-            "ppt_pl2_sppt" => format!(
-                "Slow boost (SPPT) — medium burst · range {}",
-                lim.range_label()
-            ),
-            "ppt_pl3_fppt" => format!(
-                "Peak burst (FPPT) — short turbo · range {}",
-                lim.range_label()
-            ),
-            "ppt_cpu_cl" => format!(
-                "CPU cross-load share · range {}",
-                lim.range_label()
-            ),
-            "cpu_temp" => format!(
-                "CPU thermal cutoff — firmware throttles near this temperature · \
-                 independent of, and stacking with, the software Thermal governor · \
-                 range {} (°C, not watts)",
-                lim.range_label()
-            ),
-            "gpu_temp" => format!(
-                "GPU thermal cutoff — firmware throttles near this temperature · \
-                 independent of, and stacking with, the software Thermal governor · \
-                 range {} (°C, not watts)",
-                lim.range_label()
-            ),
-            "gpu_nv_ac_offset" => format!(
-                "GPU AC total processing power target (BIOS attribute). Firmware range {}. \
-                 This is not the absolute {peak_tgp} W NVIDIA TGP — Performance/Max already use {peak_tgp} W.",
-                lim.range_label()
-            ),
-            "gpu_nv_ctgp" => format!(
-                "GPU configurable TGP (cTGP) · range {}",
-                lim.range_label()
-            ),
-            "gpu_nv_ppab" => format!(
-                "GPU PPAB boost · range {}",
-                lim.range_label()
-            ),
-            "gpu_nv_cpu_boost" => format!(
-                "GPU↔CPU dynamic boost share · range {}",
-                lim.range_label()
-            ),
-            _ => format!("{} · {}", lim.label, lim.range_label()),
-        };
-        tip(&row, &ppt_tip);
-
-        let val = gtk::Label::new(Some(&lim.value_label(lim.current)));
-        val.add_css_class("dim-label");
-        val.add_css_class("numeric");
-        val.add_css_class("scale-value");
-        val.set_xalign(1.0);
-        tip(&val, &ppt_tip);
-
-        let adj = gtk::Adjustment::new(
-            lim.current as f64,
-            lim.min as f64,
-            lim.max as f64,
-            1.0,
-            5.0,
-            0.0,
-        );
-        let scale = gtk::Scale::new(Orientation::Horizontal, Some(&adj));
-        scale.set_draw_value(false);
-        scale.set_hexpand(true);
-        scale.set_width_request(160);
-        tip(&scale, &ppt_tip);
-        row.add_suffix(&scale);
-        row.add_suffix(&val);
-        ppt_group.add(&row);
-
-        let overlay = toast_overlay.clone();
-        let queue = apply_queue.clone();
-        let id = lim.id.to_string();
-        let lim_max = lim.max;
-        let unit_sym = lim.unit.symbol();
-        let unit_celsius = lim.unit == legion_core::profile::LimitUnit::Celsius;
-        let lim_label = lim.label.to_string();
-        let val_l = val.clone();
-        let drop_c = drop.clone();
-        let choices_c = choices.to_vec();
-        let suppress = ppt_suppress_slot.clone();
-        let ppt_warned = Rc::new(Cell::new(false));
-        let scale_c = scale.clone();
-        scale.connect_value_changed(move |s| {
-            if suppress.get() {
-                return;
-            }
-            let v = s.value().round() as u32;
-            val_l.set_text(&format!("{v} {unit_sym}"));
-            let warn_at = (lim_max as f64 * 0.92).round() as u32;
-            if v >= warn_at && !ppt_warned.get() {
-                ppt_warned.set(true);
-                let scale_r = scale_c.clone();
-                let suppress_r = suppress.clone();
-                let prev = (warn_at.saturating_sub(5)).max(lim_max / 2);
-                let overlay = overlay.clone();
-                let queue = queue.clone();
-                let id = id.clone();
-                let lim_label = lim_label.clone();
-                let choices_c = choices_c.clone();
-                let drop_c = drop_c.clone();
-                let val_l_c = val_l.clone();
-                let ppt_warned_c = ppt_warned.clone();
-                confirm_risk(
-                    s,
-                    "High power limit",
-                    &format!(
-                        "{lim_label} at {v} {unit_sym} is near the firmware maximum ({lim_max} {unit_sym}).\n\n\
-                         {}\n\n\
-                         Continue only if cooling is strong.",
-                        if unit_celsius {
-                            "A high cutoff lets the CPU/GPU run hotter before firmware throttling kicks in."
-                        } else {
-                            "Sustained high limits increase heat and fan noise."
-                        }
-                    ),
-                    "Use high limit",
-                    move |ok| {
-                        if !ok {
-                            suppress_r.set(true);
-                            scale_r.set_value(prev as f64);
-                            val_l_c.set_text(&format!("{prev} {unit_sym}"));
-                            ppt_warned_c.set(false);
-                            suppress_r.set(false);
-                            return;
-                        }
-                        ensure_custom_then_ppt(&overlay, &drop_c, &choices_c, &queue, &id, v);
-                    },
-                );
-                return;
-            }
-            ensure_custom_then_ppt(&overlay, &drop_c, &choices_c, &queue, &id, v);
-        });
-        ppt_scales_slot
-            .borrow_mut()
-            .push((lim.id.to_string(), scale, val));
-    }
-
-    let ppt_visible = current == "custom" && !ppt_scales_slot.borrow().is_empty();
-    ppt_group.set_visible(ppt_visible);
-    gate.track(&ppt_group);
-    if !ppt_scales_slot.borrow().is_empty() {
-        page.append(&ppt_group);
-    }
-    *ppt_group_slot.borrow_mut() = Some(ppt_group);
 }
 
 pub(crate) fn tint_temp(chip: &gtk::Box, temp: f64) {
@@ -1368,7 +1175,7 @@ pub(crate) fn apply_platform_profile(
 }
 
 pub(crate) const MAX_POWER_WARNING: &str = "\
-Max Power (Extreme) pushes the highest turbo the BIOS allows. Without strong \
+Max power pushes the highest turbo the BIOS allows. Without strong \
 cooling the laptop can overheat, throttle, or shut down.
 
 Continue only if you accept the risk.";
@@ -1383,9 +1190,9 @@ pub(crate) fn confirm_max_power(
 ) {
     confirm_risk(
         parent,
-        "Max Power can overheat this laptop",
+        "Max power can overheat this laptop",
         MAX_POWER_WARNING,
-        "Use Max Power anyway",
+        "Use Max power anyway",
         done,
     );
 }
