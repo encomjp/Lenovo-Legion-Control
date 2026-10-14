@@ -360,16 +360,52 @@ pub fn mark_welcome_seen() {
     });
 }
 
+/// Move a daemon config written by older builds at /.config/legion-control
+/// to /var/lib/legion-control, keeping settings and the telemetry
+/// machine_id (a fresh id would show up as a new laptop). Runs once.
+fn migrate_root_config_once() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        let old = Path::new("/.config/legion-control/settings.json");
+        let new = Path::new(SYSTEM_STATE_DIR).join("legion-control/settings.json");
+        if new.exists() || !old.exists() {
+            return;
+        }
+        if let Some(dir) = new.parent() {
+            if let Err(e) = fs::create_dir_all(dir) {
+                log::warn!("config: cannot create {}: {e}", dir.display());
+                return;
+            }
+        }
+        match fs::copy(old, &new) {
+            Ok(_) => {
+                log::info!("config: migrated {} → {}", old.display(), new.display());
+                let _ = fs::remove_file(old);
+                let _ = fs::remove_file("/.config/legion-control/.settings.lock");
+                let _ = fs::remove_dir(old.parent().unwrap_or(old));
+                let _ = fs::remove_dir("/.config");
+            }
+            Err(e) => log::warn!("config: migration from {} failed: {e}", old.display()),
+        }
+    });
+}
+
+/// State dir for the system daemon, which systemd starts without $HOME.
+const SYSTEM_STATE_DIR: &str = "/var/lib";
+
 fn config_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            let mut h = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-            if h.as_os_str().is_empty() {
-                log::trace!("config::config_path — XDG_CONFIG_HOME unset and HOME empty");
+            let home = std::env::var_os("HOME").unwrap_or_default();
+            if home.is_empty() {
+                // No $HOME (systemd system service): "" + ".config" used to
+                // resolve to /.config at the filesystem root.
+                log::trace!("config::config_path — XDG_CONFIG_HOME/HOME unset, using {SYSTEM_STATE_DIR}");
+                migrate_root_config_once();
+                return PathBuf::from(SYSTEM_STATE_DIR);
             }
-            h.push(".config");
-            h
+            PathBuf::from(home).join(".config")
         });
     let p = base.join("legion-control").join("settings.json");
     log::trace!("config::config_path — resolved to {}", p.display());
