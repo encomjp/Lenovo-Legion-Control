@@ -226,6 +226,11 @@ struct CurveUi {
     headline: gtk::Label,
     state_label: gtk::Label,
     reason: gtk::Label,
+    mode_hint: gtk::Label,
+    mode_buttons: Vec<(String, gtk::ToggleButton)>,
+    initial_active: String,
+    touched: Cell<bool>,
+    programmatic: Cell<bool>,
     state_dot: Option<gtk::Widget>,
     apply: gtk::Button,
     reset: gtk::Button,
@@ -261,7 +266,54 @@ impl CurveUi {
 
     /// Refresh labels, buttons and fan cards from the current state.
     fn sync(&self) {
+        // The power mode that is active right now (live from the service).
+        let active = self
+            .status
+            .borrow()
+            .as_ref()
+            .map(|s| s.current_profile.clone())
+            .unwrap_or_else(|| self.initial_active.clone());
+        // Until the user picks a mode themselves, the selector follows the
+        // active one (Fn+Q, Home, tray).
+        if !self.touched.get()
+            && *self.profile.borrow() != active
+            && self.mode_buttons.iter().any(|(n, _)| *n == active)
+        {
+            self.programmatic.set(true);
+            if let Some((_, b)) = self.mode_buttons.iter().find(|(n, _)| *n == active) {
+                b.set_active(true);
+            }
+            self.programmatic.set(false);
+            let pts = self
+                .drafts
+                .borrow()
+                .get(&active)
+                .copied()
+                .unwrap_or_else(|| self.stored(&active).0);
+            *self.profile.borrow_mut() = active.clone();
+            self.editor.set_points(pts);
+        }
+        for (n, b) in &self.mode_buttons {
+            let want = if *n == active {
+                format!("{} (active)", profile_tab_label(n))
+            } else {
+                profile_tab_label(n)
+            };
+            if b.label().as_deref() != Some(want.as_str()) {
+                b.set_label(&want);
+            }
+        }
         let profile = self.profile.borrow().clone();
+        if profile != active {
+            self.mode_hint.set_text(&format!(
+                "{} is active now. This curve applies when you switch to {}.",
+                profile_tab_label(&active),
+                profile_tab_label(&profile)
+            ));
+            self.mode_hint.set_visible(true);
+        } else {
+            self.mode_hint.set_visible(false);
+        }
         let (_, enabled) = self.stored(&profile);
         let dirty = self.dirty();
         let st = self.status.borrow();
@@ -444,8 +496,17 @@ fn build_fan_curve_section(
         modes.append(&b);
         mode_buttons.push((name.clone(), b));
     }
+    let edit_for = gtk::Label::new(Some("Edit curve for"));
+    edit_for.add_css_class("row-sub");
+    edit_for.set_valign(Align::Center);
+    header.append(&edit_for);
     header.append(&modes);
     root.append(&header);
+    let mode_hint = gtk::Label::new(None);
+    mode_hint.add_css_class("row-sub");
+    mode_hint.set_xalign(0.0);
+    mode_hint.set_visible(false);
+    root.append(&mode_hint);
 
     // Editor + status + buttons.
     let editor = CurveEditor::new();
@@ -519,6 +580,11 @@ fn build_fan_curve_section(
         headline,
         state_label,
         reason,
+        mode_hint,
+        mode_buttons: mode_buttons.clone(),
+        initial_active: current.clone(),
+        touched: Cell::new(false),
+        programmatic: Cell::new(false),
         state_dot,
         apply: apply.clone(),
         reset: reset.clone(),
@@ -543,7 +609,8 @@ fn build_fan_curve_section(
         let ui = ui.clone();
         let name = name.clone();
         b.connect_toggled(move |b| {
-            if b.is_active() {
+            if b.is_active() && !ui.programmatic.get() {
+                ui.touched.set(true);
                 ui.load_profile(&name);
             }
         });
