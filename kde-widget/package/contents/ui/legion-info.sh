@@ -22,3 +22,13 @@ value() {
 
 value CPU_NAME "$(printf '%s\n' "$info" | grep -oP 'cpu\s+\K.*' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
 value GPU_NAME "$(printf '%s\n' "$info" | grep -oP 'gpu\s+\K.*' | head -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+
+# Fn Lock: `fn-lock` exits non-zero ("not supported") when unavailable, so
+# FN_LOCK is only emitted on success -> the widget hides the toggle otherwise.
+fn_out="$(timeout 3 "$CLI" fn-lock 2>/dev/null || true)"
+fn_state="$(printf '%s\n' "$fn_out" | grep -oP '^fn-lock\s+\K(on|off)' | head -1 || true)"
+value FN_LOCK "$fn_state"
+
+# GPU mode (read-only label): "active (boot)  Hybrid"
+gpu_out="$(timeout 3 "$CLI" gpu-mode 2>/dev/null || true)"
+value GPU_MODE "$(printf '%s\n' "$gpu_out" | grep -oP 'active \(boot\)\s+\K.*' | head -1 | sed -e 's/[[:space:]]*$//' || true)"
