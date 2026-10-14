@@ -302,10 +302,70 @@ pub fn detect() -> DeviceInfo {
     info
 }
 
+/// True when DMI `sys_vendor` is readable and is not Lenovo. An unreadable
+/// vendor (VM, container) is not treated as foreign hardware.
+pub fn is_foreign_vendor(sys_vendor: &str) -> bool {
+    let v = sys_vendor.trim();
+    !v.is_empty() && !v.to_ascii_lowercase().starts_with("lenovo")
+}
+
+/// Cached vendor gate: false on non-Lenovo machines. Hardware writes (fans,
+/// Spectrum HID) must check this before touching anything.
+pub fn vendor_supported() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| !is_foreign_vendor(&read_dmi("sys_vendor").unwrap_or_default()))
+}
+
+/// Message shown by GUI/CLI when the vendor gate trips.
+pub fn unsupported_vendor_message(sys_vendor: &str) -> String {
+    format!(
+        "Unsupported vendor \"{}\": Legion Control only supports Lenovo laptops, \
+         so fan, lighting and power controls are disabled.",
+        sys_vendor.trim()
+    )
+}
+
+/// Device info for non-Lenovo hardware: no placeholder fans, no lighting,
+/// no profile match, and a clear reason in `profile_source`.
+fn unsupported_vendor_info(vendor: &str) -> DeviceInfo {
+    let name = read_dmi("product_name").unwrap_or_else(|| "Unknown".into());
+    let bios = read_dmi("bios_version").unwrap_or_else(|| "Unknown".into());
+    let msg = unsupported_vendor_message(vendor);
+    log::warn!("device detect: {msg}");
+    DeviceInfo {
+        model: name.clone(),
+        machine_type: name.clone(),
+        marketing_name: name,
+        series: "Unsupported vendor".into(),
+        bios_prefix: bios_prefix(&bios),
+        bios_version: bios,
+        ec_chip: "n/a".into(),
+        cpu_model: read_cpu_model().unwrap_or_else(|| "Unknown".into()),
+        gpu_model: "Unknown".into(),
+        gen: 0,
+        profile_matched: false,
+        profile_source: format!("unsupported vendor ({})", vendor.trim()),
+        profile_notes: msg,
+        capabilities: Capabilities {
+            fan_backend: "unsupported vendor".into(),
+            fans: Vec::new(),
+            lighting: "Unsupported vendor".into(),
+            lighting_kind: LightingKind::White,
+            peak_gpu_w: None,
+            peak_gpu_source: "unavailable".into(),
+            ppt_attrs: Vec::new(),
+            platform_profiles: Vec::new(),
+            has_custom_profile: false,
+        },
+    }
+}
+
 fn detect_uncached() -> DeviceInfo {
     log::debug!("device detect: full probe starting");
-    // sys_vendor is informational only — read for logs, never used for decisions.
     let dmi_vendor = read_dmi("sys_vendor").unwrap_or_default();
+    if is_foreign_vendor(&dmi_vendor) {
+        return unsupported_vendor_info(&dmi_vendor);
+    }
     let dmi_name = read_dmi("product_name").unwrap_or_default();
     let dmi_version = read_dmi("product_version").unwrap_or_default();
     let dmi_family = read_dmi("product_family").unwrap_or_default();
@@ -321,7 +381,9 @@ fn detect_uncached() -> DeviceInfo {
         "device detect: classify_dmi resolved machine_type={machine_type:?} marketing={marketing:?}"
     );
 
-    let profile = models::lookup(&machine_type, &marketing, &bios_prefix);
+    let model_match = models::lookup_match(&machine_type, &marketing, &bios_prefix);
+    let profile = model_match.map(|m| m.profile);
+    let family_only = model_match.is_some_and(|m| m.family_only);
     log::debug!(
         "device detect: profile {}",
         match profile {
@@ -364,8 +426,13 @@ fn detect_uncached() -> DeviceInfo {
             (
                 p.series.to_string(),
                 p.gen,
-                p.notes.to_string(),
-                p.source.to_string(),
+                // Row notes describe a different machine type.
+                if family_only { String::new() } else { p.notes.to_string() },
+                if family_only {
+                    format!("bios-prefix family ({}) · {}", p.bios_prefix, p.source)
+                } else {
+                    p.source.to_string()
+                },
                 true,
             )
         }
@@ -438,7 +505,8 @@ pub fn probe_capabilities(profile: Option<&'static ModelProfile>, gpu_name: &str
     let (lighting_kind, lighting) = probe_lighting();
     log::debug!("capability probe: lighting {lighting:?} (kind {lighting_kind:?})");
     let ppt_attrs = probe_ppt_attrs();
-    let platform_profiles = crate::profile::choices();
+    // Known-dangerous profiles (see profile::DANGEROUS_PROFILES) are not offered.
+    let platform_profiles = crate::profile::safe_choices();
     let has_custom = platform_profiles.iter().any(|p| p == "custom");
     log::trace!("capability probe: platform profiles {platform_profiles:?} (custom={has_custom})");
 
@@ -1167,6 +1235,16 @@ mod tests {
             0xc0,
         ]);
         d
+    }
+
+    #[test]
+    fn vendor_gate_only_rejects_readable_non_lenovo_vendors() {
+        assert!(is_foreign_vendor("HP"));
+        assert!(is_foreign_vendor("ASUSTeK COMPUTER INC."));
+        assert!(!is_foreign_vendor("LENOVO"));
+        assert!(!is_foreign_vendor("Lenovo\n"));
+        assert!(!is_foreign_vendor(""), "unreadable vendor is not foreign");
+        assert!(unsupported_vendor_message("HP").contains("Unsupported vendor"));
     }
 
     #[test]

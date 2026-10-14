@@ -1240,6 +1240,9 @@ fn spectrum_worker(rx: Receiver<SpectrumJob>) {
 }
 
 fn enqueue(job: SpectrumJob, wait: bool) -> Result<(), String> {
+    if !crate::device::vendor_supported() {
+        return Err("unsupported vendor: Spectrum lighting is Lenovo-only".into());
+    }
     log::debug!("spectrum: enqueue job {} (wait={wait})", job.describe());
     if wait {
         let (done_tx, done_rx) = mpsc::channel();

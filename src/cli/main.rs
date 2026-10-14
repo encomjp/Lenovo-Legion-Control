@@ -294,6 +294,9 @@ fn main() {
         },
         Commands::SetProfile { name } => {
             let name = normalize_profile(&name);
+            if let Some(why) = legion_core::profile::blocked_reason(&name) {
+                fail(format!("refusing to set '{name}': {why}"));
+            }
             if name == "max-power" {
                 eprintln!(
                     "warning: Max Power / Extreme can overheat this laptop and wear hardware.\n\
@@ -555,6 +558,9 @@ fn main() {
                         "profiles    {}",
                         info.capabilities.platform_profiles.join(", ")
                     );
+                }
+                for (profile, why) in legion_core::profile::blocked_choices() {
+                    println!("blocked     {profile}: {why}");
                 }
             }
             Ok(DaemonResponse::Error(e)) => fail(e),

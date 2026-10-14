@@ -63,6 +63,18 @@
       "notes": "Observed reports and deep samples from the IONOS fleet. Raw data lives in the developer's local monorepo only — evidence claims below stand on their own."
     },
     {
+      "id": "fleet-telemetry-2026-10",
+      "class": "telemetry_observed",
+      "path": "IONOS telemetry.reports (deep hid_devices / hwmon_dump / ppt_snapshot / dmi_dump), 2026-10-14",
+      "notes": "Live per-machine observations; one host per MT unless stated."
+    },
+    {
+      "id": "fleet-telemetry-2026-10-ec-fallback",
+      "class": "contradictory",
+      "path": "IONOS telemetry.reports, 2026-10-14 (bug B2 analysis)",
+      "notes": "ec-fallback 'loq-ec' RPM is constant (~3900-4300) across 30-100 C and fan1 ~= fan2 on 82YA/82MJ/83DG/82K2: not a tachometer."
+    },
+    {
       "id": "psref-legion-5-15ach6",
       "class": "official",
       "url": "https://psref.lenovo.com/syspool/Sys/PDF/Legion/Legion_5_15ACH6/Legion_5_15ACH6_Spec.pdf",
@@ -641,7 +653,7 @@
         {
           "source": "local-telemetry",
           "path": "telemetry-triage/y7000p-0.2.7-latest.json",
-          "claim": "NMCN34WW; no 048d:c197; ec-fallback RPM around 4010; no fan control",
+          "claim": "NMCN34WW; no 048d:c197; no fan control",
           "confidence": "high"
         },
         {
@@ -653,6 +665,11 @@
         {
           "source": "psref-legion-5-16irx9",
           "claim": "Y7000P IRX9 is the Chinese-market alias of the Legion 5 16IRX9 chassis",
+          "confidence": "high"
+        },
+        {
+          "source": "fleet-telemetry-2026-10-ec-fallback",
+          "claim": "ec-fallback RPM (~4010-4340) is constant from 40 to 80 C: not a verified tachometer; earlier 'ec-fallback RPM around 4010' claim is contradicted",
           "confidence": "high"
         }
       ],
@@ -869,6 +886,11 @@
           "source": "lenovo-legion-linux-kernel-module",
           "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c",
           "claim": "kernel_module DMI entry line ~2066: \"Legion 7 16IAX10 (83KY)\" matches BIOS prefix RXCN; Q7CN absent from the kernel allowlist (belongs to 83F5 Legion Pro 7 16IAX10H)",
+          "confidence": "high"
+        },
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "Live BIOS RXCN78WW on 83KY (Core Ultra 9 275HX, RTX 5070); lenovo_wmi_other fans; HID 048d:c197 + 048d:c193 (Spectrum). src/models.rs row corrected from Q7CN to RXCN.",
           "confidence": "high"
         }
       ],
@@ -2574,12 +2596,17 @@
         "rgb_zones": "24_zone_optional",
         "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
-        "fan_rpm_backend": "lenovo_wmi_other_expected",
+        "fan_rpm_backend": "lenovo_wmi_other",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
         "smart_amp_aw88399": "unknown",
         "rgb_protocol_note": "original: wmi2_expected_not_spectrum",
-        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant"
+        "keyboard_backlight_note": "original: white_or_24_zone_rgb_sku_variant",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance"
+        ]
       },
       "evidence": [
         {
@@ -2591,9 +2618,14 @@
           "source": "lenovolegionlinux-373-387",
           "claim": "BIOS prefix RGCN web-verified: BIOS prefix RGCN verified: RGCN27WW (#373) and RGCN32WW (#387) reported against this exact model.",
           "confidence": "high"
+        },
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "RGCN34WW EC 1.33; Ryzen 7 260 + RTX 5050 (10de:2d98); lenovo_wmi_other fans 1800–4383 (fan_div 100), idle fan-stop; platform_profile_choices low-power/balanced/performance only; ppt_pl1_spl 40–90, ppt_pl2_sppt 45–100, ppt_pl3_fppt 55–125; HID 048d:c195 x2; no AWDZ8399",
+          "confidence": "high"
         }
       ],
-      "notes": "Distinct from LOQ 15AHP10 83JG; BIOS unverified — do not infer; 24-Zone WMI2 not Spectrum c197; no live telemetry in fleet."
+      "notes": "Distinct from LOQ 15AHP10 83JG; BIOS unverified — do not infer; 24-Zone WMI2 not Spectrum c197; live fleet telemetry from RGCN34WW (see fleet-telemetry-2026-10 evidence)."
     },
     {
       "machine_types": [
@@ -2619,7 +2651,7 @@
         "rgb_zones": "24_zone_optional",
         "rgb_protocol": "wmi_backlight",
         "fan_count": 2,
-        "fan_rpm_backend": "legion_laptop_wmi3",
+        "fan_rpm_backend": "lenovo_wmi_other",
         "fan_control": "expected",
         "ppt": "expected_but_probe_live",
         "smart_amp_aw88399": "unknown",
@@ -2636,6 +2668,11 @@
           "source": "lenovo-legion-linux",
           "url": "https://github.com/johnfanv2/LenovoLegionLinux/blob/main/kernel_module/legion-laptop.c#L1910",
           "claim": "ident QNCN EC 0x5508 model_qncn high",
+          "confidence": "high"
+        },
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "QNCN38WW EC 1.36; i7-13650HX + RTX 5060 (10de:2d19); lenovo_wmi_other fans 1800–5400; ppt_pl1_spl 50–100, ppt_pl2_sppt 60–168, ppt_cpu_cl 30–65, cpu_temp 85–100, gpu_temp 75–87, gpu_nv_ac_offset 10–80; HID 048d:c195 x2; no AWDZ8399",
           "confidence": "high"
         }
       ],
@@ -3516,6 +3553,187 @@
         }
       ],
       "notes": "Promoted from stub 2026-09-02. BIOS M2CN via LLL #93 (kernel comment: Slim 5 16IRH8 RTX 4070). Backlight white-only on that host; SKU variance possible. 2026-09-02: Lenovo catalog latest M2CN40WW."
+    },
+    {
+      "machine_types": [
+        "83F6"
+      ],
+      "aliases": [
+        "Legion R9000P AFR10"
+      ],
+      "bios_prefixes": [
+        "RECN"
+      ],
+      "family": "legion-pro-5",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name 83F6 before BIOS-family fallback",
+        "bios_prefix": "RECN (shared with 83F2 Legion Pro 5 16AFR10)",
+        "ec_window": "legion_hwmon (LenovoLegionLinux) observed: fan1..fan3 + CPU/GPU Temperature labels",
+        "wmi_variant": "WMI3 GUIDs present; lenovo_wmi_other not bound on observed Debian 7.2.6 kernel",
+        "hid_controller": "048d:c197 Spectrum observed (no 048d:c193); 048d:5003 on i2c"
+      },
+      "capabilities": {
+        "keyboard_backlight": "spectrum_rgb",
+        "rgb_zones": "unknown",
+        "rgb_protocol": "spectrum",
+        "fan_count": 3,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "unknown",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "not_exposed_on_observed_kernel",
+        "smart_amp_aw88399": true,
+        "rgb_protocol_note": "original: 048d:c197 live",
+        "keyboard_backlight_note": "original: Spectrum HID live; 83F2 PSREF lists white/24-zone, so 83F6 differs"
+      },
+      "evidence": [
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "RECN20WW EC 1.19; Ryzen 9 9955HX; RTX 5060 (10de:2d59); legion_hwmon fan1 2000 (max 5100, target reads 9600 garbage), fan2 2000, fan3 2200; HID 048d:c197; AWDZ8399 ACPI present, aw88399 modules not loaded, firmware present",
+          "confidence": "high"
+        }
+      ],
+      "notes": "Third fan is fan3 on legion_hwmon, not fan4. Contradicts 83F2 entry's fan_count 2 — verify 83F2 live."
+    },
+    {
+      "machine_types": [
+        "83S0"
+      ],
+      "aliases": [
+        "LOQ 15ARP10E"
+      ],
+      "bios_prefixes": [
+        "SUCN"
+      ],
+      "family": "loq-15",
+      "generation": 10,
+      "detection_method": {
+        "machine_type": "DMI product name 83S0 before BIOS-family fallback",
+        "bios_prefix": "SUCN",
+        "ec_window": "no ec_sys on observed host; not needed (WMI fans)",
+        "wmi_variant": "lenovo_wmi_other fans + PPT observed",
+        "hid_controller": "no 048d ITE HID observed"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": 0,
+        "rgb_protocol": "none",
+        "fan_count": 2,
+        "fan_rpm_backend": "lenovo_wmi_other",
+        "fan_control": "unknown",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "observed",
+        "smart_amp_aw88399": false,
+        "rgb_protocol_note": "original: no ITE HID",
+        "keyboard_backlight_note": "original: white or none — not observable from telemetry"
+      },
+      "evidence": [
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "SUCN18WW EC 1.18; Ryzen 5 7535HS; RTX 3050 6GB (10de:25ac); fans 2000–5200; ppt_pl1_spl 20–59, ppt_pl2_sppt 23–59, ppt_pl3_fppt 25–70, ppt_cpu_cl 20–40, cpu_temp 90–100, gpu_temp 75–87, gpu_nv_ac_offset 10–45; battery L24D3PF0 57.5 Wh; charge_types Fast/Standard/Long_Life",
+          "confidence": "high"
+        }
+      ],
+      "notes": "9,028 reports Sep 7 – Oct 7 2026."
+    },
+    {
+      "machine_types": [
+        "82JY"
+      ],
+      "aliases": [
+        "Legion 5 17ACH6H"
+      ],
+      "bios_prefixes": [
+        "GKCN"
+      ],
+      "family": "legion-5",
+      "generation": 6,
+      "detection_method": {
+        "machine_type": "DMI product name 82JY",
+        "bios_prefix": "GKCN (family-level)",
+        "ec_window": "EC 0x8227 family per LLL; needs legion-laptop module — ec_sys absent on Fedora",
+        "wmi_variant": "no lenovo_wmi_other fan channels observed",
+        "hid_controller": "048d:c101 observed (role unverified)"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown",
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "legion_laptop_ec",
+        "fan_control": "unknown",
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "custom"
+        ],
+        "ppt": "not_exposed",
+        "smart_amp_aw88399": false
+      },
+      "evidence": [
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "GKCN65WW; Ryzen 7 5800H; RTX 3060 (10de:2560); Fedora 6.19: no fan RPM backend (backend-unavailable); HID 048d:c101",
+          "confidence": "high"
+        }
+      ]
+    },
+    {
+      "machine_types": [
+        "82Y3"
+      ],
+      "aliases": [
+        "Legion Slim 7 16IRH8"
+      ],
+      "bios_prefixes": [
+        "M0CN"
+      ],
+      "family": "legion-s7",
+      "generation": 8,
+      "detection_method": {
+        "machine_type": "DMI product name 82Y3",
+        "bios_prefix": "M0CN",
+        "ec_window": "ec-fallback values ~3830 rpm constant — NOT a verified tach",
+        "wmi_variant": "PPT pl1/pl2 via lenovo_wmi_other-style attrs; no WMI fan channels",
+        "hid_controller": "048d:c987 + 17ef:30b4/30bb observed"
+      },
+      "capabilities": {
+        "keyboard_backlight": "unknown",
+        "rgb_zones": "unknown",
+        "rgb_protocol": "unknown",
+        "fan_count": 2,
+        "fan_rpm_backend": "unknown",
+        "fan_control": false,
+        "platform_profiles": [
+          "low-power",
+          "balanced",
+          "performance",
+          "max-power",
+          "custom"
+        ],
+        "ppt": "observed",
+        "smart_amp_aw88399": false
+      },
+      "evidence": [
+        {
+          "source": "fleet-telemetry-2026-10",
+          "claim": "M0CN42WW; i7-13700H; RTX 4060; ppt_pl1_spl 40–90, ppt_pl2_sppt 50–140",
+          "confidence": "medium"
+        }
+      ]
     }
   ],
   "family_patterns_not_machine_exact": [
