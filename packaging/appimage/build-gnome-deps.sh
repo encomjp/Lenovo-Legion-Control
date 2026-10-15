@@ -21,8 +21,18 @@ SRC="$(mktemp -d)"
 trap 'rm -rf "$SRC"' EXIT
 
 fetch() { # name version
-    local series="${2%.*}"
-    curl -fsSL "https://download.gnome.org/sources/$1/$series/$1-$2.tar.xz" | tar -xJ -C "$SRC"
+    # download.gnome.org has short outages; retry, then use a mirror.
+    local path="$1/${2%.*}/$1-$2.tar.xz" base
+    local out="$SRC/$1-$2.tar.xz"
+    for base in https://download.gnome.org/sources https://mirrors.dotsrc.org/gnome/sources; do
+        if curl -fsSL --retry 3 --retry-delay 10 --retry-all-errors --connect-timeout 20 \
+            --max-time 600 -o "$out" "$base/$path"; then
+            tar -xJf "$out" -C "$SRC" && rm -f "$out" && return 0
+        fi
+        echo "fetch: $base failed for $1-$2, trying next source" >&2
+    done
+    echo "fetch: could not download $1-$2" >&2
+    return 1
 }
 
 build() { # dir meson-args...
