@@ -728,6 +728,11 @@ fn write_disk(cfg: &AppConfig) {
             return;
         }
     };
+    // Unchanged settings: skip the write (saves SSD wear on periodic saves).
+    if fs::read_to_string(&path).is_ok_and(|old| old == s) {
+        log::trace!("config::write_disk: unchanged, not rewriting {}", path.display());
+        return;
+    }
     // Atomic write: temp file in the same directory + rename. A crash or
     // power loss mid-write can never leave a truncated settings.json behind.
     // The suffix is unique per call — PID alone collides when two threads

@@ -152,13 +152,13 @@ pub fn diagnose() -> Diagnosis {
     );
 
     match health {
-        Health::Ok => log::info!(
+        Health::Ok => log::debug!(
             "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?})"
         ),
         Health::SoftIssue | Health::HardwareBroken | Health::DriverMissing => log::warn!(
             "audio: classify: {summary} (acpi={amp_acpi} bound={amp_bound} modules={amp_modules} fw={firmware_ok} card={hda_card:?} muted={speakers_muted} bass_off={bass_off} volume_low={volume_low} wrong_sink={wrong_default_sink})"
         ),
-        Health::NotApplicable => log::info!(
+        Health::NotApplicable => log::debug!(
             "audio: classify: {summary} (acpi={amp_acpi}, hda_card={hda_card:?})"
         ),
     }

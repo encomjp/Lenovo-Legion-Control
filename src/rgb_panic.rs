@@ -246,7 +246,7 @@ pub fn diagnose() -> Diagnosis {
     };
 
     if health == Health::Ok {
-        log::info!(
+        log::debug!(
             "rgb-panic: classify: {summary} (accessible={accessible} ioctl_ok={ioctl_ok} dark_panic={dark_panic} bad_perms={bad_perms} kernel_faults={})",
             kernel_faults.len()
         );
@@ -921,6 +921,12 @@ fn capture_stdout(name: &str, cmd: &mut Command) -> Option<String> {
                 blob.len()
             );
             Some(blob)
+        }
+        // `journalctl -g` exits 1 with no output when nothing matches,
+        // which is the healthy case, not a failure.
+        Ok(o) if name == "journalctl" && o.status.code() == Some(1) && o.stdout.is_empty() => {
+            log::debug!("rgb-panic: journalctl found no matching kernel lines");
+            Some(String::new())
         }
         Ok(o) => {
             log::warn!(
