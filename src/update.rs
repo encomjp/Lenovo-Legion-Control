@@ -499,6 +499,10 @@ where
 
 fn asset_score(name: &str, kind: AssetKind) -> Option<u8> {
     let n = name.to_ascii_lowercase();
+    // Debug symbol packages share the suffix but are never what users want.
+    if n.contains("-debug-") || n.contains("-debuginfo-") || n.contains("-debugsource-") {
+        return None;
+    }
     let arch = n.contains("x86_64") || n.contains("amd64");
     match kind {
         AssetKind::AppImage => {
@@ -1969,6 +1973,28 @@ mod tests {
         assert_eq!(
             super::release_highlights(body, 4),
             vec!["GPU mode (MUX)".to_string(), "Plain item".to_string()]
+        );
+    }
+
+    #[test]
+    fn asset_picker_skips_debug_packages() {
+        let names = [
+            "legion-control-debug-0.2.24-1-x86_64.pkg.tar.zst",
+            "legion-control-0.2.24-1-x86_64.pkg.tar.zst",
+            "legion-control-debuginfo-0.2.24-1.fc42.x86_64.rpm",
+            "legion-control-0.2.24-1.fc42.x86_64.rpm",
+        ];
+        let refs: Vec<GhAssetRef> = names
+            .iter()
+            .map(|n| GhAssetRef { name: n, url: "u", size: 1, digest: None })
+            .collect();
+        assert_eq!(
+            pick_asset(&refs, AssetKind::Arch).unwrap().name,
+            "legion-control-0.2.24-1-x86_64.pkg.tar.zst"
+        );
+        assert_eq!(
+            pick_asset(&refs, AssetKind::Rpm).unwrap().name,
+            "legion-control-0.2.24-1.fc42.x86_64.rpm"
         );
     }
 }

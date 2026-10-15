@@ -179,6 +179,22 @@ fn missing_components() -> Vec<Recommendation> {
         });
     }
 
+    // Background service: an update that only replaced the binaries left the
+    // service's device sandbox behind (e.g. no NVIDIA access).
+    if legion_core::service_unit::sandbox_outdated() {
+        out.push(Recommendation {
+            title: "Update the background service",
+            subtitle: "Lets it read the graphics card temperature again".into(),
+            tooltip: "Adds the device access this version needs to legion-control.service \
+                      through a systemd drop-in, then restarts the service (admin password \
+                      via PolicyKit)"
+                .into(),
+            operation: "refresh-service",
+            done_toast: "Background service updated",
+            blocked: false,
+        });
+    }
+
     // Speaker firmware: the woofer amp is present but has no firmware file.
     if legion_core::audio::aw88399_acpi_present() && !legion_core::audio::aw88399_firmware_present()
     {

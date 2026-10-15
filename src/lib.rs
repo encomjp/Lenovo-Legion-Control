@@ -32,6 +32,7 @@ pub mod rgb_panic;
 pub mod selftest;
 pub mod telemetry_id;
 pub mod sensors;
+pub mod service_unit;
 pub mod thermal;
 pub mod undervolt;
 pub mod update;
