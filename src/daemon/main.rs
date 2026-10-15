@@ -902,15 +902,12 @@ fn process_command(
             let s = sensors::read_all();
             let now = Instant::now();
             let due = match last_sensors {
-                Some(t) => now >= t + Duration::from_secs(10),
+                Some(t) => now >= t + Duration::from_secs(60),
                 None => true,
             };
-            let changed = snapshot.cpu_temp != s.cpu_temp
-                || snapshot.dgpu_temp != s.dgpu_temp
-                || snapshot.fan1_rpm != s.fan1_rpm
-                || snapshot.fan2_rpm != s.fan2_rpm
-                || snapshot.fan4_rpm != s.fan4_rpm
-                || snapshot.profile != s.profile;
+            // Temperatures change on every sample, so only a mode change
+            // counts; everything else is summarised once a minute.
+            let changed = snapshot.profile != s.profile;
             if due || changed {
                 last_sensors = Some(now);
                 snapshot = SensorSnapshot {

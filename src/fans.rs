@@ -552,6 +552,10 @@ pub fn set_target(fan: u8, rpm: u32) -> std::io::Result<()> {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, msg));
         }
     };
+    if rpm == 0 && read_target(fan) == Some(0) {
+        log::debug!("fan {fan} already auto: no write");
+        return Ok(());
+    }
     if rpm == 0 {
         log::info!("fan {fan} → auto ({})", path.display());
     } else {
