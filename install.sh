@@ -562,6 +562,8 @@ if [[ "$DO_DAEMON" -eq 1 ]]; then
   # Group 'legion' and membership are set up above, before the udev rules.
   sudo_run install -Dm644 "$ROOT/data/systemd/legion-control.system.service" \
     /etc/systemd/system/legion-control.service
+  # A fresh unit carries the current device rules; drop the in-app refresh.
+  sudo_run rm -f /etc/systemd/system/legion-control.service.d/10-legion-device-access.conf
   # Declarative group creation for future systems (groupadd above covers now).
   sudo_run install -Dm644 "$ROOT/data/sysusers.d/legion-control.conf" \
     /usr/lib/sysusers.d/legion-control.conf 2>/dev/null || true

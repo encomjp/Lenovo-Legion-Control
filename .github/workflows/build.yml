@@ -229,6 +229,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # Debug symbol packages are not for end users, and 0.2.13 to 0.2.23
+      # updaters pick assets by suffix only, so keep them out of the release.
+      - name: Drop debug packages
+        run: |
+          find artifacts -type f \( -name '*-debug-*' -o -name '*-debuginfo-*' -o -name '*-debugsource-*' \) -print -delete
       - run: ls -R artifacts
       # Every asset gets a detached minisign signature (<asset>.minisig) whose
       # trusted comment is "file:<asset name> version:<tag>". The in-app

@@ -109,16 +109,23 @@ fn source_dir() -> Result<PathBuf, String> {
         return Ok(source);
     }
 
+    let has_source = |p: &Path| p.join("Makefile").is_file() && p.join("dkms.conf").is_file();
     let bundled = executable
         .parent()
         .and_then(Path::parent)
-        .map(|usr| usr.join("lib/legion-control/ryzen_smu"));
+        .map(|usr| usr.join("lib/legion-control/ryzen_smu"))
+        .filter(|p| has_source(p))
+        // Source installs updated in-app only receive new binaries: use the
+        // checkout recorded by install.sh / the updater.
+        .or_else(|| {
+            fs::read_to_string("/var/lib/legion-control/source-tree")
+                .ok()
+                .map(|t| PathBuf::from(t.trim()).join("third_party/ryzen_smu"))
+                .filter(|p| has_source(p))
+        });
     let Some(bundled) = bundled else {
         return Err("bundled ryzen_smu source is missing; reinstall Legion Control".into());
     };
-    if !bundled.join("Makefile").is_file() || !bundled.join("dkms.conf").is_file() {
-        return Err("bundled ryzen_smu source is missing; reinstall Legion Control".into());
-    }
     let stable = PathBuf::from("/usr/local/lib/legion-control/ryzen_smu");
     copy_tree(&bundled, &stable)?;
     Ok(stable)
@@ -213,6 +220,20 @@ fn remove_ryzen_smu() -> Result<(), String> {
 fn systemctl(args: &[&str]) -> Result<(), String> {
     let systemctl = executable(&["/usr/bin/systemctl", "/bin/systemctl"])?;
     run(systemctl, args)
+}
+
+/// Bring the service's device sandbox up to date with this version through a
+/// drop-in (package-owned units stay untouched), then restart the service.
+fn refresh_service() -> Result<(), String> {
+    use legion_core::service_unit::{drop_in_text, DROP_IN_PATH};
+    let dest = Path::new(DROP_IN_PATH);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    fs::write(dest, drop_in_text()).map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
+    systemctl(&["daemon-reload"])?;
+    systemctl(&["restart", "legion-control.service"])
 }
 
 fn restart_daemon() -> Result<(), String> {
@@ -571,6 +592,7 @@ fn real_main() -> Result<(), String> {
         Some("remove-ryzen-smu") => remove_ryzen_smu(),
         Some("enable-daemon") => enable_daemon(),
         Some("restart-daemon") => restart_daemon(),
+        Some("refresh-service") => refresh_service(),
         Some("install-udev") => install_udev_rule(),
         Some("install-yogafan") => install_yogafan(),
         Some("install-amp-firmware") => install_amp_firmware(),
